@@ -12,6 +12,7 @@ import type {
   Tool, Conversation, AgentTrigger,
   InterceptRule, InterceptPending, InterceptApprovalRow,
   TaskAssetView, SSProject, SSTask, ConvTokenSummary,
+  MyProfile, PermissionPoint, PlatformUser, PlatformRole, AuditLogEntry,
 } from "@/lib/types";
 
 function getToken(): string | null {
@@ -440,4 +441,39 @@ export const api = {
     });
     if (!r.ok) throw new Error(await r.text());
   },
+
+  // ---- 平台层：RBAC 多用户 + 审计（RestXtra 移植）----
+  platformMy: () => get<MyProfile>("/platform/my"),
+  platformPermissions: () => get<{ permissions: PermissionPoint[] }>("/platform/permissions").then((r) => arr(r.permissions)),
+  platformUsers: () => get<{ users: PlatformUser[] }>("/platform/users").then((r) => arr(r.users)),
+  createPlatformUser: (body: { username: string; display_name?: string; password: string; roles?: string[] }) =>
+    post<{ id: number }>("/platform/users", body),
+  updatePlatformUser: (id: number, body: { display_name?: string; enabled?: boolean }) =>
+    patch<{ ok: boolean }>(`/platform/users/${id}`, body),
+  deletePlatformUser: (id: number) => del<{ deleted: number }>(`/platform/users/${id}`),
+  resetUserPassword: (id: number, password: string) =>
+    post<{ ok: boolean }>(`/platform/users/${id}/password`, { password }),
+  setUserRoles: (id: number, roles: string[]) =>
+    post<{ ok: boolean }>(`/platform/users/${id}/roles`, { roles }),
+  platformRoles: () => get<{ roles: PlatformRole[] }>("/platform/roles").then((r) => arr(r.roles)),
+  createPlatformRole: (body: { name: string; description?: string; scope?: string; permissions?: string[] }) =>
+    post<{ id: number }>("/platform/roles", body),
+  updatePlatformRole: (id: number, body: { description?: string; scope?: string }) =>
+    patch<{ ok: boolean }>(`/platform/roles/${id}`, body),
+  deletePlatformRole: (id: number) => del<{ deleted: number }>(`/platform/roles/${id}`),
+  rolePermissions: (id: number) => get<{ keys: string[] }>(`/platform/roles/${id}/permissions`).then((r) => r.keys),
+  setRolePermissions: (id: number, keys: string[]) =>
+    put<{ ok: boolean }>(`/platform/roles/${id}/permissions`, { keys }),
+  auditLogs: (f: { category?: string; action?: string; result?: string; actor?: string; limit?: number; offset?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (f.category) q.set("category", f.category);
+    if (f.action) q.set("action", f.action);
+    if (f.result) q.set("result", f.result);
+    if (f.actor) q.set("actor", f.actor);
+    q.set("limit", String(f.limit ?? 100));
+    q.set("offset", String(f.offset ?? 0));
+    return get<{ items: AuditLogEntry[]; total: number; limit: number; offset: number }>(`/audit/logs?${q.toString()}`);
+  },
+  auditStats: () => get<{ total: number }>("/audit/stats"),
+  auditGC: (days = 90) => post<{ removed: number }>(`/audit/gc?days=${days}`, {}),
 };

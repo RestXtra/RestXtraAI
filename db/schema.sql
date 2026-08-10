@@ -511,3 +511,65 @@ CREATE TABLE IF NOT EXISTS server_logs (
     text       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_server_logs_id ON server_logs(id DESC);
+
+-- =====================================================================
+-- N. 平台层：多用户 RBAC + 审计日志（自 Pentest-RestXtra 移植，PostgreSQL 化）
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS users (
+    id            BIGSERIAL PRIMARY KEY,
+    username      TEXT NOT NULL UNIQUE,
+    display_name  TEXT NOT NULL DEFAULT '',
+    password_hash TEXT NOT NULL DEFAULT '',
+    enabled       BOOLEAN NOT NULL DEFAULT true,
+    is_builtin    BOOLEAN NOT NULL DEFAULT false,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+DROP TRIGGER IF EXISTS trg_users_upd ON users;
+CREATE TRIGGER trg_users_upd BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS roles (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    scope       TEXT NOT NULL DEFAULT 'all' CHECK (scope IN ('all', 'assigned', 'own')),
+    is_system   BOOLEAN NOT NULL DEFAULT false,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+DROP TRIGGER IF EXISTS trg_roles_upd ON roles;
+CREATE TRIGGER trg_roles_upd BEFORE UPDATE ON roles
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS permissions (
+    key         TEXT PRIMARY KEY,
+    description TEXT NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+    role_id        BIGINT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    permission_key TEXT NOT NULL REFERENCES permissions(key) ON DELETE CASCADE,
+    PRIMARY KEY (role_id, permission_key)
+);
+
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_id BIGINT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, role_id)
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id         BIGSERIAL PRIMARY KEY,
+    actor      TEXT NOT NULL DEFAULT '',
+    category   TEXT NOT NULL DEFAULT '',
+    action     TEXT NOT NULL DEFAULT '',
+    result     TEXT NOT NULL DEFAULT '',
+    message    TEXT NOT NULL DEFAULT '',
+    ip         TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_time  ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor);

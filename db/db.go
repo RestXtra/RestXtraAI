@@ -196,6 +196,9 @@ ON CONFLICT (name) DO NOTHING`,
 	if err := d.seedDefaultInterceptRules(); err != nil {
 		return fmt.Errorf("seed intercept rules: %w", err)
 	}
+	if err := d.seedPlatform(); err != nil {
+		return fmt.Errorf("seed platform rbac: %w", err)
+	}
 	return nil
 }
 

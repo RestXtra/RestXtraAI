@@ -8,6 +8,10 @@ export interface CurrentUser {
   email: string;
   avatar: string;
   role: string;
+  roles?: string[];
+  permissions?: string[];
+  admin?: boolean;
+  display_name?: string;
 }
 
 export const auth = {

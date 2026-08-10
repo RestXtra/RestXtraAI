@@ -597,6 +597,28 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/intercept/tool-config", s.interceptGetToolConfig)
 	mux.HandleFunc("PUT /api/intercept/tool-config", s.interceptSetToolConfig)
 
+	// --- 平台层：多用户 RBAC + 审计（RestXtra 移植；统一 JWT + 权限点） ---
+	mux.HandleFunc("GET /api/platform/my", s.platformMy)
+	mux.HandleFunc("GET /api/platform/permissions", s.rbac("platform.role.read", s.platformPermissions))
+	// 成员管理
+	mux.HandleFunc("GET /api/platform/users", s.rbac("platform.user.read", s.platformListUsers))
+	mux.HandleFunc("POST /api/platform/users", s.rbac("platform.user.write", s.platformCreateUser))
+	mux.HandleFunc("PATCH /api/platform/users/{id}", s.rbac("platform.user.write", s.platformUpdateUser))
+	mux.HandleFunc("DELETE /api/platform/users/{id}", s.rbac("platform.user.write", s.platformDeleteUser))
+	mux.HandleFunc("POST /api/platform/users/{id}/password", s.rbac("platform.user.write", s.platformResetPassword))
+	mux.HandleFunc("POST /api/platform/users/{id}/roles", s.rbac("platform.user.role", s.platformSetUserRoles))
+	// 平台角色
+	mux.HandleFunc("GET /api/platform/roles", s.rbac("platform.role.read", s.platformListRoles))
+	mux.HandleFunc("POST /api/platform/roles", s.rbac("platform.role.write", s.platformCreateRole))
+	mux.HandleFunc("PATCH /api/platform/roles/{id}", s.rbac("platform.role.write", s.platformUpdateRole))
+	mux.HandleFunc("DELETE /api/platform/roles/{id}", s.rbac("platform.role.write", s.platformDeleteRole))
+	mux.HandleFunc("GET /api/platform/roles/{id}/permissions", s.rbac("platform.role.read", s.platformGetRolePermissions))
+	mux.HandleFunc("PUT /api/platform/roles/{id}/permissions", s.rbac("platform.role.write", s.platformSetRolePermissions))
+	// 审计日志
+	mux.HandleFunc("GET /api/audit/logs", s.rbac("sec.audit.read", s.platformListAudit))
+	mux.HandleFunc("GET /api/audit/stats", s.rbac("sec.audit.read", s.platformAuditStats))
+	mux.HandleFunc("POST /api/audit/gc", s.rbac("sec.audit.export", s.platformAuditGC))
+
 	// /api/* goes through CORS + JWT; everything else is served by the embedded
 	// frontend (public — auth is enforced client-side and on the API). With the
 	// no-embed build the webui handler just 404s (run `next dev` separately).

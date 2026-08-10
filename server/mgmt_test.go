@@ -21,7 +21,7 @@ func TestMgmtAPI(t *testing.T) {
 	td := t.TempDir()
 	s := New(context.Background(), m, td, td)
 	h := s.Handler()
-	tok, err := signJWT(s.jwtKey)
+	tok, err := signUserJWT(s.jwtKey, 0, "ARTEX")
 	if err != nil {
 		t.Fatalf("sign jwt: %v", err)
 	}

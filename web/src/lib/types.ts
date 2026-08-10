@@ -549,3 +549,54 @@ export interface ConvTokenSummary {
   cache_read_tokens: number;
   cache_write_tokens: number;
 }
+
+// ---- 平台层：多用户 RBAC + 审计（RestXtra 移植）----
+
+export interface PlatformUser {
+  id: number;
+  username: string;
+  display_name: string;
+  enabled: boolean;
+  is_builtin: boolean;
+  created_at: string;
+  roles: string[];
+}
+
+export interface PlatformRole {
+  id: number;
+  name: string;
+  description: string;
+  scope: string;
+  is_system: boolean;
+  perm_count: number;
+}
+
+export interface PermissionPoint {
+  key: string;
+  description: string;
+}
+
+export interface MyProfile {
+  user: {
+    id: number;
+    username: string;
+    display_name: string;
+    enabled: boolean;
+    is_builtin: boolean;
+  };
+  roles: string[];
+  permissions: string[];
+  scope: string;
+  admin: boolean;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  actor: string;
+  category: string;
+  action: string;
+  result: string;
+  message: string;
+  ip: string;
+  created_at: string;
+}

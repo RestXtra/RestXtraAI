@@ -14,14 +14,21 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { APP_CONFIG } from "@/config/app-config";
-import { useCurrentUser } from "@/hooks/use-current-user";
-import { sidebarItems } from "@/navigation/sidebar/sidebar-items";
+import { useCurrentUser, hasPerm } from "@/hooks/use-current-user";
+import { sidebarItems, type NavGroup } from "@/navigation/sidebar/sidebar-items";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
 import { NavMain } from "./nav-main";
 import { NavUser } from "./nav-user";
 import { SidebarSupportCard } from "./sidebar-support-card";
 
+// visibleNav hides menu items the signed-in user lacks permission for
+// (admin bypasses; items without a perm key are visible to all logged-in users).
+function visibleNav(user: ReturnType<typeof useCurrentUser>): NavGroup[] {
+  return sidebarItems
+    .map((g) => ({ ...g, items: g.items.filter((it) => !it.perm || hasPerm(user, it.perm)) }))
+    .filter((g) => g.items.length > 0);
+}
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const currentUser = useCurrentUser();
@@ -52,7 +59,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <NavMain items={sidebarItems} />
+        <NavMain items={visibleNav(currentUser)} />
         {/* <NavDocuments items={data.documents} /> */}
         {/* <NavSecondary items={data.navSecondary} className="mt-auto" /> */}
       </SidebarContent>
