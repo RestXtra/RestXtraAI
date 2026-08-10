@@ -14,20 +14,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
-import { auth } from "@/lib/auth";
+import { auth, type CurrentUser } from "@/lib/auth";
 import { getInitials } from "@/lib/utils";
 
 import { ChangePasswordDialog } from "./change-password-dialog";
 
-export function NavUser({
-  user,
-}: {
-  readonly user: {
-    readonly name: string;
-    readonly email: string;
-    readonly avatar: string;
-  };
-}) {
+export function NavUser({ user }: { readonly user: CurrentUser }) {
   const { isMobile } = useSidebar();
   const [pwOpen, setPwOpen] = React.useState(false);
 
@@ -37,6 +29,8 @@ export function NavUser({
     // middleware 才能正确读到空 token 并放行 /login
     window.location.href = "/login";
   }
+
+  const roleText = user.admin ? "管理员" : user.roles?.length ? user.roles.join(" · ") : user.role;
 
   return (
     <SidebarMenu>
@@ -53,7 +47,7 @@ export function NavUser({
               </Avatar>
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">{user.name}</span>
-                <span className="truncate text-muted-foreground text-xs">{user.email}</span>
+                <span className="truncate text-muted-foreground text-xs">@{user.username}</span>
               </div>
               <EllipsisVertical className="ml-auto size-4" />
             </SidebarMenuButton>
@@ -72,9 +66,12 @@ export function NavUser({
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-medium">{user.name}</span>
-                  <span className="truncate text-muted-foreground text-xs">{user.email}</span>
+                  <span className="truncate text-muted-foreground text-xs">@{user.username}</span>
                 </div>
               </div>
+            </DropdownMenuLabel>
+            <DropdownMenuLabel className="px-2 pt-1 text-xs font-normal text-muted-foreground">
+              平台角色：{roleText}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setPwOpen(true)}>
