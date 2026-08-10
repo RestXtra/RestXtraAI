@@ -1,0 +1,31 @@
+RestXtra AI NOTICE
+==================
+
+RestXtra AI is a fused AI penetration testing platform built on two upstream
+projects:
+
+1. ARTEX
+   - Source: https://github.com/Autumn-27/ARTEX
+   - Licensed under the MIT License (web frontend LICENSE at web/LICENSE;
+     the backend packages agent/, cmd/, config/, db/, enrich/, guard/,
+     intercept/, mcphttp/, report/, server/, skills/, traffic/ are derived
+     from this project).
+   - Contributes: the Next.js frontend, the norma-agent-driven autonomous
+     exploration engine (planner/worker/goals/mainagent), the PostgreSQL
+     schema, traffic recording (go-mitmproxy), intercept/HITL approvals, and
+     the asset/finding/conversation/LLM/agent/MCP management surfaces.
+
+2. Pentest-RestXtra
+   - Source: https://github.com/RestXtra/Pentest-RestXtra
+   - Licensed under the Apache License, Version 2.0 (the "License").
+   - Contributes: the platform capability concepts ported into this build —
+     RBAC (users/roles/permissions), audit logging, knowledge base, attack
+     pattern library (playbook), batch task queues, deterministic report and
+     evidence gating, and the planned C2 / WebShell / sandbox / robot modules.
+   - Pentest-RestXtra itself is a rebrand of CyberStrikeAI (Copyright 2025
+     Ed1s0nZ, Apache-2.0) and Z3r0 (Copyright (c) 2026 yv1ing, MIT), see its
+     original NOTICE for full attribution.
+
+The overall combined work is made available under the Apache License,
+Version 2.0 (see LICENSE). The MIT-licensed ARTEX web frontend remains
+available under its original MIT terms (see web/LICENSE).
