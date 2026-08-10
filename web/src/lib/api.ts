@@ -13,6 +13,8 @@ import type {
   InterceptRule, InterceptPending, InterceptApprovalRow,
   TaskAssetView, SSProject, SSTask, ConvTokenSummary,
   MyProfile, PermissionPoint, PlatformUser, PlatformRole, AuditLogEntry,
+  AttackPattern, PlaybookResult,
+  BatchQueue, BatchTask,
 } from "@/lib/types";
 
 function getToken(): string | null {
@@ -476,4 +478,35 @@ export const api = {
   },
   auditStats: () => get<{ total: number }>("/audit/stats"),
   auditGC: (days = 90) => post<{ removed: number }>(`/audit/gc?days=${days}`, {}),
+
+  // ---- 攻击模式库 / playbook ----
+  playbookPatterns: (f: { technique?: string; cve?: string; verification?: string; tag?: string; limit?: number; offset?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (f.technique) q.set("technique", f.technique);
+    if (f.cve) q.set("cve", f.cve);
+    if (f.verification) q.set("verification", f.verification);
+    if (f.tag) q.set("tag", f.tag);
+    q.set("limit", String(f.limit ?? 100));
+    q.set("offset", String(f.offset ?? 0));
+    return get<{ patterns: AttackPattern[]; total: number }>(`/playbook/patterns?${q.toString()}`);
+  },
+  createPlaybookPattern: (p: Partial<AttackPattern>) =>
+    post<AttackPattern>("/playbook/patterns", p),
+  deletePlaybookPattern: (id: string) => del<{ deleted: number }>(`/playbook/patterns/${id}`),
+  playbookSearch: (q: { cve?: string; technique?: string; components?: string[]; keywords?: string; limit?: number }) =>
+    post<{ results: PlaybookResult[] }>("/playbook/search", q).then((r) => r.results ?? []),
+  playbookStats: () => get<{ total: number; counts: Record<string, number> }>("/playbook/stats"),
+
+  // ---- 批量任务队列 ----
+  batchQueues: () => get<{ queues: BatchQueue[] }>("/batch/queues").then((r) => arr(r.queues)),
+  createBatchQueue: (q: { name: string; description?: string; cron?: string }) =>
+    post<{ id: number }>("/batch/queues", q),
+  updateBatchQueue: (id: number, q: { name?: string; description?: string; cron?: string; enabled?: boolean }) =>
+    patch<{ ok: boolean }>(`/batch/queues/${id}`, q),
+  deleteBatchQueue: (id: number) => del<{ deleted: number }>(`/batch/queues/${id}`),
+  runBatchQueue: (id: number) => post<{ ran: number }>(`/batch/queues/${id}/run`, {}),
+  batchTasks: (queueId: number) => get<{ tasks: BatchTask[] }>(`/batch/queues/${queueId}/tasks`).then((r) => ({ tasks: arr(r.tasks) })),
+  addBatchTask: (queueId: number, title: string, payload: Record<string, unknown>) =>
+    post<{ id: number }>(`/batch/queues/${queueId}/tasks`, { title, payload }),
+  deleteBatchTask: (id: number) => del<{ deleted: number }>(`/batch/tasks/${id}`),
 };

@@ -1,5 +1,6 @@
 import {
   Activity,
+  BookMarked,
   Bot,
   Brain,
   Bug,
@@ -81,7 +82,7 @@ export const sidebarItems: NavGroup[] = [
       { id: "assets", title: "资产管理", url: "/function/assets", icon: Network },
       { id: "sync", title: "资产同步", url: "/function/sync", icon: FolderSync },
       { id: "workspace", title: "工作空间", url: "/workspace", icon: Server, badge: "soon", disabled: true },
-      { id: "workflows", title: "工作流", url: "/workflows", icon: GitBranch, badge: "soon", disabled: true },
+      { id: "workflows", title: "工作流", url: "/workflows", icon: GitBranch, badge: "new", perm: "batch.read" },
     ],
   },
   {
@@ -122,6 +123,7 @@ export const sidebarItems: NavGroup[] = [
       { id: "webshell", title: "WebShell", url: "/cap/webshell", icon: Terminal, badge: "soon", disabled: true, perm: "cap.webshell.read" },
       { id: "c2", title: "C2", url: "/cap/c2", icon: Webhook, badge: "soon", disabled: true, perm: "cap.c2.read" },
       { id: "report", title: "报告编写", url: "/cap/report", icon: FileText, badge: "new", perm: "cap.report.read" },
+      { id: "playbook", title: "攻击模式库", url: "/cap/playbook", icon: BookMarked, badge: "new", perm: "playbook.read" },
     ],
   },
   {

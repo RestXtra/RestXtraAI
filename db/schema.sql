@@ -573,3 +573,64 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_logs_time  ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor);
+
+-- =====================================================================
+-- O. 攻击模式库 attack_patterns（自 Pentest-RestXtra 移植）
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS attack_patterns (
+    id                    TEXT PRIMARY KEY,
+    title                 TEXT NOT NULL DEFAULT '',
+    summary               TEXT NOT NULL DEFAULT '',
+    attack_technique_id   TEXT NOT NULL DEFAULT '',
+    cve_id                TEXT NOT NULL DEFAULT '',
+    tags                  TEXT NOT NULL DEFAULT '',
+    verification          TEXT NOT NULL DEFAULT 'draft'
+                              CHECK (verification IN ('draft', 'validated', 'reference')),
+    environment_signature TEXT NOT NULL DEFAULT '{}',
+    execution_steps       TEXT NOT NULL DEFAULT '',
+    validation_notes      TEXT NOT NULL DEFAULT '',
+    source                TEXT NOT NULL DEFAULT 'reference',
+    origin_project_id     TEXT NOT NULL DEFAULT '',
+    origin_session_id     TEXT NOT NULL DEFAULT '',
+    evidence_refs         TEXT NOT NULL DEFAULT '[]',
+    confidence            INTEGER NOT NULL DEFAULT 0,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+DROP TRIGGER IF EXISTS trg_attack_patterns_upd ON attack_patterns;
+CREATE TRIGGER trg_attack_patterns_upd BEFORE UPDATE ON attack_patterns
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX IF NOT EXISTS idx_attack_patterns_technique ON attack_patterns(attack_technique_id);
+CREATE INDEX IF NOT EXISTS idx_attack_patterns_cve       ON attack_patterns(cve_id);
+CREATE INDEX IF NOT EXISTS idx_attack_patterns_tags      ON attack_patterns(tags);
+
+-- =====================================================================
+-- P. 批量任务 batch_queues / batch_tasks（自 Pentest-RestXtra 移植）
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS batch_queues (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    cron        TEXT NOT NULL DEFAULT '',           -- 预留：cron 表达式（暂未启用，用 run 手动触发）
+    enabled     BOOLEAN NOT NULL DEFAULT true,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+DROP TRIGGER IF EXISTS trg_batch_queues_upd ON batch_queues;
+CREATE TRIGGER trg_batch_queues_upd BEFORE UPDATE ON batch_queues
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS batch_tasks (
+    id          BIGSERIAL PRIMARY KEY,
+    queue_id    BIGINT REFERENCES batch_queues(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL DEFAULT '',
+    payload     JSONB NOT NULL DEFAULT '{}',
+    status      TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    error       TEXT NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at  TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_batch_tasks_queue ON batch_tasks(queue_id, status);

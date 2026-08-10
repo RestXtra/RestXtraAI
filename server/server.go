@@ -160,6 +160,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		s.seedOrchestrationTools()                      // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
 		s.seedPythonInterpreter()                       // 自定义脚本工具:开机检测 python 解释器入库(仅空时)
 		go newScheduler(s).Run(s.ctx)                   // P3 触发器调度(定时/finding/目标事件),仅自定义 agent
+		s.startBatchScheduler()                          // 批量任务队列后台排空(骨架执行器)
 		// Fill the tool cache for any enabled MCP that has none yet (notably the
 		// seeded browser MCP on first run). Async so it never blocks startup.
 		go s.discoverEmptyMCPsOnStartup()
@@ -618,6 +619,21 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/audit/logs", s.rbac("sec.audit.read", s.platformListAudit))
 	mux.HandleFunc("GET /api/audit/stats", s.rbac("sec.audit.read", s.platformAuditStats))
 	mux.HandleFunc("POST /api/audit/gc", s.rbac("sec.audit.export", s.platformAuditGC))
+	// 攻击模式库 / playbook
+	mux.HandleFunc("GET /api/playbook/patterns", s.rbac("playbook.read", s.playbookListPatterns))
+	mux.HandleFunc("POST /api/playbook/patterns", s.rbac("playbook.write", s.playbookCreatePattern))
+	mux.HandleFunc("DELETE /api/playbook/patterns/{id}", s.rbac("playbook.write", s.playbookDeletePattern))
+	mux.HandleFunc("POST /api/playbook/search", s.rbac("playbook.read", s.playbookSearch))
+	mux.HandleFunc("GET /api/playbook/stats", s.rbac("playbook.read", s.playbookStats))
+	// 批量任务队列
+	mux.HandleFunc("GET /api/batch/queues", s.rbac("batch.read", s.batchListQueues))
+	mux.HandleFunc("POST /api/batch/queues", s.rbac("batch.write", s.batchCreateQueue))
+	mux.HandleFunc("PATCH /api/batch/queues/{id}", s.rbac("batch.write", s.batchUpdateQueue))
+	mux.HandleFunc("DELETE /api/batch/queues/{id}", s.rbac("batch.write", s.batchDeleteQueue))
+	mux.HandleFunc("POST /api/batch/queues/{id}/run", s.rbac("batch.write", s.batchRunQueue))
+	mux.HandleFunc("GET /api/batch/queues/{id}/tasks", s.rbac("batch.read", s.batchListTasks))
+	mux.HandleFunc("POST /api/batch/queues/{id}/tasks", s.rbac("batch.write", s.batchAddTask))
+	mux.HandleFunc("DELETE /api/batch/tasks/{id}", s.rbac("batch.write", s.batchDeleteTask))
 
 	// /api/* goes through CORS + JWT; everything else is served by the embedded
 	// frontend (public — auth is enforced client-side and on the API). With the

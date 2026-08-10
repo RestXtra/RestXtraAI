@@ -600,3 +600,56 @@ export interface AuditLogEntry {
   ip: string;
   created_at: string;
 }
+
+// ---- 攻击模式库 / playbook（自 Pentest-RestXtra 移植）----
+export interface AttackPattern {
+  id: string;
+  title: string;
+  summary: string;
+  attack_technique_id: string;
+  cve_id: string;
+  tags: string;
+  verification: "draft" | "validated" | "reference";
+  environment_signature: string;
+  execution_steps: string;
+  validation_notes: string;
+  source: string;
+  origin_project_id: string;
+  origin_session_id: string;
+  evidence_refs: string;
+  confidence: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlaybookResult {
+  pattern: AttackPattern;
+  score: number;
+  tag_hits: number;
+  text_hits: number;
+}
+
+// ---- 批量任务 batch（自 Pentest-RestXtra 移植）----
+export interface BatchQueue {
+  id: number;
+  name: string;
+  description: string;
+  cron: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  task_count?: number;
+}
+
+export interface BatchTask {
+  id: number;
+  queue_id: number;
+  title: string;
+  payload: Record<string, unknown>;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  attempts: number;
+  error: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
