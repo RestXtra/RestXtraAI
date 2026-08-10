@@ -84,6 +84,34 @@ function hasSubItems(item: NavMainItem): item is NavMainParentItem {
   return Boolean(item.subItems?.length);
 }
 
+// 分组折叠偏好：localStorage 记忆，默认全部展开（完整 IA 一览）。
+const GROUP_OPEN_PREF = "restxtra.nav.groups.open";
+
+function useGroupOpenPref() {
+  const [map, setMap] = React.useState<Record<string, boolean>>({});
+  React.useEffect(() => {
+    try {
+      const raw = localStorage.getItem(GROUP_OPEN_PREF);
+      if (raw) setMap(JSON.parse(raw));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const toggle = React.useCallback((id: number) => {
+    setMap((m) => {
+      const next = { ...m, [String(id)]: !(m[String(id)] ?? true) };
+      try {
+        localStorage.setItem(GROUP_OPEN_PREF, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+  const isOpen = React.useCallback((id: number) => map[String(id)] ?? true, [map]);
+  return { isOpen, toggle };
+}
+
 export function NavMain({ items }: NavMainProps) {
   const rawPath = usePathname();
   // 路由段含中文，pathname 可能是百分号编码，解码后再与导航 url 比较，保证高亮命中。
@@ -111,29 +139,43 @@ export function NavMain({ items }: NavMainProps) {
     return item.subItems.some((sub) => path.startsWith(sub.url));
   };
 
+  const { isOpen, toggle } = useGroupOpenPref();
+
   return (
     <>
       {items.map((group) => (
-        <SidebarGroup key={group.id}>
-          {group.label && (
-            <SidebarGroupLabel className="group-data-[collapsible=icon]:pointer-events-none">
-              {group.label}
-            </SidebarGroupLabel>
-          )}
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {group.items.map((item) => (
-                <NavItem
-                  key={item.id}
-                  item={item}
-                  isItemActive={isItemActive}
-                  isSubItemActive={isSubItemActive}
-                  isSubmenuOpen={isSubmenuOpen}
-                />
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        <Collapsible
+          key={group.id}
+          open={isOpen(group.id)}
+          onOpenChange={() => toggle(group.id)}
+          className="group/collapsible"
+        >
+          <SidebarGroup>
+            {group.label && (
+              <CollapsibleTrigger asChild>
+                <SidebarGroupLabel className="cursor-pointer select-none justify-between gap-2 group-data-[collapsible=icon]:pointer-events-none">
+                  <span>{group.label}</span>
+                  <ChevronRight className="size-3.5 shrink-0 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                </SidebarGroupLabel>
+              </CollapsibleTrigger>
+            )}
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {group.items.map((item) => (
+                    <NavItem
+                      key={item.id}
+                      item={item}
+                      isItemActive={isItemActive}
+                      isSubItemActive={isSubItemActive}
+                      isSubmenuOpen={isSubmenuOpen}
+                    />
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
       ))}
     </>
   );

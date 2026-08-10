@@ -108,12 +108,13 @@ export const sidebarItems: NavGroup[] = [
     id: 4,
     label: "Agent 管理",
     items: [
+      { id: "llm", title: "LLM 配置", url: "/system/llm", icon: Brain, perm: "platform.settings.read" },
+      { id: "mcp", title: "MCP 管理", url: "/system/mcp", icon: Plug, perm: "agent.read" },
+      { id: "kb", title: "知识库", url: "/agent/kb", icon: FileText, badge: "soon", disabled: true, perm: "knowledge.read" },
       { id: "agents", title: "智能体管理", url: "/system/agents", icon: Bot, perm: "agent.read" },
       { id: "agent-roles", title: "Agent 角色", url: "/agent/roles", icon: KeyRound, badge: "soon", disabled: true },
-      { id: "mcp", title: "MCP 管理", url: "/system/mcp", icon: Plug, perm: "agent.read" },
       { id: "skills", title: "Skill", url: "/system/skills", icon: Sparkles, perm: "agent.read" },
       { id: "tools", title: "工具", url: "/system/tools", icon: Wrench, perm: "agent.read" },
-      { id: "kb", title: "知识库", url: "/agent/kb", icon: FileText, badge: "soon", disabled: true, perm: "knowledge.read" },
     ],
   },
   {
@@ -141,7 +142,6 @@ export const sidebarItems: NavGroup[] = [
     items: [
       { id: "users", title: "成员管理", url: "/platform/users", icon: Users, badge: "new", perm: "platform.user.read" },
       { id: "roles", title: "平台角色", url: "/platform/roles", icon: ShieldCheck, badge: "new", perm: "platform.role.read" },
-      { id: "llm", title: "LLM 配置", url: "/system/llm", icon: Brain, perm: "platform.settings.read" },
       { id: "settings", title: "系统配置", url: "/system/settings", icon: Settings2, perm: "platform.settings.read" },
     ],
   },

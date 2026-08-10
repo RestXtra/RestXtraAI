@@ -7,7 +7,6 @@ import { useShallow } from "zustand/react/shallow";
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -19,8 +18,6 @@ import { sidebarItems, type NavGroup } from "@/navigation/sidebar/sidebar-items"
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
 import { NavMain } from "./nav-main";
-import { NavUser } from "./nav-user";
-import { SidebarSupportCard } from "./sidebar-support-card";
 
 // visibleNav hides menu items the signed-in user lacks permission for
 // (admin bypasses; items without a perm key are visible to all logged-in users).
@@ -62,10 +59,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <NavMain items={visibleNav(currentUser)} />
         {/* <NavDocuments items={data.documents} /> */}
         {/* <NavSecondary items={data.navSecondary} className="mt-auto" /> */}
+        {/* <SidebarSupportCard /> */}
       </SidebarContent>
-      <SidebarFooter>
-        <NavUser user={currentUser} />
-      </SidebarFooter>
     </Sidebar>
   );
 }
