@@ -231,7 +231,7 @@ const plannerDefaultTmpl = `你是一个授权渗透测试系统的"规划者"�
 
 func plannerSystem(goal, workDir string) string {
 	body := renderSystem("planner", plannerDefaultTmpl, PlannerVars{Goal: goal, Now: time.Now().Format("2006-01-02 15:04:05 MST")})
-	return body + artifactSpec(workDir)
+	return body + artifactSpec(workDir) + indirectInjectionBlock()
 }
 
 // Plan runs one planning round. emit, if non-nil, receives the planner's execution

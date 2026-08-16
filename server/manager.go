@@ -113,6 +113,7 @@ const (
 	settingWebSearchProxy   = "web_search_proxy"
 	settingWorkers          = "workers"
 	settingLLMRecord        = "llm_record"
+	settingDenyExploit      = "guard_deny_exploit" // P6.1: 拒绝利用类动作(recon-only/RoE 严格)
 	// defaultWebSearchBackend is used when web search is on but no backend was picked.
 	defaultWebSearchBackend = "ddgs"
 	// defaultWorkers is the concurrent work-agent count when the setting is unset.
@@ -504,6 +505,7 @@ func (m *Manager) CreateTask(description, goal string, llmProfileID *int64, time
 		return nil, err
 	}
 	t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor)
+	t.Guard.SetDenyExploit(m.pg.GetBool(settingDenyExploit, false)) // P6.1
 	m.mu.Lock()
 	m.tasks[t.ID] = t
 	m.active = t.ID
@@ -527,6 +529,7 @@ func (m *Manager) LoadExisting() []*Task {
 			continue
 		}
 		t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor)
+		t.Guard.SetDenyExploit(m.pg.GetBool(settingDenyExploit, false)) // P6.1
 		m.tasks[id] = t
 		loaded = append(loaded, t)
 	}

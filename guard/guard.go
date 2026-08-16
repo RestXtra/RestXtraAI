@@ -22,6 +22,7 @@ type AuditEntry struct {
 	TS      int64  `json:"ts"`
 	Tool    string `json:"tool"`
 	Action  string `json:"action"` // allow|block
+	Class   string `json:"class,omitempty"` // P6.1: recon|scan|exploit（从命令内容推演）
 	Reason  string `json:"reason,omitempty"`
 	Command string `json:"command,omitempty"`
 }
@@ -33,6 +34,11 @@ type Guard struct {
 	attrib      map[string]int // failure attribution counts (Observer / G5)
 	reg         *hook.Registry
 	interceptor *intercept.Interceptor // optional; nil disables user-configured rules
+	// denyExploit 为 true 时，P6.1 会把 exploit 类动作（利用/爆破/写 webroot webshell）直接
+	// 阻断——用于 recon-only / 严格 RoE 场景。默认 false（授权渗透允许在范围内利用）。
+	denyExploit bool
+	// denyExfil 加严外泄检测开关（默认开）。见 reExfilHard。
+	denyExfil bool
 }
 
 // New creates a Guard without user-configured intercept rules (used for pentest
@@ -43,12 +49,18 @@ func New() *Guard { return newGuard(nil) }
 func NewWithInterceptor(ic *intercept.Interceptor) *Guard { return newGuard(ic) }
 
 func newGuard(ic *intercept.Interceptor) *Guard {
-	g := &Guard{attrib: map[string]int{}, interceptor: ic}
+	g := &Guard{attrib: map[string]int{}, interceptor: ic, denyExfil: true}
 	g.reg = hook.NewRegistry().
 		On(hook.PreToolUse, g.preToolUse).
 		On(hook.PostToolUse, g.postToolUse)
 	return g
 }
+
+// SetDenyExploit 开关 P6.1 的 exploit 动作门控（recon-only 场景置 true）。
+func (g *Guard) SetDenyExploit(on bool) { g.denyExploit = on }
+
+// SetDenyExfil 开关加严外泄检测（默认开）。
+func (g *Guard) SetDenyExfil(on bool) { g.denyExfil = on }
 
 // Hooks returns the hook registry to attach to an agent session.
 func (g *Guard) Hooks() *hook.Registry { return g.reg }
@@ -85,12 +97,22 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 		return g.applyIntercept(ctx, ev)
 	}
 
+	// P6.1 动作推演：从命令内容分类（recon/scan/exploit），用于审计 + 可选门控。
+	cls := classifyAction(cmd)
+
 	// destructive / exfil gating (§11 side-effect gating)
 	if reDestructive.MatchString(cmd) {
-		return g.block(ev.ToolName, "破坏性命令被安全边界拒绝（需人工批准）", cmd)
+		return g.block(ev.ToolName, "破坏性命令被安全边界拒绝（需人工批准）", cmd, cls)
+	}
+	if g.denyExfil && reExfilHard.MatchString(cmd) {
+		return g.block(ev.ToolName, "疑似数据外泄（本地敏感文件外发）被拒绝", cmd, cls)
 	}
 	if reExfil.MatchString(cmd) {
-		return g.block(ev.ToolName, "疑似数据外泄管道被拒绝", cmd)
+		return g.block(ev.ToolName, "疑似数据外泄管道被拒绝", cmd, cls)
+	}
+	// P6.1 exploit 门控（默认关；recon-only/RoE 严格场景由 server 打开）
+	if g.denyExploit && cls == "exploit" {
+		return g.block(ev.ToolName, "当前任务禁止利用类动作（DenyExploit）："+cls, cmd, cls)
 	}
 
 	g.record(ev.ToolName, "allow", "", cmd)
@@ -112,7 +134,7 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 	}
 	switch dec.Action {
 	case "deny":
-		return g.block(ev.ToolName, dec.Message, "")
+		return g.block(ev.ToolName, dec.Message, "", "")
 	case "allow":
 		return hook.Result{}
 	case "ask":
@@ -120,11 +142,11 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 		// immediately without creating a pending record — avoids orphaned DB entries
 		// and makes execOne complete fast, reducing the race against drainSynthetic.
 		if ctx.Err() != nil {
-			return g.block(ev.ToolName, "工作已取消，拦截规则阻止执行", "")
+			return g.block(ev.ToolName, "工作已取消，拦截规则阻止执行", "", "")
 		}
 		convID := intercept.ConvIDFromContext(ctx)
 		if !g.interceptor.HandleAsk(ctx, convID, dec, ev.ToolName, ev.Input) {
-			return g.block(ev.ToolName, "用户拒绝或审批超时", "")
+			return g.block(ev.ToolName, "用户拒绝或审批超时", "", "")
 		}
 		return hook.Result{}
 	}
@@ -164,8 +186,13 @@ func (g *Guard) Attributions() map[string]int {
 	return out
 }
 
-func (g *Guard) block(tool, reason, cmd string) hook.Result {
+func (g *Guard) block(tool, reason, cmd, cls string) hook.Result {
 	g.record(tool, "block", reason, cmd)
+	if cls != "" {
+		g.mu.Lock()
+		g.audit[len(g.audit)-1].Class = cls
+		g.mu.Unlock()
+	}
 	return hook.Result{Decision: "block", Message: reason}
 }
 
