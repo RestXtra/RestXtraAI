@@ -24,6 +24,7 @@ import (
 	"github.com/RestXtra/RestXtraAI/agent"
 	"github.com/RestXtra/RestXtraAI/db"
 	"github.com/RestXtra/RestXtraAI/llmrec"
+	"github.com/RestXtra/RestXtraAI/metrics"
 	"github.com/RestXtra/RestXtraAI/report"
 )
 
@@ -194,6 +195,8 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		}
 		// TSecBenchmark 跑分工具接线：worker/红队总指挥/pentest 可用 bench_* 自主跑分。
 		agent.BenchmarkCall = s.benchmarkCallForAgent
+		// P2.2 工具渐进披露开关（默认开）：低频工具 schema 隐藏经 SearchExtraTools 发现。
+		agent.ProgressiveDisclosure = func() bool { return m.pg.GetBool("tool_progressive_disclosure", true) }
 		if v, _, _ := m.pg.GetSetting("bench_tool_bind_v1"); v != "true" {
 			for _, t := range []string{"bench_vpn_check", "bench_challenges", "bench_start", "bench_hint", "bench_submit", "bench_close"} {
 				_ = m.pg.AddAgentToToolBinding(t, []string{"worker", "red_team_lead", "pentest"})
@@ -207,6 +210,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		}
 		// 六域智能体体系（幂等播种：创建领域 agent + 绑定技能/MCP/工具）。
 		s.seedSixDomainAgents()
+		s.seedAgentModelBindings() // P1.4 强/弱模型路由：按模型名把 planner 绑强模型、worker 绑弱模型(一次性)
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
 		domainReg := buildDomainReg(m.Assets())
 		wireTools(m.pg, domainReg)                      // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
@@ -357,21 +361,46 @@ func (s *Server) webSearchFor(key string) agent.WebSearchOpts {
 	return o
 }
 
+// providerForRole returns the (provider, config) for an agent role ("planner" /
+// "worker" / …) when that role has an agent_llm_profiles binding (P1.4 强/弱模型路由),
+// else the caller's base provider+cfg. Missing/invalid bindings fall back silently.
+func (s *Server) providerForRole(role string, baseCfg agent.Config, baseProv llm.Provider) (llm.Provider, agent.Config) {
+	pid, err := s.m.pg.GetAgentLLMProfile(role)
+	if err != nil || pid <= 0 {
+		return baseProv, baseCfg
+	}
+	cfg, ok := s.loadProfileConfig(pid)
+	if !ok {
+		return baseProv, baseCfg
+	}
+	prov, err := cfg.NewProvider()
+	if err != nil {
+		log.Printf("[engine] build provider for agent %q -> profile %d failed: %v", role, pid, err)
+		return baseProv, baseCfg
+	}
+	if p, _ := s.m.pg.ProfileByID(pid); p != nil {
+		prov = llmrec.Wrap(prov, s.m.PG(), cfg.Model, p.Name, s.m.LLMRecordEnabled)
+	}
+	return prov, cfg
+}
+
 // buildPlannerWorker builds a planner+worker pair on an already-constructed provider
 // + cfg, with all engine callbacks / proxy / web-search / memory wiring. Shared by the
 // global apply path (applyLLM) and the per-profile path (agentsForProfile), so a task
 // pinned to a specific profile behaves identically to the active one — just a different LLM.
+// planner/worker may individually be overridden by agent_llm_profiles bindings (P1.4).
 func (s *Server) buildPlannerWorker(prov llm.Provider, cfg agent.Config) (*agent.Planner, *agent.Worker) {
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts")) // raw LLM conversation logs
-	win := cfg.CompactionWindow()                                    // context window in tokens (compaction)
+	wkProv, wkCfg := s.providerForRole("worker", cfg, prov)
+	plProv, plCfg := s.providerForRole("planner", cfg, prov)
 	// traffic host tools flow through ToolAugment for every agent and are filtered by
 	// the tools-table binding (default = worker), so worker behavior is unchanged.
-	wk := agent.NewWorker(prov, cfg.Model, s.m.dir, tx, win, s.agentMaxTurns("worker"))
+	wk := agent.NewWorker(wkProv, wkCfg.Model, s.m.dir, tx, wkCfg.CompactionWindow(), s.agentMaxTurns("worker"))
 	wk.SetRunTimeout(time.Duration(s.agentRunSeconds("worker")) * time.Second)
 	wk.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	wk.SetMemory(memory.NewStore(filepath.Join(s.m.dir, "memory")))
 	wk.SetWebSearch(s.webSearchFor("worker"))
-	pl := agent.NewPlanner(prov, cfg.Model, s.m.dir, tx, win, s.agentMaxTurns("planner"))
+	pl := agent.NewPlanner(plProv, plCfg.Model, s.m.dir, tx, plCfg.CompactionWindow(), s.agentMaxTurns("planner"))
 	pl.SetKillWork(s.engine.KillWork)               // planner kill_work → terminate a running work
 	pl.SetSteerWork(s.engine.SteerWork)             // planner steer_work → inject mid-run course-correction
 	pl.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert()) // WebFetch through the recording proxy
@@ -526,6 +555,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/stats", s.stats)
+	mux.HandleFunc("GET /api/metrics", s.metrics) // P5.4 关键路径指标
 	mux.HandleFunc("GET /api/logs", s.getLogs)
 	mux.HandleFunc("GET /api/logs/history", s.getLogsHistory)
 	mux.HandleFunc("GET /api/logs/stream", s.streamLogs)
@@ -615,6 +645,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/agents/{key}/prompt/preview", s.pgPreviewPrompt)
 	mux.HandleFunc("GET /api/agents/{key}/visibility", s.pgGetAgentVisibility)
 	mux.HandleFunc("PUT /api/agents/{key}/visibility", s.pgSetAgentVisibility)
+	mux.HandleFunc("GET /api/agents/{key}/profile", s.pgGetAgentLLMProfile)
+	mux.HandleFunc("POST /api/agents/{key}/profile", s.pgSetAgentLLMProfile)
 	// 内置工具目录（描述/参数默认值可改、按 agent 绑定；key 与 handler 在代码层）
 	mux.HandleFunc("GET /api/tools", s.pgListTools)
 	mux.HandleFunc("PUT /api/tools/{key}", s.pgUpdateTool)
@@ -778,6 +810,11 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "service": "restxtra"})
+}
+
+// metrics 返回进程级关键路径计数器（P5.4）。
+func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, metrics.M.Snapshot())
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
@@ -1086,7 +1123,9 @@ type createTaskReq struct {
 	Goal           string        `json:"goal"`
 	LLMProfileID   *int64        `json:"llm_profile_id,omitempty"` // 指定运行本任务的 LLM 配置;省略/null=用激活配置
 	TimeoutSeconds int           `json:"timeout_seconds"`          // 任务级超时(秒);0/省略=不限时
-	Workflow       *TaskWorkflow `json:"workflow,omitempty"`       // 可选：初始探索方向 + 战略提示
+	// PlanHeartbeatSeconds 是 planner 心跳触发间隔(秒;0/省略=不心跳, <600 归一 600)。
+	PlanHeartbeatSeconds int           `json:"plan_heartbeat_seconds"`
+	Workflow             *TaskWorkflow `json:"workflow,omitempty"` // 可选：初始探索方向 + 战略提示
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
@@ -1109,7 +1148,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	if req.TimeoutSeconds < 0 {
 		req.TimeoutSeconds = 0
 	}
-	t, err := s.m.CreateTask(req.Description, req.Goal, req.LLMProfileID, req.TimeoutSeconds)
+	t, err := s.m.CreateTask(req.Description, req.Goal, req.LLMProfileID, req.TimeoutSeconds, req.PlanHeartbeatSeconds)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return

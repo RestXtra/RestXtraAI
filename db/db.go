@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/RestXtra/RestXtraAI/config"
 	_ "github.com/jackc/pgx/v5/stdlib" // pgx database/sql driver ("pgx")
@@ -25,7 +26,20 @@ func DSN() (dsn, source string, err error) {
 
 // DB wraps the shared *sql.DB. PG handles its own connection pool + concurrency
 // (MVCC), so unlike the old SQLite store there is no process-wide write mutex.
-type DB struct{ *sql.DB }
+type DB struct {
+	*sql.DB
+	// P2.6 graph_overview 版本缓存：per-exploration 图版本 + 最近一次 overview 的 JSON。
+	// 同一版本内多次读取（同 burst 的多次 planner 唤醒）直接复用，避免重复全量查询。
+	ovMu    sync.Mutex
+	ovVer   map[int64]int64
+	ovCache map[int64]*overviewCache
+}
+
+// overviewCache caches one graph_overview snapshot at a specific graph version.
+type overviewCache struct {
+	ver  int64
+	data []byte
+}
 
 // ensureDatabase connects to the postgres system database and creates the target
 // database if it does not exist. dsn must be a postgres:// URL.
@@ -85,7 +99,7 @@ func Open(dsn string) (*DB, error) {
 		sqlDB.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	d := &DB{sqlDB}
+	d := &DB{DB: sqlDB}
 	if err := d.seedBuiltins(); err != nil {
 		sqlDB.Exec(`SELECT pg_advisory_unlock(7337741001)`) //nolint:errcheck
 		sqlDB.Close()

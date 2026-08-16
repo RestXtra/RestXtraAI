@@ -122,6 +122,46 @@ func (d *DB) Exploration(id int64) *ExplorationStore { return &ExplorationStore{
 
 func (s *ExplorationStore) ID() int64 { return s.expID }
 
+// BumpVersion marks this exploration's graph as changed (P2.6). Called by every
+// write that graph_overview reflects; invalidates the cached overview snapshot.
+func (s *ExplorationStore) BumpVersion() {
+	s.db.ovMu.Lock()
+	defer s.db.ovMu.Unlock()
+	if s.db.ovVer == nil {
+		s.db.ovVer = map[int64]int64{}
+	}
+	s.db.ovVer[s.expID]++
+}
+
+// CachedOverview returns the cached overview JSON when the graph version is
+// unchanged since it was computed. (b, ok); ok=false → caller recomputes.
+func (s *ExplorationStore) CachedOverview() ([]byte, bool) {
+	s.db.ovMu.Lock()
+	defer s.db.ovMu.Unlock()
+	c, ok := s.db.ovCache[s.expID]
+	if !ok {
+		return nil, false
+	}
+	if c.ver != s.db.ovVer[s.expID] {
+		return nil, false
+	}
+	return c.data, true
+}
+
+// CacheOverview stores a fresh overview snapshot at the current graph version.
+func (s *ExplorationStore) CacheOverview(data map[string]any) {
+	b, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	s.db.ovMu.Lock()
+	defer s.db.ovMu.Unlock()
+	if s.db.ovCache == nil {
+		s.db.ovCache = map[int64]*overviewCache{}
+	}
+	s.db.ovCache[s.expID] = &overviewCache{ver: s.db.ovVer[s.expID], data: b}
+}
+
 // Root returns the exploration's description and goal.
 func (s *ExplorationStore) Root() (description, goal string, err error) {
 	var d sql.NullString
@@ -149,6 +189,7 @@ VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 			return 0, err
 		}
 	}
+	s.BumpVersion() // P2.6: graph changed → invalidate overview cache
 	return id, tx.Commit()
 }
 
@@ -188,6 +229,7 @@ func (s *ExplorationStore) Anchor(nodeID, assetID int64) error {
 		return nil
 	}
 	_, err := s.db.Exec(`INSERT INTO exploration_anchors(node_id, asset_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, nodeID, assetID)
+	s.BumpVersion() // P2.6
 	return err
 }
 
@@ -196,12 +238,14 @@ func (s *ExplorationStore) Link(from int64, rel string, to int64) error {
 	_, err := s.db.Exec(`
 INSERT INTO exploration_edges(exploration_id, src_id, rel, dst_id) VALUES ($1,$2,$3,$4)
 ON CONFLICT (exploration_id, src_id, rel, dst_id) DO NOTHING`, s.expID, from, rel, to)
+	s.BumpVersion() // P2.6
 	return err
 }
 
 // SetNodeState updates any node's state (never deletes).
 func (s *ExplorationStore) SetNodeState(id int64, state string) error {
 	_, err := s.db.Exec(`UPDATE exploration_nodes SET state=$1 WHERE id=$2 AND exploration_id=$3`, state, id, s.expID)
+	s.BumpVersion() // P2.6
 	return err
 }
 
@@ -217,6 +261,9 @@ WHERE exploration_id=$1 AND kind='intent' AND state='running'`, s.expID)
 		return 0, err
 	}
 	n, _ := res.RowsAffected()
+	if n > 0 {
+		s.BumpVersion() // P2.6
+	}
 	return n, nil
 }
 
@@ -226,6 +273,7 @@ func (s *ExplorationStore) SetIntentState(id int64, state string) error {
 	_, err := s.db.Exec(`UPDATE exploration_nodes
 SET state=$1, completed_at = CASE WHEN $4 THEN now() ELSE NULL END
 WHERE id=$2 AND exploration_id=$3 AND kind='intent'`, state, id, s.expID, terminal)
+	s.BumpVersion() // P2.6
 	return err
 }
 
@@ -355,6 +403,67 @@ ORDER BY priority DESC, id ASC LIMIT $2`, s.expID, limit)
 	return scanNodes(rows)
 }
 
+// IntentReady 返回意图的前置依赖是否已满足（P3.1 依赖门控认领）。
+// 语义：意图的 derived_from / spawns 父节点——
+//   - fact/finding/goal/hint → 已满足（事实在图上即算数）；
+//   - intent → 仅当该父意图已 done 且产出了至少一个事实/发现（有 yields 边）才算满足；
+//     open/running/blocked/exhausted 的父意图 → 不满足（下游串行链不能抢跑）。
+// 无父节点 → 满足（顶层意图可直接认领）。
+func (s *ExplorationStore) IntentReady(id int64) (bool, error) {
+	rows, err := s.db.Query(`
+SELECT e.src_id, COALESCE(n.kind,''), COALESCE(n.state,'')
+FROM exploration_edges e
+LEFT JOIN exploration_nodes n ON n.id = e.src_id AND n.exploration_id = e.exploration_id
+WHERE e.dst_id=$1 AND e.exploration_id=$2 AND e.rel IN ('derived_from','spawns')`, id, s.expID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	var parents []struct {
+		id    int64
+		kind  string
+		state string
+	}
+	for rows.Next() {
+		var p struct {
+			id    int64
+			kind  string
+			state string
+		}
+		if err := rows.Scan(&p.id, &p.kind, &p.state); err != nil {
+			return false, err
+		}
+		parents = append(parents, p)
+	}
+	if rows.Err() != nil {
+		return false, rows.Err()
+	}
+	if len(parents) == 0 {
+		return true, nil
+	}
+	for _, p := range parents {
+		switch p.kind {
+		case "intent":
+			if p.state != "done" {
+				return false, nil // 父意图还没完成
+			}
+			// 父意图 done 还不够：必须有产出（yields 到 fact/finding）才算真正给出前置结果。
+			var n int
+			if err := s.db.QueryRow(`
+SELECT count(*) FROM exploration_edges
+WHERE src_id=$1 AND exploration_id=$2 AND rel='yields'`, p.id, s.expID).Scan(&n); err != nil {
+				return false, err
+			}
+			if n == 0 {
+				return false, nil
+			}
+		default:
+			// fact/finding/goal/hint 父节点 → 已满足
+		}
+	}
+	return true, nil
+}
+
 // ClaimIntent atomically moves an open intent to running. Returns true if claimed.
 func (s *ExplorationStore) ClaimIntent(id int64, owner string) (bool, error) {
 	res, err := s.db.Exec(`UPDATE exploration_nodes SET state='running', owner=$1
@@ -363,6 +472,9 @@ WHERE id=$2 AND exploration_id=$3 AND kind='intent' AND state='open'`, owner, id
 		return false, err
 	}
 	n, _ := res.RowsAffected()
+	if n == 1 {
+		s.BumpVersion() // P2.6: intent → running 也影响 overview(running_intents)
+	}
 	return n == 1, nil
 }
 
@@ -650,5 +762,9 @@ FROM activity WHERE exploration_id=$1 AND kind<>'thinking' AND id IN (`+strings.
 // persists across task deletion (task_id / node_id become NULL when the task or
 // exploration node is deleted). taskID and nodeID may be 0 (stored as NULL).
 func (s *ExplorationStore) AddStandaloneFinding(taskID, nodeID int64, vulnclass, severity, summary, evidence, worker string, assetIDs []int64) (int64, error) {
-	return s.db.AddFinding(taskID, nodeID, vulnclass, severity, summary, evidence, worker, assetIDs)
+	id, err := s.db.AddFinding(taskID, nodeID, vulnclass, severity, summary, evidence, worker, assetIDs)
+	if err == nil {
+		s.BumpVersion() // P2.6
+	}
+	return id, err
 }

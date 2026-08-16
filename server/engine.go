@@ -14,6 +14,7 @@ import (
 	"github.com/RestXtra/RestXtraAI/agent"
 	"github.com/RestXtra/RestXtraAI/db"
 	"github.com/RestXtra/RestXtraAI/intercept"
+	"github.com/RestXtra/RestXtraAI/metrics"
 )
 
 // model_error（provider/API 故障：LLM 层瞬时重试耗尽，或流已开始后中途断流）
@@ -56,6 +57,12 @@ type Engine struct {
 	// single worker without pausing the whole task. Keyed by globally-unique intent id.
 	workMu     sync.Mutex
 	workCancel map[int64]context.CancelFunc
+	// P3.4 卡死检测：每个 running work 的最后活动时间戳（工具/思考/文本事件都刷新），
+	// 以及"卡死 requeue"标记与次数（cap 后转 blocked 防无限重跑）。
+	workLastAct sync.Map // intentID -> int64 unix
+	stuckMu     sync.Mutex
+	stuckReq    map[int64]bool // 卡死 watchdog 标记 → 该 work 以 requeue 而非 stopped 收场
+	stuckCount  map[int64]int  // 每个 intent 已被卡死 requeue 的次数
 
 	// steerBox queues planner course-corrections for a running work (keyed by intent
 	// id). The worker's PreToolUse hook drains it before its next tool call and hands
@@ -156,7 +163,8 @@ func (e *Engine) touch(taskID string) { e.lastAct.Store(taskID, time.Now().Unix(
 func NewEngine(m *Manager) *Engine {
 	return &Engine{m: m, debounce: 800 * time.Millisecond, bc: NewBroadcaster(),
 		execCancel: map[string]context.CancelFunc{}, execCtx: map[string]context.Context{},
-		workCancel: map[int64]context.CancelFunc{}, steerBox: map[int64][]string{}}
+		workCancel: map[int64]context.CancelFunc{}, steerBox: map[int64][]string{},
+		stuckReq: map[int64]bool{}, stuckCount: map[int64]int{}}
 }
 
 // registerWork records the cancel for the work currently running intentID.
@@ -174,9 +182,82 @@ func (e *Engine) unregisterWork(intentID int64) {
 		c() // release context resources (no-op if already cancelled)
 	}
 	e.workMu.Unlock()
+	e.workLastAct.Delete(intentID) // P3.4: 清掉活动戳
 	e.steerMu.Lock()
 	delete(e.steerBox, intentID) // drop any undelivered steering for a finished work
 	e.steerMu.Unlock()
+}
+
+// ---- P3.4 卡死检测 ----
+
+const (
+	stuckIdleSeconds = 20 * 60 // 一个 work 连续 idle 超过 20min 视为卡死（覆盖 RunSecs=0 的长跑配置）
+	stuckRequeueCap  = 2       // 单个 intent 最多因卡死 requeue 2 次；超过则标记 blocked 放弃
+)
+
+// markStuck 由 stuckWatchdog 调用：标记该 work 以 requeue 收场，并累计次数。
+func (e *Engine) markStuck(intentID int64) {
+	e.stuckMu.Lock()
+	defer e.stuckMu.Unlock()
+	e.stuckReq[intentID] = true
+	e.stuckCount[intentID]++
+}
+
+// consumeStuck 报告被取消的 work 是否是"卡死 requeue"场景：
+//
+//	"requeue" → 卡死且未超 cap：重新开放意图让别的 worker 重跑
+//	"blocked" → 卡死已超 cap：标记 blocked 放弃（避免无限重跑烧 token）
+//	""        → 非卡死（planner kill_work / 其它取消）
+func (e *Engine) consumeStuck(intentID int64) string {
+	e.stuckMu.Lock()
+	defer e.stuckMu.Unlock()
+	if !e.stuckReq[intentID] {
+		return ""
+	}
+	delete(e.stuckReq, intentID)
+	if e.stuckCount[intentID] > stuckRequeueCap {
+		delete(e.stuckCount, intentID)
+		return "blocked"
+	}
+	return "requeue"
+}
+
+// stuckWatchdog 周期性检查每个 running work 的最后活动时间；超过 stuckIdleSeconds
+// 判定卡死 → 取消该 work（由 workerLoop 的 kill 分支按 consumeStuck 决定 requeue/blocked）。
+func (e *Engine) stuckWatchdog(ctx context.Context, t *Task) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			now := time.Now().Unix()
+			e.workMu.Lock()
+			ids := make([]int64, 0, len(e.workCancel))
+			for id := range e.workCancel {
+				ids = append(ids, id)
+			}
+			e.workMu.Unlock()
+			for _, id := range ids {
+				v, ok := e.workLastAct.Load(id)
+				if !ok {
+					continue
+				}
+				last := v.(int64)
+				if now-last > stuckIdleSeconds {
+					log.Printf("[watchdog] task %s 意图 #%d 已 %d 秒无活动，判定卡死 → 取消并 requeue", t.ID, id, now-last)
+					e.markStuck(id)
+					e.workMu.Lock()
+					c := e.workCancel[id]
+					e.workMu.Unlock()
+					if c != nil {
+						c()
+					}
+				}
+			}
+		}
+	}
 }
 
 // SteerWork queues a mid-run course-correction for the work running intentID (the
@@ -362,6 +443,7 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 	}
 	e.touch(t.ID)
 	go e.plannerLoop(ctx, t)
+	go e.stuckWatchdog(ctx, t) // P3.4 卡死检测
 	workers := e.m.Workers()
 	for i := 0; i < workers; i++ {
 		go e.workerLoop(ctx, t, fmt.Sprintf("work#%d", i+1))
@@ -370,74 +452,112 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 	t.Notify()                         // kick the first planning round (acted on once LLM is ready)
 }
 
+// plannerHeartbeatInterval 解析任务的 planner 心跳间隔。db.CreateTask 已归一
+// (低于 600 一律抬到 600);这里再兜一次底,防内存态异常值。
+func plannerHeartbeatInterval(t *Task) time.Duration {
+	sec := t.PlanHeartbeatSeconds
+	if sec < db.MinPlanHeartbeatSeconds { // 下限=默认=600(10min)
+		sec = db.MinPlanHeartbeatSeconds
+	}
+	return time.Duration(sec) * time.Second
+}
+
+// resetPlannerTimer 安全重臂一个可能已触发的 Timer(标准 Stop→drain→Reset 模式)。
+func resetPlannerTimer(timer *time.Timer, d time.Duration) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(d)
+}
+
 func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
+	interval := plannerHeartbeatInterval(t)
+	// 心跳定时器在 loop 入口臂 = 从任务 start 计时：周期性兜底唤醒 planner 去监督
+	// 飞行中的 worker(steer/kill) + 复查方向。之后每次唤醒(边沿/心跳)都重臂。
+	heartbeat := time.NewTimer(interval)
+	defer heartbeat.Stop()
+
+	// runRound 跑一轮规划(含 debounce 合并 + 各 guard)。src 仅用于日志区分触发来源。
+	runRound := func(src string) {
+		// debounce: coalesce a burst of changes into one planning round
+		timer := time.NewTimer(e.debounce)
+	drain:
+		for {
+			select {
+			case <-t.notify:
+			case <-timer.C:
+				break drain
+			}
+		}
+		planner, _ := e.snapshotFor(t)
+		if planner == nil {
+			return // idle until LLM configured
+		}
+		if e.IsPaused(t.ID) {
+			return // user-paused: don't plan
+		}
+		// terminal task (goals all met → done, or failed): the run is over. A
+		// resume/nudge — e.g. auto-resume of the active task on restart — must NOT
+		// re-plan (it would burn an LLM round and re-confirm a settled result).
+		if isTerminalStatus(t.Status) {
+			return
+		}
+		// 任务级超时收尾中:丢弃普通唤醒——worker 收尾写回、Resume 的 Notify 都不再
+		// 触发常规规划轮;终局那一轮由协调器(settleTask)直接驱动,不走这里。
+		if e.isSettling(t.ID) {
+			return
+		}
+		e.stampFirstRun(t) // 首次真正规划 → 盖 first_run_at + 算 deadline(仅带 timeout 的任务)
+		e.touch(t.ID)
+		emit := func(r db.Activity) { e.emitActivity(t, r) }
+		ectx := e.clockCtx(e.execContextFor(ctx, t.ID), t, false) // cancellable by Pause; 带任务 deadline
+		log.Printf("[planner] task %s 规划中…(%s 触发)", t.ID, src)
+		// round marker: each Plan() is one planner round; emit a boundary so the
+		// UI can separate rounds in the transcript (kind='round').
+		e.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
+			Summary: fmt.Sprintf("第 %d 轮规划", e.nextPlannerRound(t.ID))})
+		// what fired this round (worker done / finding; may be several — debounce
+		// coalesces a burst; empty for time/heartbeat wakes).
+		triggers := t.drainTriggers()
+		e.incInflight(t.ID)
+		taskIDInt, _ := strconv.ParseInt(t.ID, 10, 64)
+		metrics.M.Inc(&metrics.M.PlannerRounds) // P5.4
+		met, reason, err := planner.Plan(ectx, taskIDInt, e.m.assets, t.Store, t.Goal, triggers, emit)
+		e.decInflight(t.ID)
+		switch {
+		case err != nil && ectx.Err() == nil:
+			log.Printf("[planner] task %s 规划出错: %v", t.ID, err)
+		case met:
+			log.Printf("[planner] task %s 判定目标达成: %s", t.ID, reason)
+			// 所有目标达成 → 持久化任务状态为 done（前端 DTO 会优先展示该终态）。
+			if err := e.m.SetTaskStatus(t.ID, "done"); err != nil {
+				log.Printf("[planner] task %s 标记完成落库失败: %v", t.ID, err)
+			}
+			// 任务已判完成 → 立刻取消在跑的 worker：它们手头的意图跑出来也没意义了。
+			// 下一轮 worker 循环撞终态门就不再领新意图;被取消的这批走下方"任务已完成"分支
+			// 归为 stopped(而非 blocked)。
+			e.cancelExec(t.ID)
+		default:
+			log.Printf("[planner] task %s 规划完成", t.ID)
+		}
+		e.touch(t.ID)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.notify:
-			// debounce: coalesce a burst of changes into one planning round
-			timer := time.NewTimer(e.debounce)
-		drain:
-			for {
-				select {
-				case <-t.notify:
-				case <-timer.C:
-					break drain
-				}
-			}
-			planner, _ := e.snapshotFor(t)
-			if planner == nil {
-				continue // idle until LLM configured
-			}
-			if e.IsPaused(t.ID) {
-				continue // user-paused: don't plan
-			}
-			// terminal task (goals all met → done, or failed): the run is over. A
-			// resume/nudge — e.g. auto-resume of the active task on restart — must NOT
-			// re-plan (it would burn an LLM round and re-confirm a settled result).
-			if isTerminalStatus(t.Status) {
-				continue
-			}
-			// 任务级超时收尾中:丢弃普通唤醒——worker 收尾写回、Resume 的 Notify 都不再
-			// 触发常规规划轮;终局那一轮由协调器(settleTask)直接驱动,不走这里。
-			if e.isSettling(t.ID) {
-				continue
-			}
-			e.stampFirstRun(t) // 首次真正规划 → 盖 first_run_at + 算 deadline(仅带 timeout 的任务)
-			e.touch(t.ID)
-			emit := func(r db.Activity) { e.emitActivity(t, r) }
-			ectx := e.clockCtx(e.execContextFor(ctx, t.ID), t, false) // cancellable by Pause; 带任务 deadline
-			log.Printf("[planner] task %s 规划中…", t.ID)
-			// round marker: each Plan() is one planner round; emit a boundary so the
-			// UI can separate rounds in the transcript (kind='round').
-			e.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
-				Summary: fmt.Sprintf("第 %d 轮规划", e.nextPlannerRound(t.ID))})
-			// which intents' completion triggered this round (may be several — debounce
-			// coalesces a burst; empty for non-completion wakes like a new hint).
-			doneIntents := t.drainDone()
-			e.incInflight(t.ID)
-			taskIDInt, _ := strconv.ParseInt(t.ID, 10, 64)
-			met, reason, err := planner.Plan(ectx, taskIDInt, e.m.assets, t.Store, t.Goal, doneIntents, emit)
-			e.decInflight(t.ID)
-			switch {
-			case err != nil && ectx.Err() == nil:
-				log.Printf("[planner] task %s 规划出错: %v", t.ID, err)
-			case met:
-				log.Printf("[planner] task %s 判定目标达成: %s", t.ID, reason)
-				// 所有目标达成 → 持久化任务状态为 done（前端 DTO 会优先展示该终态）。
-				if err := e.m.SetTaskStatus(t.ID, "done"); err != nil {
-					log.Printf("[planner] task %s 标记完成落库失败: %v", t.ID, err)
-				}
-				// 任务已判完成 → 立刻取消在跑的 worker：它们手头的意图跑出来也没意义了。
-				// 下一轮 worker 循环撞终态门就不再领新意图;被取消的这批走下方"任务已完成"分支
-				// 归为 stopped(而非 blocked)。
-				e.cancelExec(t.ID)
-			default:
-				log.Printf("[planner] task %s 规划完成", t.ID)
-			}
-			e.touch(t.ID)
+			runRound("edge") // worker 结束 / finding / kill / resume / seed 首轮
+		case <-heartbeat.C:
+			// 周期兜底:死锁兜底 + 唤醒去监督飞行中的 worker(steer/kill) + 周期复查。
+			runRound("heartbeat")
 		}
+		// 每次唤醒(边沿或心跳)后重臂心跳:任意规划触发都重算这段静置计时。
+		resetPlannerTimer(heartbeat, interval)
 	}
 }
 
@@ -488,10 +608,12 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 		// per-work child context so the planner's kill_work can stop just this work.
 		workCtx, workCancel := context.WithCancel(ectx)
 		e.registerWork(intent.ID, workCancel)
+		e.workLastAct.Store(intent.ID, time.Now().Unix()) // P3.4 卡死检测起点
 		// wrap the guard hooks so steer_work can inject a mid-run course-correction
 		// for THIS intent (drained before the worker's next tool call).
 		iid := intent.ID
 		taskEmit := func(a db.Activity) {
+			e.workLastAct.Store(iid, time.Now().Unix()) // P3.4: 任何活动都刷新活动戳
 			nid := iid
 			a.NodeID, a.Worker = &nid, name
 			emit(a)
@@ -499,8 +621,10 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 		workCtx = intercept.WithTaskContext(workCtx, t.ID, fmt.Sprintf("%s · #%d", name, iid), taskEmit)
 		hooks := steerHooks{inner: t.Guard.Hooks(), drain: func() (string, bool) { return e.drainSteer(iid) }}
 		wTaskID, _ := strconv.ParseInt(t.ID, 10, 64)
+		notifyFinding := func(intentID int64, summary string) { t.NotifyFinding(intentID, summary) }
 		e.incInflight(t.ID) // 计入在跑,供收尾时序 drain 等待
-		reason, wrote, err := worker.Execute(workCtx, name, wTaskID, e.m.assets, t.Store, intent, hooks, emit, e.m.enrich)
+		metrics.M.Inc(&metrics.M.WorkerRuns) // P5.4
+		reason, wrote, err := worker.Execute(workCtx, name, wTaskID, e.m.assets, t.Store, intent, hooks, emit, e.m.enrich, notifyFinding)
 		// model_error 收场 → 额外重跑几次（退避后再试）。仅在意图仍属本 work、任务
 		// 未暂停/未终止/未取消【且未进入收尾】时重试；否则让位给对应分支处理(收尾期不
 		// 再重试,避免退避挤占其他 worker 的优雅收尾窗口)。
@@ -512,7 +636,14 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 			if sleepCtx(workCtx, modelErrorRetryBackoff) {
 				break // 退避期间被取消（终止/暂停）→ 交给下方分支处理
 			}
-			reason, wrote, err = worker.Execute(workCtx, name, wTaskID, e.m.assets, t.Store, intent, hooks, emit, e.m.enrich)
+			reason, wrote, err = worker.Execute(workCtx, name, wTaskID, e.m.assets, t.Store, intent, hooks, emit, e.m.enrich, notifyFinding)
+		}
+		// P5.4 指标：写回分项 + model_error 计数。
+		metrics.M.Add(&metrics.M.WritesFacts, int64(wrote.Facts))
+		metrics.M.Add(&metrics.M.WritesAssets, int64(wrote.Assets))
+		metrics.M.Add(&metrics.M.WritesFindings, int64(wrote.Findings))
+		if reason == harness.ReasonModelError {
+			metrics.M.Inc(&metrics.M.ModelErrors)
 		}
 		e.decInflight(t.ID)
 		// CAPTURE kill state BEFORE unregisterWork cancels workCtx. kill = this work's
@@ -544,10 +675,23 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 			e.touch(t.ID)
 			continue
 		}
-		// killed by the planner: mark stopped (don't write back results, don't auto-reclaim).
+		// killed by the planner OR the P3.4 stuck-watchdog: mark stopped (don't write
+		// back results, don't auto-reclaim) — unless it was a stuck-requeue, in which
+		// case reopen the intent for another worker (or mark blocked past the cap).
 		if killed {
-			_ = t.Store.SetIntentState(intent.ID, "stopped")
-			log.Printf("[worker %s] task %s 意图 #%d 被终止(stopped)", name, t.ID, intent.ID)
+			switch e.consumeStuck(intent.ID) {
+			case "requeue":
+				_ = t.Store.SetIntentState(intent.ID, "open")
+				log.Printf("[worker %s] task %s 意图 #%d 卡死被取消，重新开放(requeue)", name, t.ID, intent.ID)
+				metrics.M.Inc(&metrics.M.StuckRequeues) // P5.4
+			case "blocked":
+				_ = t.Store.SetIntentState(intent.ID, "blocked")
+				log.Printf("[worker %s] task %s 意图 #%d 卡死重试超限，标记 blocked 放弃", name, t.ID, intent.ID)
+				metrics.M.Inc(&metrics.M.StuckBlocked) // P5.4
+			default:
+				_ = t.Store.SetIntentState(intent.ID, "stopped")
+				log.Printf("[worker %s] task %s 意图 #%d 被终止(stopped)", name, t.ID, intent.ID)
+			}
 			e.touch(t.ID)
 			t.Notify()
 			continue
@@ -570,6 +714,14 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 		}
 		_ = t.Store.SetIntentState(intent.ID, state)
 		log.Printf("[worker %s] task %s 意图 #%d 结束: %s (写回 %s)", name, t.ID, intent.ID, state, wrote)
+		// P4.2 stall guard：连续零产出计数，达到阈值记警告（方向可能全是死路）。
+		if wrote.Total() == 0 {
+			if n := t.BumpEmptyRun(); n >= 3 {
+				log.Printf("[worker %s] task %s 连续 %d 个意图零产出，活跃方向疑似死路（stall guard）", name, t.ID, n)
+			}
+		} else {
+			t.ResetEmptyRuns()
+		}
 		e.touch(t.ID)
 		t.NotifyDone(intent.ID) // results changed the graph -> wake the planner (with the just-finished intent id)
 	}
@@ -587,6 +739,12 @@ func sleepCtx(ctx context.Context, d time.Duration) (done bool) {
 func (e *Engine) claimNext(t *Task, name string) *db.Node {
 	fr, _ := t.Store.Frontier(20)
 	for _, in := range fr {
+		// P3.1 依赖门控认领：前置依赖未满足（串行链父意图还没产 fact）的意图不认领，
+		// 避免下游 worker 抢跑空转。ready 判断出错时按"可认领"处理，不阻塞任务。
+		if ready, err := t.Store.IntentReady(in.ID); err == nil && !ready {
+			metrics.M.Inc(&metrics.M.IntentReadySkip) // P5.4
+			continue
+		}
 		if ok, _ := t.Store.ClaimIntent(in.ID, name); ok {
 			return in
 		}

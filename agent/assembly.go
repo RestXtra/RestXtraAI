@@ -55,5 +55,48 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 	if ToolResolve != nil {
 		out = ToolResolve(ctx, agentKey, out)
 	}
+	// P2.2 工具渐进披露：把低频内置工具（bench_*/traffic_*）的 schema 隐藏进 deferred，
+	// 模型只看到名字（system 块）+ 经 SearchExtraTools/ExecuteExtraTool 发现与调用。
+	// 节省每回合工具 schema token。可用 ProgressiveDisclosure 开关关闭（默认开）。
+	applyProgressiveDisclosure(&def, out)
 	return out, def, cleanup
+}
+
+// progressiveBuiltins 是被渐进披露隐藏 schema 的低频内置工具（按需经 ExecuteExtraTool 调用）。
+var progressiveBuiltins = map[string]bool{
+	"bench_vpn_check": true, "bench_challenges": true, "bench_start": true,
+	"bench_hint": true, "bench_submit": true, "bench_close": true,
+	"traffic_search": true, "traffic_get": true,
+}
+
+// ProgressiveDisclosure, if set, controls P2.2 schema-hiding (nil = enabled).
+// Server wires it to a settings toggle so operators can disable on problems.
+var ProgressiveDisclosure func() bool
+
+func applyProgressiveDisclosure(def *DeferredInfo, tools []actool.CoreTool) {
+	on := true
+	if ProgressiveDisclosure != nil {
+		on = ProgressiveDisclosure()
+	}
+	if !on {
+		return
+	}
+	var names []string
+	seen := map[string]bool{}
+	for _, t := range tools {
+		n := t.Name()
+		if progressiveBuiltins[n] && !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	def.Deferred = append(def.Deferred, names...)
+	def.GlobalNames = append(def.GlobalNames, names...) // 名字进 system 块，模型知道它们存在
+	if def.Unlock == nil {
+		def.Unlock = actool.NewUnlockSet()
+	}
+	def.Unlock.Add(names...) // 保持可调用（不按 skill 门控）
 }

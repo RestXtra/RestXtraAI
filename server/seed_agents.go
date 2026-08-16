@@ -194,3 +194,44 @@ func (s *Server) seedSixDomainAgents() {
 		}
 	}
 }
+
+// seedAgentModelBindings 是一次性(设置标记 agent_model_bind_v1)把 planner 绑到"强模型"、
+// worker 绑到"弱模型"的 profile（P1.4 强/弱模型路由）。按 model 名精确匹配：
+//   strongModel = "deepseek-v4-pro"   → planner
+//   weakModel   = "deepseek-v4-flash" → worker
+// 两个 profile 都建好才生效；缺一个就跳过（用户可在 agent 设置页手动绑定）。
+func (s *Server) seedAgentModelBindings() {
+	pg := s.m.PG()
+	if v, _, _ := pg.GetSetting("agent_model_bind_v1"); v == "true" {
+		return
+	}
+	_ = pg.SetSetting("agent_model_bind_v1", "true")
+	profs, err := pg.ListProfiles()
+	if err != nil {
+		log.Printf("[seed-agent] 读取 profiles 失败: %v", err)
+		return
+	}
+	var proID, flashID int64
+	for _, p := range profs {
+		switch p.Model {
+		case "deepseek-v4-pro":
+			proID = p.ID
+		case "deepseek-v4-flash":
+			flashID = p.ID
+		}
+	}
+	if proID > 0 {
+		if err := pg.SetAgentLLMProfile("planner", proID); err != nil {
+			log.Printf("[seed-agent] planner 绑定 profile %d 失败: %v", proID, err)
+		} else {
+			log.Printf("[seed-agent] planner → profile %d (强模型 deepseek-v4-pro)", proID)
+		}
+	}
+	if flashID > 0 {
+		if err := pg.SetAgentLLMProfile("worker", flashID); err != nil {
+			log.Printf("[seed-agent] worker 绑定 profile %d 失败: %v", flashID, err)
+		} else {
+			log.Printf("[seed-agent] worker → profile %d (弱模型 deepseek-v4-flash)", flashID)
+		}
+	}
+}

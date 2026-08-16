@@ -119,6 +119,30 @@ func (d *DB) SetActiveProfile(id int64) error {
 
 // ---------- Agents / prompts ----------
 
+// GetAgentLLMProfile returns the llm_profile_id pinned to an agent key (0 = 未绑定,
+// 用任务/全局 profile).
+func (d *DB) GetAgentLLMProfile(agentKey string) (int64, error) {
+	var id int64
+	err := d.QueryRow(`SELECT COALESCE(llm_profile_id,0) FROM agent_llm_profiles WHERE agent_key=$1`, agentKey).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return id, err
+}
+
+// SetAgentLLMProfile pins (id>0) or clears (id=0) an agent's LLM profile binding.
+func (d *DB) SetAgentLLMProfile(agentKey string, profileID int64) error {
+	if profileID <= 0 {
+		_, err := d.Exec(`DELETE FROM agent_llm_profiles WHERE agent_key=$1`, agentKey)
+		return err
+	}
+	_, err := d.Exec(`
+INSERT INTO agent_llm_profiles(agent_key, llm_profile_id, updated_at) VALUES ($1,$2,now())
+ON CONFLICT (agent_key) DO UPDATE SET llm_profile_id=EXCLUDED.llm_profile_id, updated_at=now()`,
+		agentKey, profileID)
+	return err
+}
+
 type Agent struct {
 	ID               int64  `json:"id"`
 	Key              string `json:"key"`
