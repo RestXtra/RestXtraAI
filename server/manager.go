@@ -39,15 +39,17 @@ type Task struct {
 	TimeoutSeconds int                    `json:"timeout_seconds"`
 	FirstRunAt     int64                  `json:"first_run_at,omitempty"`
 	DeadlineAt     int64                  `json:"deadline_at,omitempty"`
-	Store          *pgdb.ExplorationStore `json:"-"`
-	Guard          *guard.Guard           `json:"-"`
-	notify         chan struct{}
+	// PlanHeartbeatSeconds 是 planner 心跳触发间隔(秒;0=不心跳)。db.CreateTask 归一 >=600。
+	PlanHeartbeatSeconds int                    `json:"plan_heartbeat_seconds"`
+	Store                *pgdb.ExplorationStore `json:"-"`
+	Guard                *guard.Guard           `json:"-"`
+	notify               chan struct{}
 
-	// doneIntents accumulates the ids of intents that completed since the last
-	// planning round consumed them. The debounce coalesces a burst of completions
-	// into one round, so several ids may pile up before drainDone() clears them.
-	doneMu      sync.Mutex
-	doneIntents []int64
+	// pendingTriggers accumulates the concrete changes (worker done / finding) that
+	// fired planning rounds since the last one consumed them. The debounce coalesces
+	// a burst into one round, so several may pile up before drainTriggers() clears them.
+	trigMu          sync.Mutex
+	pendingTriggers []agent.TriggerEvent
 }
 
 // Manager owns the PostgreSQL data source (asset graph + every task's exploration
@@ -461,14 +463,16 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		CompletedAt: unixOrZero(pt.CompletedAt), Status: pt.Status, ParentRef: pt.ParentRef,
 		LLMProfileID:   pt.LLMProfileID,
 		TimeoutSeconds: pt.TimeoutSeconds, FirstRunAt: unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),
-		Store: store, Guard: guard.NewWithInterceptor(ic), notify: make(chan struct{}, 1),
+		PlanHeartbeatSeconds: pt.PlanHeartbeatSeconds,
+		Store:                store, Guard: guard.NewWithInterceptor(ic), notify: make(chan struct{}, 1),
 	}
 }
 
 // CreateTask creates a task + its exploration and makes it active.
 // timeoutSeconds is the task-level wall-clock budget (0 = 不限时).
-func (m *Manager) CreateTask(description, goal string, llmProfileID *int64, timeoutSeconds int) (*Task, error) {
-	pt, err := m.pg.CreateTask(description, goal, llmProfileID, timeoutSeconds)
+// planHeartbeatSeconds is the planner periodic wake-up interval (0 = disabled).
+func (m *Manager) CreateTask(description, goal string, llmProfileID *int64, timeoutSeconds, planHeartbeatSeconds int) (*Task, error) {
+	pt, err := m.pg.CreateTask(description, goal, llmProfileID, timeoutSeconds, planHeartbeatSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -696,23 +700,35 @@ func (t *Task) Notify() {
 }
 
 // NotifyDone is Notify plus a hint: intentID just finished and is what triggered
-// this wake-up. The planner reads the accumulated ids next round so it knows
-// which intents' fresh yields to focus on. Ids pile up (debounce) until the
-// round drains them via drainDone.
+// this wake-up. The planner reads the accumulated triggers next round so it knows
+// which intents' fresh yields to focus on. Events pile up (debounce) until the
+// round drains them via drainTriggers.
 func (t *Task) NotifyDone(intentID int64) {
 	if intentID > 0 {
-		t.doneMu.Lock()
-		t.doneIntents = append(t.doneIntents, intentID)
-		t.doneMu.Unlock()
+		t.trigMu.Lock()
+		t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "done", IntentID: intentID})
+		t.trigMu.Unlock()
 	}
 	t.Notify()
 }
 
-// drainDone returns and clears the intent ids completed since the last round.
-func (t *Task) drainDone() []int64 {
-	t.doneMu.Lock()
-	defer t.doneMu.Unlock()
-	ids := t.doneIntents
-	t.doneIntents = nil
-	return ids
+// NotifyFinding is Notify plus a hint that a worker reported a finding on intent
+// intentID (summary is the finding summary) — the planner wakes mid-flight instead
+// of waiting for the worker to finish.
+func (t *Task) NotifyFinding(intentID int64, summary string) {
+	if intentID > 0 {
+		t.trigMu.Lock()
+		t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "finding", IntentID: intentID, Detail: summary})
+		t.trigMu.Unlock()
+	}
+	t.Notify()
+}
+
+// drainTriggers returns and clears the trigger events accumulated since the last round.
+func (t *Task) drainTriggers() []agent.TriggerEvent {
+	t.trigMu.Lock()
+	defer t.trigMu.Unlock()
+	ev := t.pendingTriggers
+	t.pendingTriggers = nil
+	return ev
 }

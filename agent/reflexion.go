@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"regexp"
 	"strings"
@@ -29,6 +30,7 @@ const (
 	reflexionFailThreshold   = 2 // 连败≥2 触发一次升级提示
 	reflexionNoProgressAt    = 5 // 连败≥5 记一次反思并清零（强制进入更高档）
 	reflexionMaxLevel        = 4
+	reflexionRepeatThreshold = 3 // 同一工具+同一参数连续≥3 次 → 判为原地重复调用
 )
 
 // Reflexion 是单次 worker 运行的失败升级跟踪器。
@@ -37,6 +39,10 @@ type Reflexion struct {
 	consecutiveFailures int
 	reflections         int
 	queued              []string
+	// 重复调用检测（P3.3）：记录上一把 (工具, 参数hash)，连续相同则计数。
+	lastTool     string
+	lastArgsHash string
+	repeatCount  int
 }
 
 func NewReflexion() *Reflexion { return &Reflexion{} }
@@ -44,12 +50,32 @@ func NewReflexion() *Reflexion { return &Reflexion{} }
 // hasBlockSignal 识别"被挡"的信号（WAF/403/限流等）。
 var reBlock = regexp.MustCompile(`(?i)(403|forbidden|waf|blocked|rate\s*limit|429|captcha|denied|拒绝访问|拦截)`)
 
+// argsHash 生成工具输入参数的稳定指纹（同一参数内容 → 同一 hash）。
+func argsHash(input []byte) string {
+	h := sha256.Sum256(input)
+	return fmt.Sprintf("%x", h[:8])
+}
+
 // Observe 在每次工具结果后调用：判断失败/被挡并累积，达标则入队升级提示。
+// P3.3：同时检测"同一工具+同一参数连续重复调用"，达到阈值入队停止重复提示。
 func (r *Reflexion) Observe(tool string, input, result []byte, isErr bool) {
 	text := strings.ToLower(string(result))
 	blocked := isErr || reBlock.MatchString(text)
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// —— P3.3 重复调用检测（无论成败）——
+	h := argsHash(input)
+	if r.lastTool == tool && r.lastArgsHash == h {
+		r.repeatCount++
+	} else {
+		r.lastTool = tool
+		r.lastArgsHash = h
+		r.repeatCount = 1
+	}
+	if r.repeatCount >= reflexionRepeatThreshold && len(r.queued) == 0 {
+		r.queued = []string{renderRepeatWarning(tool, r.repeatCount)}
+	}
+	// —— 失败升级（原有逻辑）——
 	if !blocked {
 		r.consecutiveFailures = 0
 		return
@@ -65,6 +91,12 @@ func (r *Reflexion) Observe(tool string, input, result []byte, isErr bool) {
 			r.queued = []string{renderEscalation(r.level(), tool, string(input))}
 		}
 	}
+}
+
+// renderRepeatWarning 生成"停止原地重复"提示（P3.3）。
+func renderRepeatWarning(tool string, n int) string {
+	return fmt.Sprintf("【重复调用提示】你已连续 %d 次以**完全相同的参数**调用工具 %s。这是原地空转、不会带来新信息。"+
+		"请立即停止重复调用：要么换不同的参数/目标/方法重试，要么调用别的工具，要么直接基于已有信息给出结论结束本意图。", n, tool)
 }
 
 func (r *Reflexion) level() int {

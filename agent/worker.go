@@ -125,6 +125,7 @@ func proxyEnv(proxyAddr, caCert string) []string {
 const workerDefaultTmpl = `你是一个授权渗透测试系统的"执行者"(work agent)。你领到【一条意图】(一句话探索方向)，唯一职责是：**完成这一条意图、把发现的事实写回知识图谱，然后停止返回。**
 
 铁律（务必遵守）：
+0. **开场不要做前置普查**。启动消息里已附【全局探索态势】和（若有）意图锚定资产——**不要为了"了解大局"先调 list_facts / list_findings / search_all_worker_traces / list_assets**，那只是浪费回合。直接执行你的意图；需要某个细节时再按需查。
 1. **只做这一条意图**。意图边界就是你的红线。指纹意图就只做指纹识别，不要顺手去枚举端点、爆破目录、扒 JS 找 API、测漏洞——那些是【别的意图】的事，由规划者去派别的 worker。
 2. **你不负责"探索方向"**。发现了值得继续追的新线索，不要自己接着打；只要把它写回图，规划者会读到、自己生成新意图。生成探索方向是规划者的职责，不是你的。
 3. **穷尽后再返回，别在第一个障碍前放弃**。判"意图达成"的标准是【你已把这条方向真正探透】：初次尝试被拦（一个 payload 被过滤、一个端点 404、一个注入点没回显）不等于此路不通——先换编码/换方法/换参数/换路径把这条意图的合理手段走完，再下结论。**但边界不变**：穷尽的只是【这一条意图内部】的手段，绝不是顺手去做别的意图（枚举别的端点、测别的漏洞）；那些仍是规划者派别的 worker 的事。真正探透了、或确认此路不通了，就立即写回并返回，别因为"任务总目标还没达成"就继续，也别为凑步数在已探尽的方向空转。
@@ -180,7 +181,28 @@ func renderIntentTask(intent *db.Node) string {
 // purpose is letting the worker read context (existing facts/assets/hints)
 // so it avoids redundant work and doesn't re-derive what others already found.
 func renderWorkerGraphOverview(data map[string]any) string {
-	b, err := json.Marshal(data)
+	// coverage 是给规划者判断「哪类测得少 / 要不要扩范围」的信号，与 worker「只做领到的
+	// 那条意图、别追未覆盖的点」的职责边界相悖 → 从 worker 视图里剔除。
+	delete(data, "coverage")
+	// P2.5 裁剪：worker 只需要"最近事实 + 计数 + 任务"，不需要完整意图血缘/资产细节。
+	// 保留的信息足够避免重复劳动、复用否定结论，但体积小很多。
+	trimmed := map[string]any{
+		"task":    data["task"],
+		"facts":   data["facts"],
+		"findings": data["findings"],
+	}
+	if rf, ok := data["recent_facts"].([]map[string]any); ok {
+		if len(rf) > 10 {
+			rf = rf[:10]
+		}
+		trimmed["recent_facts"] = rf
+	} else if rf, ok := data["recent_facts"]; ok {
+		trimmed["recent_facts"] = rf
+	}
+	if n, ok := data["frontier_open"].(int); ok {
+		trimmed["open_intents"] = n
+	}
+	b, err := json.Marshal(trimmed)
 	if err != nil {
 		return "" // fall back silently: the worker just won't have the global context
 	}
@@ -190,13 +212,32 @@ func renderWorkerGraphOverview(data map[string]any) string {
 		string(b)
 }
 
+// intentAssetIDs pulls the intent's target asset ids out of its payload
+// (planner's add_intent stores them as a numeric asset_ids array). nil on absence
+// or malformed payload.
+func intentAssetIDs(intent *db.Node) []int64 {
+	if intent == nil {
+		return nil
+	}
+	var p struct {
+		AssetIDs []int64 `json:"asset_ids"`
+	}
+	if err := json.Unmarshal(intent.Payload, &p); err != nil {
+		return nil
+	}
+	return p.AssetIDs
+}
+
 // Execute runs one intent. hooks (the per-task Guard) gates every tool call; may
 // be nil. emit, if non-nil, receives one ActivityRecord per execution step.
+// notifyFinding, if non-nil, is called (intentID, summary) when this worker writes
+// a finding (report_finding) so the task's planner wakes mid-flight — with context
+// on which intent found what — instead of waiting for the worker to finish.
 // Returns the terminal reason (so the engine can distinguish completed vs
 // max_turns) and a per-kind breakdown of what was written back (so an intent that
 // explored but persisted nothing isn't mistaken for done, and the engine can log
 // facts/assets/findings separately instead of lumping them under "facts").
-func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, intent *db.Node, hooks harness.HookRunner, emit func(db.Activity), enr EnrichTrigger) (harness.TerminalReason, WriteCounts, error) {
+func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, intent *db.Node, hooks harness.HookRunner, emit func(db.Activity), enr EnrichTrigger, notifyFinding func(int64, string)) (harness.TerminalReason, WriteCounts, error) {
 	tsx := NewToolSet(ts, name)
 	tsx.SetTaskID(taskID)
 	if as != nil {
@@ -204,6 +245,7 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 	}
 	tsx.SetOwnerNode(intent.ID) // assets this worker discovers anchor to its intent → visible to the task
 	tsx.SetEnrich(enr)          // async DNS/HTTP auto-completion for assets this worker writes
+	tsx.SetNotifyFinding(notifyFinding)
 	// base = built-in worker tools ∪ host tools (traffic) ∪ default tools (incl. Bash);
 	// then augment with the agent's visible skills/MCP. During the SDK settlement
 	// phase, Bash is hidden via Settlement.DisabledTools (no local gating needed).
@@ -212,11 +254,12 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 	tools, def, cleanup := AugmentTools(ctx, "worker", base)
 	defer cleanup()
 
-	// 意图是 worker 的全部任务，放进 system prompt（抗 compaction、整轮常驻），而不是
-	// user 输入——与 planner 把关键态势放 system 一致。落在指令之后、deferred 块之前。
-	// 全局态势(graphOverviewData)也带上，但仅供了解大局；意图放在最后、最醒目的位置。
+	// 意图 + 全局态势改放【启动 user 消息】(见下方 input)，system 只留静态角色正文
+	// (段[A]/[B]/[C] + deferred 块)。与 planner 一致：把易变的运行期数据移出 system，
+	// system 每 session 稳定、更利于缓存；代价是长 run 里这条 user 消息可能被 compaction
+	// 压缩（意图是 worker 全部职责，若被压掉由证据闸门/收尾兜底，见 2.5/2.6 说明）。
 	overview := renderWorkerGraphOverview(tsx.graphOverviewData())
-	system, boundary := deferredSystem(workerSystem(w.proxyAddr, w.workDir)+overview+renderIntentTask(intent), def)
+	system, boundary := deferredSystem(workerSystem(w.proxyAddr, w.workDir), def)
 	// 任务级 deadline(经 ctx 注入)夹逼本 run 的墙钟预算 + 决定收尾词(见 taskclock.go)。
 	tc := taskClockFrom(ctx)
 	maxDur, clamped := clampMaxDuration(tc.DeadlineUnix, w.runTimeout)
@@ -280,8 +323,25 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 			emit(r)
 		}
 	}
-	// 意图已在 system 里。user 输入只放启动指令。
-	input := "开始执行 system 提示里的这条意图：只做它、只产生事实、做完即停。"
+	// 意图 + 全局态势 + 启动指令 + 意图锚定资产的原始数据都放这条启动 user 消息里。
+	// 意图放最前、最醒目；overview 仅供了解大局。资产原始 JSON 直接附上，不做提取/格式化，
+	// 省去开场再查一次 list_assets。
+	input := renderIntentTask(intent) + overview + "\n\n开始执行上面这条意图：只做它、只产生事实、做完即停。"
+	if as != nil {
+		if ids := intentAssetIDs(intent); len(ids) > 0 {
+			if assets, err := as.GetByIDs(ids); err == nil && len(assets) > 0 {
+				if b, err := json.Marshal(assets); err == nil {
+					input += "\n\n本意图 asset_ids 对应的目标资产：\n" + string(b)
+				}
+				// 意图明确针对的这些资产 → 自动纳入任务测试范围（与 insertAssets 同一套
+				// 保守粒度）。AddAutoScope 幂等（ON CONFLICT DO NOTHING + 唯一索引），
+				// 重跑/重试同样安全。
+				for _, a := range assets {
+					_ = as.AddAutoScope(taskID, a.Type, a.Domain, a.URL, a.IP)
+				}
+			}
+		}
+	}
 
 	s := agentcore.NewSession(opts)
 	defer s.Close() // release the session's background-task manager (temp dir + processes)
@@ -302,13 +362,14 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 	}
 	finalText, reason, err := captureRunSession(runCtx, s, input, emitWrap)
 	// 证据闸门：正常完成时校验最终总结——引用的证据 id 必须真实、声称的 flag 必须
-	// 逐字出现在工具输出。不通过则把拒绝原因回注给模型修正后重答（最多 2 次）。
+	// 逐字出现在工具输出。不通过则把拒绝原因回注给模型修正后重答（P2.3：最多 1 次，
+	// 且该轮【禁止调用工具】——只核对既有证据、改写最终总结，避免整轮重跑烧 token）。
 	if ctx.Err() == nil && runCtx.Err() == nil && err == nil {
 		goal := ""
 		if g, _, rootErr := ts.Root(); rootErr == nil {
 			goal = g
 		}
-		for attempt := 0; attempt < 2; attempt++ {
+		for attempt := 0; attempt < 1; attempt++ {
 			ok, why := ev.CheckCompletion(finalText, goal)
 			if ok {
 				break
@@ -317,7 +378,7 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 				Summary: "完成闸门拒绝：" + firstLine(why, 200), Detail: why})
 			finalText, reason, err = captureRunSession(runCtx, s,
 				"完成闸门拒绝："+why+
-					"\n请核对你的结论是否真实来自本轮工具输出；若声称拿到 flag，必须逐字引用工具输出里出现的 flag。修正后给出最终总结。",
+					"\n【本修正轮禁止调用任何工具】。只对照上面已有的工具输出与证据：核对你引用的证据 id 是否真实存在、声称的 flag 是否逐字出现在工具输出里；然后直接改写你的最终总结。若证据确实不足，就如实说明哪些结论没有证据支撑，不要编造。",
 				emitWrap)
 			if err != nil {
 				break

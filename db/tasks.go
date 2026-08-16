@@ -5,6 +5,10 @@ import (
 	"time"
 )
 
+// MinPlanHeartbeatSeconds 是 planner 心跳间隔下限 = 默认 = 10min。
+// db.CreateTask 归一低于 600 一律抬到 600，防止心跳过频空转 planner。
+const MinPlanHeartbeatSeconds = 600
+
 // Task is a row in the task registry (1:1 with an exploration).
 type Task struct {
 	ID            int64      `json:"id"`
@@ -21,6 +25,10 @@ type Task struct {
 	TimeoutSeconds int        `json:"timeout_seconds"`        // 0=不限时
 	FirstRunAt     *time.Time `json:"first_run_at,omitempty"` // 首次真正开始运行的时刻(非 created_at);nil=尚未运行
 	DeadlineAt     *time.Time `json:"deadline_at,omitempty"`  // = first_run_at + timeout_seconds;nil=不限或未运行
+	// PlannerHeartbeatSeconds is the planner's periodic wake-up interval (心跳触发,
+	// 0 = disabled). While workers run, the planner wakes on this timer to re-inspect
+	// running intents (steer/kill) and decide whether new directions opened up.
+	PlanHeartbeatSeconds int `json:"plan_heartbeat_seconds"`
 }
 
 // IsTerminal reports whether a task status is a terminal (finished) state.
@@ -32,7 +40,8 @@ func IsTerminal(status string) bool {
 // CreateTask creates an exploration + task in one transaction and returns the task.
 // timeoutSeconds is the task-level wall-clock budget (0 = 不限时); deadline_at is
 // stamped later at first real run (see engine), not here.
-func (d *DB) CreateTask(description, goal string, llmProfileID *int64, timeoutSeconds int) (*Task, error) {
+// planHeartbeatSeconds is the planner periodic wake-up interval (0 = disabled).
+func (d *DB) CreateTask(description, goal string, llmProfileID *int64, timeoutSeconds, planHeartbeatSeconds int) (*Task, error) {
 	tx, err := d.Begin()
 	if err != nil {
 		return nil, err
@@ -60,20 +69,23 @@ VALUES ($1, 'fact', $2, 0, 'origin', 'system')`, expID, string(originPayload)); 
 	if timeoutSeconds < 0 {
 		timeoutSeconds = 0
 	}
-	t := &Task{Description: description, Goal: goal, ExplorationID: expID, LLMProfileID: llmProfileID, TimeoutSeconds: timeoutSeconds}
+	if planHeartbeatSeconds < 0 {
+		planHeartbeatSeconds = 0
+	}
+	t := &Task{Description: description, Goal: goal, ExplorationID: expID, LLMProfileID: llmProfileID, TimeoutSeconds: timeoutSeconds, PlanHeartbeatSeconds: planHeartbeatSeconds}
 	if err := tx.QueryRow(`
-INSERT INTO tasks(description, goal, exploration_id, llm_profile_id, timeout_seconds) VALUES ($1,$2,$3,$4,$5)
-RETURNING id, status, paused, created_at`, description, goal, expID, llmProfileID, timeoutSeconds).Scan(&t.ID, &t.Status, &t.Paused, &t.CreatedAt); err != nil {
+INSERT INTO tasks(description, goal, exploration_id, llm_profile_id, timeout_seconds, plan_heartbeat_seconds) VALUES ($1,$2,$3,$4,$5,$6)
+RETURNING id, status, paused, created_at`, description, goal, expID, llmProfileID, timeoutSeconds, planHeartbeatSeconds).Scan(&t.ID, &t.Status, &t.Paused, &t.CreatedAt); err != nil {
 		return nil, err
 	}
 	return t, tx.Commit()
 }
 
-const taskCols = `id, description, goal, exploration_id, status, paused, llm_profile_id, COALESCE(parent_ref,''), created_at, completed_at, COALESCE(timeout_seconds,0), first_run_at, deadline_at`
+const taskCols = `id, description, goal, exploration_id, status, paused, llm_profile_id, COALESCE(parent_ref,''), created_at, completed_at, COALESCE(timeout_seconds,0), first_run_at, deadline_at, COALESCE(plan_heartbeat_seconds,0)`
 
 func scanTask(sc interface{ Scan(...any) error }) (*Task, error) {
 	var t Task
-	if err := sc.Scan(&t.ID, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.LLMProfileID, &t.ParentRef, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.FirstRunAt, &t.DeadlineAt); err != nil {
+	if err := sc.Scan(&t.ID, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.LLMProfileID, &t.ParentRef, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.FirstRunAt, &t.DeadlineAt, &t.PlanHeartbeatSeconds); err != nil {
 		return nil, err
 	}
 	return &t, nil

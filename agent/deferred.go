@@ -13,12 +13,15 @@ import (
 // placed as the LAST system-prompt segment, with DynamicBoundary set so the whole
 // (session-fixed) system prompt — including the block — is cached (design doc
 // §2.1 / C1). Skill-gated MCP names are NOT in this block; they surface when their
-// skill loads. Returns a single plain segment + boundary 0 when there is no global
-// block to add.
+// skill loads.
+//
+// P2.1: 即使没有 deferred 块，也返回 boundary=1 —— 让纯静态的 system prompt 始终被
+// 作为单个 cache_control 块缓存（norma 对 boundary>=len 缓存整段；P1.1 已把动态内容
+// 移出 system，所以这里的 sysText 是静态的，跨唤醒/跨 intent 可命中 Anthropic 前缀缓存）。
 func deferredSystem(sysText string, def DeferredInfo) (system []string, boundary int) {
 	block := actool.RenderDeferredToolsBlock(def.GlobalNames)
 	if block == "" {
-		return []string{sysText}, 0
+		return []string{sysText}, 1 // 缓存单段静态 system（P2.1）
 	}
 	system = []string{sysText, block}
 	boundary = len(system) // b >= len → whole system prompt cached (SDK guard)

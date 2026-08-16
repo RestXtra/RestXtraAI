@@ -75,7 +75,7 @@ func (s *Server) executeBatchTask(t *db.BatchTask) {
 		if desc == "" {
 			desc = t.Title
 		}
-		if _, err := s.m.CreateTask(desc, payload.Goal, nil, 0); err != nil {
+		if _, err := s.m.CreateTask(desc, payload.Goal, nil, 0, 0); err != nil {
 			_ = s.m.pg.FinishBatchTask(t.ID, "failed", err.Error())
 			return
 		}

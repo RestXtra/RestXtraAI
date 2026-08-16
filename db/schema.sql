@@ -766,3 +766,47 @@ CREATE TABLE IF NOT EXISTS c2_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_c2_sessions_sid ON c2_sessions(session_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_c2_sessions_sid ON c2_sessions(session_id);
+
+-- =====================================================================
+-- T. 优化项 P1.2：planner 心跳触发间隔（任务级，秒；0=不心跳）
+-- =====================================================================
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS plan_heartbeat_seconds INTEGER NOT NULL DEFAULT 600;
+
+-- =====================================================================
+-- U. 优化项 P1.4：agent 级 LLM profile 绑定（agent_key -> llm_profile_id）
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS agent_llm_profiles (
+    agent_key      TEXT PRIMARY KEY,
+    llm_profile_id BIGINT REFERENCES llm_profiles(id) ON DELETE SET NULL,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- =====================================================================
+-- V. 优化项 P2.6：探索图版本计数（graph_overview 缓存失效依据）
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS exploration_versions (
+    task_id    BIGINT PRIMARY KEY REFERENCES explorations(id) ON DELETE CASCADE,
+    version    BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- =====================================================================
+-- W. 优化项 P1.3：任务级授权范围（source='auto' 由意图锚定资产自动登记）
+-- 匹配语义 = 命中 active 中的资产；后续 guard/egress 可按此做 scope 校验。
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS task_scope (
+    id          BIGSERIAL PRIMARY KEY,
+    task_id     BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL CHECK (kind IN ('company','root_domain','subdomain','ip','cidr')),
+    company_id  BIGINT REFERENCES companies(id) ON DELETE CASCADE,  -- kind='company'
+    domain      TEXT,          -- root_domain / subdomain
+    net         CIDR,          -- ip / cidr
+    source      TEXT NOT NULL DEFAULT 'auto' CHECK (source IN ('auto','agent','manual')),
+    reason      TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_task_scope ON task_scope(
+    task_id, kind, COALESCE(domain,''), COALESCE(net::text,''), COALESCE(company_id,0));
+CREATE INDEX IF NOT EXISTS idx_ts_domain  ON task_scope(domain) WHERE kind IN ('root_domain','subdomain');
+CREATE INDEX IF NOT EXISTS idx_ts_net     ON task_scope USING GIST(net inet_ops) WHERE kind IN ('ip','cidr');
+CREATE INDEX IF NOT EXISTS idx_ts_company ON task_scope(company_id) WHERE kind = 'company';

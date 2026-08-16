@@ -74,11 +74,18 @@ type ToolSet struct {
 	// re-planned promptly (currently: a new hint). nil = no wake (the hint is still
 	// stored and read on the next round triggered by other events). debounced.
 	notify func()
+	// notifyFinding, if set, wakes the task's planner when this run reports a
+	// finding (intentID, finding summary) so planning happens mid-flight instead of
+	// waiting for the worker to finish. nil = no wake (finding still lands in the graph).
+	notifyFinding func(intentID int64, summary string)
 }
 
 // SetNotify wires the planner-wake callback (see ToolSet.notify). Set by callers
 // that hold the task handle (main-agent chat, cross-task orchestration).
 func (t *ToolSet) SetNotify(fn func()) { t.notify = fn }
+
+// SetNotifyFinding wires the finding-wake callback (see ToolSet.notifyFinding).
+func (t *ToolSet) SetNotifyFinding(fn func(int64, string)) { t.notifyFinding = fn }
 
 // EnrichTrigger is the enrichment engine seen from the tool layer (see package
 // enrich). Kept as an interface here to avoid coupling agent → enrich.
@@ -253,7 +260,17 @@ func (t *ToolSet) graphOverview() actool.CoreTool {
 // graph_overview tool and the planner's wake-up prompt (which pre-injects it so
 // the model needn't spend a turn calling the tool — every plan round starts with
 // an empty context and always needs this first).
+// P2.6：结果按(exploration, 图版本)缓存；同一 burst 内多次唤醒（planner 首轮 + worker
+// 态势）复用一次计算，避免重复全量查询。写入图(BumpVersion)后自动失效。
 func (t *ToolSet) graphOverviewData() map[string]any {
+	if t.ts != nil {
+		if b, ok := t.ts.CachedOverview(); ok {
+			var m map[string]any
+			if json.Unmarshal(b, &m) == nil {
+				return m
+			}
+		}
+	}
 	{
 		out := map[string]any{}
 		if t.ts == nil {
@@ -346,6 +363,7 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 		if description, goal, err := t.ts.Root(); err == nil {
 			out["task"] = map[string]any{"description": description, "goal": goal}
 		}
+		t.ts.CacheOverview(out) // P2.6: 缓存当前版本快照（BumpVersion 后失效）
 		return out
 	}
 }
@@ -636,6 +654,10 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 				}
 				if intent := pid(a.IntentID); intent > 0 {
 					_ = t.ts.Link(intent, db.RelYields, id) // chain: intent -> finding
+					// 当场唤醒 planner：带上「哪个意图 + finding 摘要」，不必等 worker 结束。
+					if t.notifyFinding != nil {
+						t.notifyFinding(intent, a.Summary)
+					}
 				}
 				_, _ = t.ts.AddStandaloneFinding(t.taskID, id, a.VulnClass, a.Severity, a.Summary, a.Evidence, t.worker, anchors)
 			} else {

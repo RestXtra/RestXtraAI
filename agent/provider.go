@@ -87,11 +87,17 @@ func (c Config) CompactionWindow() int {
 // compactionConfig builds the agent-core compaction config for a context window
 // in tokens. agentcore.NewSession wires the summarizer (same provider) when this
 // is set on Options.Compaction.
+// P2.4：CountTokens 用精确 tokenizer（Anthropic cl100k 风格），避免估算导致的
+// 误触发/漏触发；ToolResultBudget 收紧到 500 清更多陈旧大工具结果，KeepRecent=8 保轨迹。
 func compactionConfig(windowTokens int) *compaction.Config {
 	if windowTokens <= 0 {
 		windowTokens = defaultWindowK * 1000
 	}
-	return &compaction.Config{ContextWindow: windowTokens}
+	return &compaction.Config{
+		ContextWindow:    windowTokens,
+		CountTokens:      llm.NewAnthropicTokenCounter(llm.Config{Model: "claude-3-5-sonnet-20241022"}),
+		ToolResultBudget: 500,
+	}
 }
 
 // FromEnv resolves the LLM provider config:

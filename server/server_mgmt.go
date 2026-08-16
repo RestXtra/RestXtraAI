@@ -503,6 +503,47 @@ func (s *Server) pgGetAgentVisibility(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"mcp": mcp, "skill": sk})
 }
 
+// pgGetAgentLLMProfile returns the LLM profile pinned to an agent key (0 = 未绑定,
+// 用任务/全局 profile)。P1.4 强/弱模型路由。
+func (s *Server) pgGetAgentLLMProfile(w http.ResponseWriter, r *http.Request) {
+	_, _, ok := s.agentByKey(w, r)
+	if !ok {
+		return
+	}
+	key := r.PathValue("key")
+	pid, _ := s.m.pg.GetAgentLLMProfile(key)
+	writeJSON(w, 200, map[string]any{"llm_profile_id": pid})
+}
+
+// pgSetAgentLLMProfile pins (id>0) or clears (id=0) an agent's LLM profile binding.
+func (s *Server) pgSetAgentLLMProfile(w http.ResponseWriter, r *http.Request) {
+	_, _, ok := s.agentByKey(w, r)
+	if !ok {
+		return
+	}
+	key := r.PathValue("key")
+	var body struct {
+		LLMProfileID int64 `json:"llm_profile_id"`
+	}
+	if err := decode(r, &body); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if body.LLMProfileID > 0 {
+		if _, ok := s.loadProfileConfig(body.LLMProfileID); !ok {
+			writeErr(w, 400, "所选 LLM 配置不存在或未设置 API Key")
+			return
+		}
+	}
+	if err := s.m.pg.SetAgentLLMProfile(key, body.LLMProfileID); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	s.invalidateProfileAgents() // 绑定变化 → 重建该 profile 的 planner/worker 缓存
+	log.Printf("[engine] agent %s 绑定 LLM profile %d", key, body.LLMProfileID)
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
 func (s *Server) pgSetAgentVisibility(w http.ResponseWriter, r *http.Request) {
 	pg, a, ok := s.agentByKey(w, r)
 	if !ok {

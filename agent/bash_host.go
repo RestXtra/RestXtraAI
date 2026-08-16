@@ -80,6 +80,10 @@ var hostDestructive = []*regexp.Regexp{
 	regexp.MustCompile(`(?i):\(\)\s*\{\s*:\|:\s*&\s*\};:`), // fork bomb
 }
 
+// HostBashTimeout 是宿主 Bash 工具的默认单条命令墙钟超时（P3.5 子集：防单条挂死命令
+// 占满整个 worker 回合）。命令可用 timeout_ms 参数按次覆盖。0 = 不设超时。
+var HostBashTimeout = 120 * time.Second
+
 // HostBash 构建一个在宿主 Linux bash（Windows=WSL）执行的 Bash 工具。
 func HostBash() actool.CoreTool {
 	return actool.Build(actool.Spec{
@@ -111,7 +115,7 @@ func HostBash() actool.CoreTool {
 			if err := json.Unmarshal(in, &a); err != nil {
 				return actool.Errorf("参数解析失败: " + err.Error()), nil
 			}
-			timeout := 120 * time.Second
+			timeout := HostBashTimeout
 			var to struct {
 				TimeoutMs int64 `json:"timeout_ms"`
 			}
@@ -125,7 +129,13 @@ func HostBash() actool.CoreTool {
 			if useWSL && tc != nil && tc.WorkingDir != "" {
 				cmdLine = "cd " + winToWslPath(tc.WorkingDir) + " && " + cmdLine
 			}
-			cctx, cancel := context.WithTimeout(ctx, timeout)
+			var cctx context.Context
+			var cancel context.CancelFunc
+			if timeout > 0 {
+				cctx, cancel = context.WithTimeout(ctx, timeout)
+			} else {
+				cctx, cancel = context.WithCancel(ctx)
+			}
 			defer cancel()
 			cmd := exec.CommandContext(cctx, shell, append(flags, cmdLine)...)
 			if tc != nil {

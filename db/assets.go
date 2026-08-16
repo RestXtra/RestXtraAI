@@ -1101,3 +1101,89 @@ func scanAssets(rows *sql.Rows) ([]*Asset, error) {
 	}
 	return out, rows.Err()
 }
+
+// =====================================================================
+// 任务级授权范围（task_scope）— P1.3
+// 意图锚定资产自动登记为任务 scope（source='auto'），供后续 guard/egress 校验。
+// =====================================================================
+
+// TaskScope is one row of a task's authorized scope.
+type TaskScope struct {
+	ID        int64  `json:"id"`
+	TaskID    int64  `json:"task_id"`
+	Kind      string `json:"kind"`
+	CompanyID *int64 `json:"company_id,omitempty"`
+	Domain    string `json:"domain,omitempty"`
+	Net       string `json:"net,omitempty"`
+	Source    string `json:"source"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+func (s *AssetStore) upsertTaskScope(ts TaskScope) error {
+	if ts.Source == "" {
+		ts.Source = "auto"
+	}
+	_, err := s.db.Exec(`
+INSERT INTO task_scope(task_id, kind, company_id, domain, net, source, reason)
+VALUES ($1,$2,$3,NULLIF($4,''),NULLIF($5::text,'')::cidr,$6,$7)
+ON CONFLICT (task_id, kind, COALESCE(domain,''), COALESCE(net::text,''), COALESCE(company_id,0)) DO NOTHING`,
+		ts.TaskID, ts.Kind, ts.CompanyID, ts.Domain, ts.Net, ts.Source, ts.Reason)
+	return err
+}
+
+// AddAutoScope records a task's authorized scope derived from an asset the task's
+// intent targets (source='auto'). Best-effort and idempotent: scope violations are
+// not enforced here, only bookkeeping for later guard/egress checks.
+func (s *AssetStore) AddAutoScope(taskID int64, assetType, domain, rawURL, ip string) error {
+	if taskID <= 0 {
+		return nil
+	}
+	host := strings.TrimSpace(domain)
+	if host == "" && rawURL != "" {
+		host, _, _ = parseURL(normalizeURL(rawURL))
+	}
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	switch assetType {
+	case "root_domain":
+		if host != "" && net.ParseIP(host) == nil {
+			return s.upsertTaskScope(TaskScope{TaskID: taskID, Kind: "root_domain", Domain: host})
+		}
+	case "subdomain":
+		if host != "" && net.ParseIP(host) == nil {
+			return s.upsertTaskScope(TaskScope{TaskID: taskID, Kind: "subdomain", Domain: host})
+		}
+	case "service", "endpoint":
+		if host != "" && net.ParseIP(host) == nil {
+			return s.upsertTaskScope(TaskScope{TaskID: taskID, Kind: "subdomain", Domain: host})
+		}
+		if c := ipCIDR(ip); c != "" {
+			return s.upsertTaskScope(TaskScope{TaskID: taskID, Kind: "ip", Net: c})
+		}
+	case "ip":
+		if c := ipCIDR(ip); c != "" {
+			return s.upsertTaskScope(TaskScope{TaskID: taskID, Kind: "ip", Net: c})
+		}
+	}
+	return nil
+}
+
+// ipCIDR normalizes a bare IP to a /32 (v4) or /128 (v6) CIDR string; "" if invalid.
+func ipCIDR(ip string) string {
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		return ""
+	}
+	if strings.Contains(ip, "/") {
+		if _, _, err := net.ParseCIDR(ip); err == nil {
+			return ip
+		}
+		return ""
+	}
+	if p := net.ParseIP(ip); p != nil {
+		if p.To4() != nil {
+			return p.String() + "/32"
+		}
+		return p.String() + "/128"
+	}
+	return ""
+}
