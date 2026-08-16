@@ -208,7 +208,7 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 	// then augment with the agent's visible skills/MCP. During the SDK settlement
 	// phase, Bash is hidden via Settlement.DisabledTools (no local gating needed).
 	base := append(tsx.WorkerTools(), w.extraTools...)
-	base = append(base, actool.DefaultTools()...)
+	base = append(base, withHostBash(actool.DefaultTools())...)
 	tools, def, cleanup := AugmentTools(ctx, "worker", base)
 	defer cleanup()
 
@@ -261,9 +261,11 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 		Compaction:    compactionConfig(w.window), // long tool-heavy runs stay within the window
 		Todos:         actool.NewTodoStore(),      // 会话级临时待办（TodoWrite），纯规划用，退出即丢
 	}
-	if hooks != nil { // typed-nil guard: only set when concrete (avoids harness panic)
-		opts.Hooks = hooks
-	}
+	// 证据闸门（反幻觉）：记录本轮所有工具输出，完成时校验最终总结。
+	// Reflexion（失败升级）：工具被拦/连败时，注入 L0-L4 绕过提示。
+	ev := NewEvidenceStore()
+	rx := NewReflexion()
+	opts.Hooks = reflexionHooks{inner: evidenceHooks{inner: hooks, ev: ev}, rx: rx}
 	if w.mem != nil {
 		opts.Memory = &agentcore.MemoryOptions{Store: w.mem, AutoInject: true, MaxInject: 3}
 	}
@@ -298,6 +300,29 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 		runCtx, runCancel = context.WithTimeout(ctx, maxDur+settleHardGrace)
 		defer runCancel()
 	}
-	_, reason, err := captureRunSession(runCtx, s, input, emitWrap)
+	finalText, reason, err := captureRunSession(runCtx, s, input, emitWrap)
+	// 证据闸门：正常完成时校验最终总结——引用的证据 id 必须真实、声称的 flag 必须
+	// 逐字出现在工具输出。不通过则把拒绝原因回注给模型修正后重答（最多 2 次）。
+	if ctx.Err() == nil && runCtx.Err() == nil && err == nil {
+		goal := ""
+		if g, _, rootErr := ts.Root(); rootErr == nil {
+			goal = g
+		}
+		for attempt := 0; attempt < 2; attempt++ {
+			ok, why := ev.CheckCompletion(finalText, goal)
+			if ok {
+				break
+			}
+			emitWrap(db.Activity{Kind: "text", IsError: true,
+				Summary: "完成闸门拒绝：" + firstLine(why, 200), Detail: why})
+			finalText, reason, err = captureRunSession(runCtx, s,
+				"完成闸门拒绝："+why+
+					"\n请核对你的结论是否真实来自本轮工具输出；若声称拿到 flag，必须逐字引用工具输出里出现的 flag。修正后给出最终总结。",
+				emitWrap)
+			if err != nil {
+				break
+			}
+		}
+	}
 	return reason, tsx.Writes(), err
 }

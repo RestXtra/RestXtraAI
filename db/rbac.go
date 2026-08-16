@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// Platform RBAC (users / roles / permissions), ported from Pentest-RestXtra
-// and adapted to PostgreSQL + the ARTEX *DB store. A user resolves to a set of
+// Platform RBAC (users / roles / permissions), built into RestXtra
+// and adapted to PostgreSQL + the RestXtra *DB store. A user resolves to a set of
 // permissions through role_permissions × user_roles; the built-in "admin" role
 // bypasses the catalog (everything is allowed).
 

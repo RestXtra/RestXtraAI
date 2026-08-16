@@ -63,7 +63,6 @@ jobs:
         run: |
           NAME="restxtra-ai-${GITHUB_REF_NAME}-${{ matrix.goos }}-${{ matrix.goarch }}"
           mkdir -p "$NAME"
-          cp -r skills "$NAME"/
           cp config.example.json "$NAME"/
           if [ "${{ matrix.goos }}" = "windows" ]; then cp restxtra.exe "$NAME"/; else cp restxtra "$NAME"/; fi
           zip -r "$NAME.zip" "$NAME"

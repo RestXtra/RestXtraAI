@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   PlusIcon,
@@ -10,6 +11,8 @@ import {
   StarIcon,
   SearchIcon,
   XIcon,
+  WorkflowIcon,
+  PanelsTopLeftIcon,
 } from "lucide-react";
 
 import { StatusBadge } from "@/components/status-badge";
@@ -17,6 +20,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
@@ -45,7 +50,8 @@ import {
 } from "@/components/ui/select";
 import { TablePagination } from "@/components/table-pagination";
 import { api } from "@/lib/api";
-import type { Task, TaskStatus, LLMProfile } from "@/lib/types";
+import { clearWorkflowDraft, draftToWorkflow, loadWorkflowDraft } from "@/lib/workflow-draft";
+import type { Task, TaskStatus, LLMProfile, TaskWorkflow } from "@/lib/types";
 
 // ACTIVE_PROFILE is the sentinel Select value for "use the global active profile".
 const ACTIVE_PROFILE = "__active__";
@@ -104,12 +110,18 @@ const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
 ];
 
 export default function TasksPage() {
+  const router = useRouter();
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [description, setDescription] = React.useState("");
   const [goal, setGoal] = React.useState("");
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [llmProfile, setLlmProfile] = React.useState<string>(ACTIVE_PROFILE); // sentinel = active
   const [timeoutMin, setTimeoutMin] = React.useState(""); // 任务级超时(分钟);空/0 = 不限时
+  const [wfEnabled, setWfEnabled] = React.useState(false); // 是否编写工作流(初始探索方向 + 提示)
+  const [wfSteps, setWfSteps] = React.useState<{ summary: string }[]>([]);
+  const [wfHints, setWfHints] = React.useState<string[]>([]);
+  const [wfDraft, setWfDraft] = React.useState<TaskWorkflow | null>(null); // 画板草稿（优先级更高）
+  const [wfDraftLoaded, setWfDraftLoaded] = React.useState(false);
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState<TaskStatus | "all">("all");
@@ -157,6 +169,28 @@ export default function TasksPage() {
     api.llmProfiles().then(setProfiles).catch(() => setProfiles([]));
   }, []);
 
+  // 从画板草稿(localStorage)载入工作流（步骤带优先级，优先于内联编辑）。
+  const reloadDraft = React.useCallback(() => {
+    const d = loadWorkflowDraft();
+    if (d) {
+      const wf = draftToWorkflow(d);
+      setWfDraft(wf);
+      setWfDraftLoaded(wf.steps.length > 0 || wf.hints.length > 0);
+    } else {
+      setWfDraft(null);
+      setWfDraftLoaded(false);
+    }
+  }, []);
+  // 页面回到前台（从画板返回）时重新载入草稿。
+  React.useEffect(() => {
+    reloadDraft();
+    const onVis = () => {
+      if (document.visibilityState === "visible") reloadDraft();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [reloadDraft]);
+
   // tick every second so running tasks' 运行时长 counts up live.
   React.useEffect(() => {
     const i = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000);
@@ -168,15 +202,33 @@ export default function TasksPage() {
       toast.error("请填写描述与目标");
       return;
     }
+    // 组装可选工作流：优先用画板草稿，否则用内联编辑（预填初始探索方向 + 提示）。
+    let workflow: TaskWorkflow | undefined;
+    if (wfEnabled) {
+      if (wfDraft && (wfDraft.steps?.length || wfDraft.hints?.length)) {
+        workflow = wfDraft;
+      } else {
+        const steps = wfSteps.map((s) => ({ summary: s.summary.trim() })).filter((s) => s.summary);
+        const hints = wfHints.map((h) => h.trim()).filter(Boolean);
+        if (steps.length || hints.length) {
+          workflow = { steps, hints };
+        }
+      }
+    }
     try {
       const pid = llmProfile === ACTIVE_PROFILE ? undefined : Number(llmProfile);
       const timeoutSec = Math.max(0, Math.floor(Number(timeoutMin) || 0)) * 60;
-      await api.createTask(description.trim(), goal.trim(), pid, timeoutSec);
-      toast.success("任务已创建");
+      await api.createTask(description.trim(), goal.trim(), pid, timeoutSec, workflow);
+      toast.success(workflow ? "任务已创建（含工作流）" : "任务已创建");
       setDescription("");
       setGoal("");
       setLlmProfile(ACTIVE_PROFILE);
       setTimeoutMin("");
+      setWfEnabled(false);
+      setWfSteps([]);
+      setWfHints([]);
+      setWfDraft(null);
+      setWfDraftLoaded(false);
       setOpen(false);
       load();
     } catch (e) {
@@ -239,14 +291,14 @@ export default function TasksPage() {
                 <PlusIcon /> 新建任务
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-lg">
+            <DialogContent className="sm:max-w-xl">
               <DialogHeader>
                 <DialogTitle>新建任务</DialogTitle>
                 <DialogDescription>
                   填写测试对象与目标。
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid gap-4 py-2">
+              <div className="max-h-[70vh] grid gap-4 overflow-y-auto py-2 pr-1">
                 <div className="grid gap-2">
                   <Label htmlFor="description">描述</Label>
                   <Textarea
@@ -299,6 +351,124 @@ export default function TasksPage() {
                   <p className="text-muted-foreground text-xs">
                     到点后触发优雅收尾（各 agent 写回 + planner 终局判定），任务进入 timeout 终态。
                   </p>
+                </div>
+
+                <div className="grid gap-3 rounded-lg border p-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="grid gap-0.5">
+                      <Label className="flex items-center gap-1.5 text-sm">
+                        <WorkflowIcon className="size-4 text-muted-foreground" />
+                        编写工作流（可选）
+                      </Label>
+                      <p className="text-muted-foreground text-xs">
+                        预填初始探索方向与战略提示，引擎启动后按顺序领取执行；留空则完全由 AI 自主规划。
+                      </p>
+                    </div>
+                    <Switch
+                      checked={wfEnabled}
+                      onCheckedChange={(v) => {
+                        setWfEnabled(v);
+                        if (v) reloadDraft();
+                      }}
+                    />
+                  </div>
+                  {wfEnabled && (
+                    <div className="grid gap-3 pt-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button size="sm" variant="outline" onClick={() => router.push("/workflow-builder")}>
+                          <PanelsTopLeftIcon /> {wfDraftLoaded ? "重新打开画板" : "打开画板构建"}
+                        </Button>
+                        {wfDraftLoaded && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              clearWorkflowDraft();
+                              reloadDraft();
+                            }}
+                          >
+                            清空画板
+                          </Button>
+                        )}
+                      </div>
+                      {wfDraftLoaded && (
+                        <p className="text-emerald-600 text-xs">
+                          已载入画板工作流：{wfDraft?.steps?.length ?? 0} 步 · {wfDraft?.hints?.length ?? 0} 条提示（创建时优先使用）
+                        </p>
+                      )}
+                      <div className="grid gap-2">
+                        <Label className="text-xs text-muted-foreground">探索步骤（按顺序执行）</Label>
+                        {wfSteps.length === 0 && (
+                          <p className="text-muted-foreground/70 text-xs">还没有步骤，添加第一步开始。</p>
+                        )}
+                        {wfSteps.map((s, i) => (
+                          <div key={i} className="flex items-start gap-2">
+                            <span className="text-muted-foreground mt-2.5 w-4 font-mono text-xs">{i + 1}.</span>
+                            <Textarea
+                              rows={2}
+                              className="min-h-0"
+                              placeholder="例如：对目标做 Web 指纹识别与端口扫描"
+                              value={s.summary}
+                              onChange={(e) => {
+                                const next = [...wfSteps];
+                                next[i] = { summary: e.target.value };
+                                setWfSteps(next);
+                              }}
+                            />
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              aria-label="删除步骤"
+                              onClick={() => setWfSteps(wfSteps.filter((_, j) => j !== i))}
+                            >
+                              <Trash2Icon className="text-destructive" />
+                            </Button>
+                          </div>
+                        ))}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="justify-self-start"
+                          onClick={() => setWfSteps([...wfSteps, { summary: "" }])}
+                        >
+                          <PlusIcon /> 添加步骤
+                        </Button>
+                      </div>
+                      <Separator />
+                      <div className="grid gap-2">
+                        <Label className="text-xs text-muted-foreground">战略提示（供 planner 首轮读取）</Label>
+                        {wfHints.map((h, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <Input
+                              placeholder="例如：优先测试登录接口的弱口令"
+                              value={h}
+                              onChange={(e) => {
+                                const next = [...wfHints];
+                                next[i] = e.target.value;
+                                setWfHints(next);
+                              }}
+                            />
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              aria-label="删除提示"
+                              onClick={() => setWfHints(wfHints.filter((_, j) => j !== i))}
+                            >
+                              <Trash2Icon className="text-destructive" />
+                            </Button>
+                          </div>
+                        ))}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="justify-self-start"
+                          onClick={() => setWfHints([...wfHints, ""])}
+                        >
+                          <PlusIcon /> 添加提示
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               <DialogFooter>

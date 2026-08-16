@@ -1,5 +1,5 @@
 // Package agent wires real LLM-driven planner and work agents (on top of the
-// agent-core SDK) to the dual SQLite graph. See docs/ARTEX-架构设计.md
+// agent-core SDK) to the dual SQLite graph. See docs/架构设计.md
 // §4.3 (planner) and §4.4 (work agent).
 //
 // Provider configuration is read from the environment so the system runs with
@@ -9,6 +9,9 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -17,6 +20,16 @@ import (
 	"github.com/Autumn-27/norma/compaction"
 	"github.com/Autumn-27/norma/llm"
 	acperm "github.com/Autumn-27/norma/permission"
+)
+
+// Auth header selection for the Anthropic format. The SDK sends x-api-key by
+// default; some Anthropic-compatible relay gateways (OpenCode GO, …) authenticate
+// via Authorization: Bearer instead — cc-switch calls that credential
+// "ANTHROPIC_AUTH_TOKEN". Values map to llm_profiles.auth_mode.
+const (
+	AuthModeDefault = ""        // 默认：anthropic→x-api-key，openai→Bearer（SDK 原生行为）
+	AuthModeXAPIKey = "x-api-key"
+	AuthModeBearer  = "bearer" // Authorization: Bearer <key>
 )
 
 // Config describes the LLM backend resolved from the environment.
@@ -39,6 +52,10 @@ type Config struct {
 	// "off" = 关闭(thinking.type=disabled); "low"/"medium"/"high"/"max" = 开启并设强度.
 	// NewProvider derives the provider-specific request fields from it.
 	ReasoningEffort string
+	// AuthMode selects the credential header for the Anthropic format: "" 或
+	// "x-api-key" = SDK 默认 x-api-key；"bearer" = Authorization: Bearer（兼容
+	// ANTHROPIC_AUTH_TOKEN 类网关）。OpenAI 格式恒为 Bearer，本字段对它是 no-op。
+	AuthMode string
 }
 
 // compaction window resolution bounds (in K tokens). Below the floor the
@@ -79,10 +96,10 @@ func compactionConfig(windowTokens int) *compaction.Config {
 
 // FromEnv resolves the LLM provider config:
 //
-//	RESTXTRA_LLM_PROVIDER (legacy ARTEX_LLM_PROVIDER) = anthropic|openai (default: inferred from keys)
-//	RESTXTRA_LLM_MODEL    (legacy ARTEX_LLM_MODEL)    = model id        (default: per provider)
-//	RESTXTRA_LLM_BASE_URL (legacy ARTEX_LLM_BASE_URL) = endpoint        (optional)
-//	RESTXTRA_LLM_PROXY    (legacy ARTEX_LLM_PROXY)    = proxy URL        (optional; http/https/socks5)
+//	RESTXTRA_LLM_PROVIDER = anthropic|openai (default: inferred from keys)
+//	RESTXTRA_LLM_MODEL    = model id        (default: per provider)
+//	RESTXTRA_LLM_BASE_URL = endpoint        (optional)
+//	RESTXTRA_LLM_PROXY    = proxy URL        (optional; http/https/socks5)
 //	ANTHROPIC_API_KEY / OPENAI_API_KEY         = credentials
 func FromEnv() (Config, bool) {
 	env := func(names ...string) string {
@@ -93,7 +110,7 @@ func FromEnv() (Config, bool) {
 		}
 		return ""
 	}
-	prov := env("RESTXTRA_LLM_PROVIDER", "ARTEX_LLM_PROVIDER")
+	prov := env("RESTXTRA_LLM_PROVIDER")
 	anthKey := os.Getenv("ANTHROPIC_API_KEY")
 	oaiKey := os.Getenv("OPENAI_API_KEY")
 
@@ -109,9 +126,9 @@ func FromEnv() (Config, bool) {
 	}
 
 	c := Config{
-		BaseURL: env("RESTXTRA_LLM_BASE_URL", "ARTEX_LLM_BASE_URL"),
-		Model:   env("RESTXTRA_LLM_MODEL", "ARTEX_LLM_MODEL"),
-		Proxy:   strings.TrimSpace(env("RESTXTRA_LLM_PROXY", "ARTEX_LLM_PROXY")),
+		BaseURL: env("RESTXTRA_LLM_BASE_URL"),
+		Model:   env("RESTXTRA_LLM_MODEL"),
+		Proxy:   strings.TrimSpace(env("RESTXTRA_LLM_PROXY")),
 	}
 	switch prov {
 	case "openai":
@@ -196,8 +213,46 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	if c.RatePerSecond > 0 || c.RatePerMinute > 0 {
 		lc.RateLimit = &llm.RateLimit{PerSecond: c.RatePerSecond, PerMinute: c.RatePerMinute}
 	}
+	// Anthropic 格式 + bearer 认证：注入一个把 x-api-key 换成 Authorization: Bearer 的
+	// transport（SDK 硬编码 x-api-key，在 RoundTrip 层改写头，无需 fork SDK）。
+	if c.Format == llm.FormatAnthropic && c.AuthMode == AuthModeBearer {
+		client, err := bearerHTTPClient(c.Proxy, c.APIKey)
+		if err != nil {
+			return nil, err
+		}
+		lc.HTTPClient = client
+	}
 	return llm.NewProvider(lc)
 }
+
+// bearerHTTPClient builds an http.Client whose transport rewrites each request's
+// Anthropic credential header from x-api-key to "Authorization: Bearer <key>",
+// for relay gateways that only accept ANTHROPIC_AUTH_TOKEN-style auth. The
+// default transport is cloned so standard timeouts / pooling / *_PROXY env are
+// preserved; an explicit proxy still wins over the environment.
+func bearerHTTPClient(proxy, key string) (*http.Client, error) {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	if proxy != "" {
+		u, err := url.Parse(proxy)
+		if err != nil {
+			return nil, fmt.Errorf("llm: invalid proxy %q: %w", proxy, err)
+		}
+		tr.Proxy = http.ProxyURL(u)
+	} else {
+		tr.Proxy = http.ProxyFromEnvironment
+	}
+	key = strings.TrimSpace(key)
+	return &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		r.Header.Del("x-api-key") // the SDK set this; the gateway wants Bearer instead
+		r.Header.Set("Authorization", "Bearer "+key)
+		return tr.RoundTrip(r)
+	})}, nil
+}
+
+// roundTripperFunc adapts a func to http.RoundTripper.
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 // TestConnection makes a minimal real completion to verify the provider/model/
 // endpoint/key actually work. Returns the round-trip latency.

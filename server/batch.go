@@ -8,8 +8,8 @@ import (
 	"github.com/RestXtra/RestXtraAI/db"
 )
 
-// Batch task queues (ported from Pentest-RestXtra). A queue holds tasks whose
-// payload drives the executor; the built-in executor spawns an ARTEX exploration
+// Batch task queues (platform built-in). A queue holds tasks whose
+// payload drives the executor; the built-in executor spawns a RestXtra exploration
 // task per task (payload {"action":"task","description":...,"goal":...}). A
 // background ticker drains enabled queues so pending tasks run without a manual
 // trigger, and POST /run forces an immediate drain.

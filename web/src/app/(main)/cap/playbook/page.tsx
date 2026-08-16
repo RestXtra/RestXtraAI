@@ -3,7 +3,7 @@
 import * as React from "react";
 
 import { toast } from "sonner";
-import { BookMarkedIcon, PlusIcon, SearchIcon, Trash2Icon } from "lucide-react";
+import { BookMarkedIcon, FlaskConicalIcon, PlusIcon, SearchIcon, Trash2Icon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -73,6 +73,50 @@ export default function PlaybookPage() {
 
   React.useEffect(load, [load]);
 
+  // ---- CVE 复现并入库 ----
+  const [reproOpen, setReproOpen] = React.useState(false);
+  const [reproBusy, setReproBusy] = React.useState(false);
+  const [hosts, setHosts] = React.useState<{ id: string; name: string }[]>([]);
+  const [repro, setRepro] = React.useState({
+    host_id: "", image: "", cve_id: "", title: "", poc: "", port: "80",
+    marker: "", attack_technique_id: "", tags: "", confidence: 60,
+  });
+  React.useEffect(() => {
+    api.sandboxHosts().then(setHosts).catch(() => setHosts([]));
+  }, []);
+  async function doReproduce() {
+    if (!repro.image.trim() || !repro.poc.trim()) {
+      toast.error("镜像与 PoC 必填");
+      return;
+    }
+    setReproBusy(true);
+    try {
+      const r = await api.playbookReproduce({
+        host_id: repro.host_id ? Number(repro.host_id) : undefined,
+        image: repro.image.trim(),
+        cve_id: repro.cve_id.trim(),
+        title: repro.title.trim() || undefined,
+        poc: repro.poc,
+        port: Number(repro.port) || 80,
+        marker: repro.marker.trim() || undefined,
+        attack_technique_id: repro.attack_technique_id.trim() || undefined,
+        tags: repro.tags.trim() || undefined,
+        confidence: Number(repro.confidence) || 0,
+      });
+      if (r.success) {
+        toast.success(`复现成功，已存入攻击模式库（${r.verification}）`);
+      } else {
+        toast.error(`复现失败（exit ${r.exit_code ?? "?"}）— 已存为 draft，可在库中补 execution_steps`);
+      }
+      setReproOpen(false);
+      load();
+    } catch (e) {
+      toast.error(`复现出错：${(e as Error).message}`);
+    } finally {
+      setReproBusy(false);
+    }
+  }
+
   async function doSearch() {
     try {
       const r = await api.playbookSearch({ keywords, limit: 20 });
@@ -116,9 +160,14 @@ export default function PlaybookPage() {
             <p className="text-sm text-muted-foreground">跨项目经验库（playbook）：结构化标签 + 文本双路检索。</p>
           </div>
           {canWrite && (
-            <Button onClick={() => setCreateOpen(true)}>
-              <PlusIcon className="size-4" /> 新增模式
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => setReproOpen(true)}>
+                <FlaskConicalIcon className="size-4" /> 复现并入库
+              </Button>
+              <Button onClick={() => setCreateOpen(true)}>
+                <PlusIcon className="size-4" /> 新增模式
+              </Button>
+            </div>
           )}
         </div>
 
@@ -260,6 +309,83 @@ export default function PlaybookPage() {
             <DialogFooter>
               <Button variant="outline" onClick={() => setCreateOpen(false)}>取消</Button>
               <Button onClick={createPattern} disabled={!form.title.trim()}>创建</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* CVE 复现并入库 */}
+        <Dialog open={reproOpen} onOpenChange={setReproOpen}>
+          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+            <DialogHeader>
+              <DialogTitle>CVE 复现并入库</DialogTitle>
+              <DialogDescription>
+                给漏洞镜像 + PoC，系统在沙箱主机起容器复现，验证成功后自动存入攻击模式库（execution_steps 供 agent 复用）。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-3 py-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">CVE 编号</Label>
+                  <Input placeholder="CVE-2021-44228" value={repro.cve_id} onChange={(e) => setRepro({ ...repro, cve_id: e.target.value })} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">沙箱主机</Label>
+                  <Select value={repro.host_id} onValueChange={(v) => setRepro({ ...repro, host_id: v })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="第一个可用主机" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {hosts.map((h) => (
+                        <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">镜像</Label>
+                  <Input placeholder="vulhub/log4j/2-rce" className="font-mono" value={repro.image} onChange={(e) => setRepro({ ...repro, image: e.target.value })} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">应用端口</Label>
+                  <Input type="number" value={repro.port} onChange={(e) => setRepro({ ...repro, port: e.target.value })} />
+                </div>
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs">标题（可选）</Label>
+                <Input placeholder="Log4j2 RCE 复现" value={repro.title} onChange={(e) => setRepro({ ...repro, title: e.target.value })} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs">PoC（容器内执行；支持 {'{{ip}} {{host}} {{port}}'} 占位）</Label>
+                <Textarea rows={6} className="font-mono text-xs" placeholder={'curl -v http://{{host}}:{{port}}/... -H \'${jndi:ldap://...}\''} value={repro.poc} onChange={(e) => setRepro({ ...repro, poc: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">成功标志（可选，输出包含则视为成功）</Label>
+                  <Input placeholder="如 flag 或漏洞标识" value={repro.marker} onChange={(e) => setRepro({ ...repro, marker: e.target.value })} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">ATT&CK 技术（可选）</Label>
+                  <Input placeholder="T1190" value={repro.attack_technique_id} onChange={(e) => setRepro({ ...repro, attack_technique_id: e.target.value })} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">标签（可选）</Label>
+                  <Input placeholder="log4j, rce" value={repro.tags} onChange={(e) => setRepro({ ...repro, tags: e.target.value })} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">置信度（0-100）</Label>
+                  <Input type="number" min={0} max={100} value={String(repro.confidence)} onChange={(e) => setRepro({ ...repro, confidence: Number(e.target.value) })} />
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setReproOpen(false)}>取消</Button>
+              <Button onClick={doReproduce} disabled={reproBusy}>
+                {reproBusy ? "复现中…" : "复现并入库"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

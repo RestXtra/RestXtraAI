@@ -34,10 +34,18 @@ Thumbs.db
 # claude code local state
 .claude/
 
+# skills 库（本地 skill 集合，不随源码分发；部署时从发布包/挂载引入）
+/skills/
+
 # 内嵌前端的单二进制产物
 /restxtra
 /restxtra.exe
+/restxtra.exe~
+/restxtra-linux
 /server/webui/dist/
+
+# 本地启动脚本（含本地数据库口令，不提交）
+start.bat
 
 # Docker 部署生成的本地环境（含密码/密钥，不提交）
 .env

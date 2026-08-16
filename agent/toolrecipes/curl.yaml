@@ -1,0 +1,28 @@
+name: curl
+command: curl
+description: 发起精确 HTTP 请求（-X/-d/-H/-b），用于手工验证与 PoC。
+short_description: HTTP 请求（curl，可带方法/数据/头/Cookie）
+enabled: true
+parameters:
+  - name: url
+    type: string
+    required: true
+    position: 1
+    format: positional
+  - name: method
+    type: string
+    flag: "-X"
+    format: flag
+  - name: data
+    type: string
+    flag: "-d"
+    format: flag
+  - name: header
+    type: string
+    flag: "-H"
+    format: flag
+  - name: cookie
+    type: string
+    flag: "-b"
+    format: flag
+additional_args: ["-sk"]

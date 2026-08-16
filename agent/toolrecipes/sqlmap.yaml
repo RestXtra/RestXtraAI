@@ -1,0 +1,27 @@
+name: sqlmap
+command: sqlmap
+description: 自动化 SQL 注入检测与利用（-u URL [--data/--cookie/--batch/--level]）。
+short_description: SQL 注入自动化检测/利用（sqlmap）
+enabled: true
+parameters:
+  - name: url
+    type: string
+    flag: "-u"
+    format: flag
+  - name: data
+    type: string
+    flag: "--data"
+    format: flag
+  - name: cookie
+    type: string
+    flag: "--cookie"
+    format: flag
+  - name: level
+    type: string
+    flag: "--level"
+    format: flag
+  - name: risk
+    type: string
+    flag: "--risk"
+    format: flag
+additional_args: ["--batch"]

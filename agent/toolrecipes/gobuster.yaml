@@ -1,0 +1,27 @@
+name: gobuster
+command: gobuster
+description: 目录/子域/虚拟主机爆破（-u URL + -w wordlist；dir/dns/vhost 模式）。
+short_description: 目录/子域/vhost 爆破（gobuster）
+enabled: true
+parameters:
+  - name: mode
+    type: string
+    position: 1
+    format: positional
+  - name: url
+    type: string
+    flag: "-u"
+    format: flag
+  - name: wordlist
+    type: string
+    flag: "-w"
+    format: flag
+  - name: extensions
+    type: string
+    flag: "-x"
+    format: flag
+  - name: threads
+    type: string
+    flag: "-t"
+    format: flag
+additional_args: []

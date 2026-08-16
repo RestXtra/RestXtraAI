@@ -71,8 +71,7 @@ func isGoRunDir(dir string) bool {
 	return false
 }
 
-// envAny returns the first non-empty env var among names (used so the rebranded
-// RESTXTRA_* vars take effect while legacy ARTEX_* names keep working).
+// envAny returns the first non-empty env var among names.
 func envAny(names ...string) string {
 	for _, n := range names {
 		if v := strings.TrimSpace(os.Getenv(n)); v != "" {
@@ -83,7 +82,7 @@ func envAny(names ...string) string {
 }
 
 // Path returns the config file path. Resolution order:
-//  1. env RESTXTRA_CONFIG (explicit override; legacy ARTEX_CONFIG also honored)
+//  1. env RESTXTRA_CONFIG
 //  2. ./config.json in the current working directory (running from the project
 //     dir — robust no matter where `go run` placed the temp/cached binary)
 //  3. config.json next to the executable (a distributed binary keeps it beside)
@@ -91,7 +90,7 @@ func envAny(names ...string) string {
 // The first existing file wins. If none exist, the CWD path is returned so the
 // "not found" message points at the project dir the user most likely expected.
 func Path() string {
-	if v := envAny("RESTXTRA_CONFIG", "ARTEX_CONFIG"); v != "" {
+	if v := envAny("RESTXTRA_CONFIG"); v != "" {
 		return v
 	}
 	var candidates []string
@@ -121,12 +120,12 @@ func Load() Config {
 
 // SkillDir returns the skill root directory with precedence:
 //
-//	env RESTXTRA_SKILL_DIR (legacy ARTEX_SKILL_DIR)  >  config file (skill_dir)  >  BaseDir()/skills
+//	env RESTXTRA_SKILL_DIR  >  config file (skill_dir)  >  BaseDir()/skills
 //
 // The directory is created if it does not exist.
 func SkillDir() string {
 	var d string
-	if v := envAny("RESTXTRA_SKILL_DIR", "ARTEX_SKILL_DIR"); v != "" {
+	if v := envAny("RESTXTRA_SKILL_DIR"); v != "" {
 		d = v
 	} else if v := strings.TrimSpace(Load().SkillDir); v != "" {
 		d = v
@@ -139,14 +138,14 @@ func SkillDir() string {
 
 // PostgresDSN resolves the connection string with precedence:
 //
-//	env RESTXTRA_PG_DSN (legacy ARTEX_PG_DSN)  >  config file (database.dsn, or assembled from fields)
+//	env RESTXTRA_PG_DSN  >  config file (database.dsn, or assembled from fields)
 //
 // There is NO built-in fallback: when neither source supplies a database config,
 // it returns an error naming the config path it inspected, so startup fails loudly
 // instead of silently connecting to a wrong default. source describes where the
 // DSN came from (for startup logging).
 func PostgresDSN() (dsn, source string, err error) {
-	if v := envAny("RESTXTRA_PG_DSN", "ARTEX_PG_DSN"); v != "" {
+	if v := envAny("RESTXTRA_PG_DSN"); v != "" {
 		return v, "环境变量 RESTXTRA_PG_DSN", nil
 	}
 	db := Load().Database

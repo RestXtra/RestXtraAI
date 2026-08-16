@@ -1,4 +1,4 @@
-// ARTEX domain model — types used across the UI.
+// RestXtra domain model — types used across the UI.
 // Derived from the functional spec (section 7: 关键数据形状).
 
 export type TaskStatus = "created" | "running" | "paused" | "done" | "failed" | "timeout";
@@ -138,9 +138,9 @@ export interface ScopeRow {
   id: number;
   company_id: number;
   kind: "domain" | "ip" | "cidr";
-  domain?: string;  // kind=domain 时有值
-  net?: string;     // kind=ip|cidr 时有值
-  raw: string;      // 原始用户输入，用于显示和回填
+  domain?: string; // kind=domain 时有值
+  net?: string; // kind=ip|cidr 时有值
+  raw: string; // 原始用户输入，用于显示和回填
   reason?: string;
 }
 
@@ -195,9 +195,9 @@ export type ActivityKind =
   | "thinking"
   | "result"
   | "user"
-  | "intent"            // LLM-generated exploration objective leading a worker session (UI-synthesized)
-  | "round"             // planner round boundary marker (engine-emitted)
-  | "usage"             // live cumulative token usage (per model turn); not rendered
+  | "intent" // LLM-generated exploration objective leading a worker session (UI-synthesized)
+  | "round" // planner round boundary marker (engine-emitted)
+  | "usage" // live cumulative token usage (per model turn); not rendered
   | "intercept_request"; // user-approval request from the intercept layer
 
 export interface Activity {
@@ -338,6 +338,7 @@ export interface TrafficDetail {
 // ---- App settings (runtime toggles) ----
 export interface Settings {
   traffic_capture: boolean;
+  llm_record: boolean; // LLM 录制开关(默认关)；关闭时不记录任何 LLM 调用
   // Web search. brave_key_set / tavily_key_set reflect whether a key is stored
   // (the values are never returned). On PUT, send the corresponding field to set/clear.
   web_search_enabled: boolean;
@@ -367,6 +368,8 @@ export interface LLMProfile {
   context_window_k?: number;
   // 思考模式: ""=默认(不发送) | "off"=关闭 | "low"/"medium"/"high"/"max"=开启并设强度
   reasoning_effort?: string;
+  // 认证头: ""/x-api-key=Anthropic 默认头(OpenAI 恒为 Bearer) | "bearer"=Authorization: Bearer(兼容 ANTHROPIC_AUTH_TOKEN 类网关, 如 OpenCode GO)
+  auth_mode?: "" | "x-api-key" | "bearer";
   is_default: boolean;
 }
 
@@ -443,12 +446,12 @@ export interface MCPTool {
 // Fields align with the agentskills.io open specification.
 // description covers both "what the skill does" and "when to use it".
 export interface SkillItem {
-  name: string;           // unique key = directory name
-  description?: string;   // required per spec; covers what + when to use
-  license?: string;       // optional: SPDX identifier or free text
+  name: string; // unique key = directory name
+  description?: string; // required per spec; covers what + when to use
+  license?: string; // optional: SPDX identifier or free text
   compatibility?: string; // optional: environment requirements
-  mcps?: string[];        // MCP server names this skill unlocks on load
-  files: string[];        // files in the skill directory
+  mcps?: string[]; // MCP server names this skill unlocks on load
+  files: string[]; // files in the skill directory
 }
 
 // ---- Tools (内置工具目录) ----
@@ -461,12 +464,12 @@ export interface Tool {
   description: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schema: Record<string, any>; // full JSON-Schema (object with properties)
-  agents: string[];            // bound agent keys
+  agents: string[]; // bound agent keys
   enabled: boolean;
   kind?: "builtin" | "shell" | "command" | "script" | "http"; // 自定义工具类型
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  exec?: Record<string, any>;  // 自定义工具执行规格(kind!=builtin)
-  deferred?: boolean;          // schema 延迟(SearchExtraTools/ExecuteExtraTool)
+  exec?: Record<string, any>; // 自定义工具执行规格(kind!=builtin)
+  deferred?: boolean; // schema 延迟(SearchExtraTools/ExecuteExtraTool)
 }
 
 // ---- Stats ----
@@ -516,14 +519,14 @@ export interface InterceptPending {
 
 // InterceptApprovalRow enriches InterceptPending with conversation/task and rule context.
 export interface InterceptApprovalRow extends InterceptPending {
-  conv_title: string;      // "" if no linked conversation
-  conv_agent_key: string;  // "" if no linked conversation
-  rule_name: string;       // "" if rule was deleted
+  conv_title: string; // "" if no linked conversation
+  conv_agent_key: string; // "" if no linked conversation
+  rule_name: string; // "" if rule was deleted
 }
 
 // ── 资产同步 (ScopeSentry 数据源) ──────────────────────────────────────────────
 export interface SSProject {
-  id: string;        // MongoDB ObjectID — used as filter.project
+  id: string; // MongoDB ObjectID — used as filter.project
   name: string;
   logo?: string;
   AssetCount?: number;
@@ -532,7 +535,7 @@ export interface SSProject {
 
 export interface SSTask {
   id: string;
-  name: string;      // used as filter.task
+  name: string; // used as filter.task
   status?: number;
   progress?: number;
   creatTime?: string;
@@ -601,7 +604,7 @@ export interface AuditLogEntry {
   created_at: string;
 }
 
-// ---- 攻击模式库 / playbook（自 Pentest-RestXtra 移植）----
+// ---- 攻击模式库 / playbook（平台内置）----
 export interface AttackPattern {
   id: string;
   title: string;
@@ -629,7 +632,7 @@ export interface PlaybookResult {
   text_hits: number;
 }
 
-// ---- 批量任务 batch（自 Pentest-RestXtra 移植）----
+// ---- 批量任务 batch（平台内置）----
 export interface BatchQueue {
   id: number;
   name: string;
@@ -652,4 +655,176 @@ export interface BatchTask {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+}
+
+// ---- 工具执行记录（任意工具的 tool_use + 配对 tool_result）----
+export interface CommandRecord {
+  id: number;
+  exploration_id: number;
+  worker: string;
+  tool: string;
+  command: string; // 原始工具输入(JSON)
+  output: string;
+  is_error: boolean;
+  created_at: string;
+}
+
+// ---- LLM 录制 ----
+export interface LLMRecordItem {
+  id: number;
+  ts: string;
+  model: string;
+  profile_name: string;
+  session_id: string;
+  task_id: string;
+  worker: string;
+  latency_ms: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read: number;
+  cache_write: number;
+  status: string;
+  error?: string;
+}
+
+export interface LLMRecordDetail extends LLMRecordItem {
+  request_body: string;
+  response_body: string;
+}
+
+// ---- 任务工作流（新建任务时的初始探索方向 + 战略提示）----
+export interface TaskWorkflowStep {
+  summary: string;
+  priority?: number;
+  agent?: string; // 指定执行 agent key；""/缺省 = 默认 worker
+  kind?: "step" | "decision"; // 判断节点(kind=decision)表示条件判断
+}
+export interface TaskWorkflow {
+  steps?: TaskWorkflowStep[];
+  hints?: string[];
+}
+
+// ---- 沙箱管理 ----
+export interface SandboxHost {
+  id: string;
+  name: string;
+  addr: string; // tcp://host:2375 | http(s):// | unix:///var/run/docker.sock
+  description?: string;
+  created_at: string;
+}
+export interface SandboxContainer {
+  Id: string;
+  Names: string[];
+  Image: string;
+  ImageID: string;
+  Command: string;
+  Created: number;
+  State: string;
+  Status: string;
+  Labels: Record<string, string>;
+  Ports: { IP?: string; PrivatePort: number; PublicPort: number; Type: string }[];
+}
+export interface DockerImage {
+  Id: string;
+  RepoTags: string[];
+  Size: number;
+  Labels: Record<string, string>;
+}
+export interface SandboxEgress {
+  id: string;
+  kind: "cidr" | "domain";
+  value: string;
+  action: "allow" | "deny";
+  note?: string;
+  enabled: boolean;
+  created_at: string;
+}
+
+// ---- 工作流图引擎 ----
+export type WorkflowGraphNodeKind = "start" | "tool" | "agent" | "condition" | "hitl" | "output" | "end";
+export interface WorkflowGraphNode {
+  id: string;
+  kind: WorkflowGraphNodeKind;
+  label?: string;
+  instruction?: string; // agent/hitl/output 节点指令/输出模板
+  tool?: string; // tool 节点工具名
+  args?: string; // tool 节点参数 JSON 模板
+  expression?: string; // condition 节点表达式
+  output_key?: string; // 写入 outputs 池的变量名
+  agent?: string; // agent 节点指定 agent key
+  reviewer?: string; // hitl 审批方
+  join?: string; // 多上游汇聚策略
+  position?: { x: number; y: number };
+}
+export interface WorkflowGraphEdge {
+  from: string;
+  to: string;
+}
+export interface WorkflowGraphDef {
+  nodes: WorkflowGraphNode[];
+  edges: WorkflowGraphEdge[];
+}
+export interface WorkflowGraphMeta {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  created_at: string;
+}
+export interface WorkflowRunItem {
+  id: string;
+  graph_id: string;
+  status: string;
+  inputs?: string;
+  result?: string;
+  error?: string;
+  created_at: string;
+}
+
+
+// ---- 平台扩展：知识库 / WebShell / C2 / 工作空间 ----
+export interface KnowledgeItem {
+  id: string;
+  title: string;
+  content: string;
+  tags?: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface WebshellConn {
+  id: string;
+  name: string;
+  url: string;
+  type: string;
+  password?: string;
+  headers?: string;
+  note?: string;
+  enabled: boolean;
+  created_at: string;
+}
+export interface C2Listener {
+  id: string;
+  name: string;
+  protocol: string;
+  host: string;
+  port: number;
+  enabled: boolean;
+  note?: string;
+  created_at: string;
+}
+export interface C2Session {
+  id: string;
+  listener_id: string | null;
+  session_id: string;
+  host: string;
+  meta?: string;
+  status: string;
+  last_seen: string;
+  created_at: string;
+}
+export interface WorkspaceEntry {
+  name: string;
+  dir: boolean;
+  size: number;
+  mod: number;
 }

@@ -1,4 +1,4 @@
-// Command restxtra runs the RestXtra AI backend: the ARTEX-derived autonomous
+// Command restxtra runs the RestXtra AI backend: the autonomous exploration engine
 // exploration engine (norma agent runtime + PostgreSQL) fused with RestXtra
 // platform capabilities (RBAC / audit / knowledge / playbook / batch, ...),
 // exposed through the JSON HTTP API consumed by the Next.js frontend.
@@ -26,12 +26,12 @@ import (
 var version = "dev"
 
 const banner = `
-    _    ____ _____ _______  __
-   / \  |  _ \_   _| ____\ \/ /
-  / _ \ | |_) || | |  _|  \  /
- / ___ \|  _ < | | | |___ /  \
-/_/   \_\_| \_\|_| |_____/_/\_\
-`
+ ____           _  __  ___             
+|  _ \ ___  ___| |_\ \/ / |_ _ __ __ _ 
+| |_) / _ \/ __| __|\  /| __| '__/ _` + "`" + ` |
+|  _ <  __/\__ \ |_ /  \| |_| | | (_| |
+|_| \_\___||___/\__/_/\_\\__|_|  \__,_|
+                                       `
 
 // printBanner writes the startup banner + version/runtime info to stdout.
 func printBanner(addr string) {
@@ -64,7 +64,7 @@ func main() {
 	if _, e := os.Stat(cfgPath); e == nil {
 		log.Printf("[config] 配置文件: %s", cfgPath)
 	} else {
-		log.Printf("[config] 配置文件: %s (不存在 — 将仅尝试环境变量 ARTEX_PG_DSN)", cfgPath)
+		log.Printf("[config] 配置文件: %s (不存在 — 将仅尝试环境变量 RESTXTRA_PG_DSN)", cfgPath)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

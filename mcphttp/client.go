@@ -1,4 +1,4 @@
-// Package mcphttp is a remote (Streamable HTTP) MCP client for ARTEX.
+// Package mcphttp is a remote (Streamable HTTP) MCP client for RestXtra.
 //
 // The core mcp package only speaks stdio; this adapts an HTTP/JSON-RPC MCP server
 // to the same tool.CoreTool shape (mcp__server__tool) WITHOUT touching the SDK.
@@ -82,7 +82,7 @@ func (c *Client) initialize(ctx context.Context) error {
 	if _, err := c.call(ctx, "initialize", map[string]any{
 		"protocolVersion": protocolVersion,
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "artex", "version": "0.2"},
+		"clientInfo":      map[string]any{"name": "restxtra", "version": "0.2"},
 	}); err != nil {
 		return err
 	}

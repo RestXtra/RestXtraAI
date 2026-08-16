@@ -9,8 +9,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// Platform RBAC management API (members / roles / permissions), fused from the
-// Pentest-RestXtra RBAC model onto the unified JWT + net/http layer.
+// Platform RBAC management API (members / roles / permissions), built into
+// RestXtra on the unified JWT + net/http layer.
 
 // resolveUID reads the {id} path segment as a user id.
 func pathID(r *http.Request) int64 {
@@ -165,7 +165,7 @@ func (s *Server) platformUpdateUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "请求格式错误")
 		return
 	}
-	// 禁止禁用/删除内置管理员 ARTEX（最后防线）
+	// 禁止禁用/删除内置管理员 RestXtra（最后防线）
 	u, err := pg.GetUserByID(id)
 	if err != nil || u == nil {
 		writeErr(w, 404, "用户不存在")

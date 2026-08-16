@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { Loader2Icon, PlugZapIcon, PlusIcon, SaveIcon, StarIcon, Trash2Icon } from "lucide-react";
+import { ClipboardPasteIcon, Loader2Icon, PlugZapIcon, PlusIcon, SaveIcon, StarIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +22,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
+import type { ImportedLLMProfile, LLMAuthMode } from "@/lib/llm-presets";
+import { AUTH_MODE_OPTIONS, LLM_PRESETS, parseEnvJsonProfile } from "@/lib/llm-presets";
 import type { LLMProfile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +50,92 @@ const toStore = (mode: ThinkMode, effort: string) => (mode === "on" ? effort : m
 const modeFromStore = (v?: string): ThinkMode => (!v ? "none" : v === "off" ? "off" : "on");
 const effortFromStore = (v?: string) => (v && v !== "off" ? v : "high");
 
+// 认证头选择（cc-switch 的「认证字段」概念）：x-api-key（默认）| Bearer（ANTHROPIC_AUTH_TOKEN）。
+function AuthModeField({ value, onChange }: { value: LLMAuthMode; onChange: (v: LLMAuthMode) => void }) {
+  const current = AUTH_MODE_OPTIONS.find((o) => o.value === value) ?? AUTH_MODE_OPTIONS[0];
+  return (
+    <div className="grid gap-2">
+      <Label>认证方式</Label>
+      <Select value={value} onValueChange={(v) => onChange(v as LLMAuthMode)}>
+        <SelectTrigger>
+          <SelectValue placeholder="选择认证头" />
+        </SelectTrigger>
+        <SelectContent>
+          {AUTH_MODE_OPTIONS.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-muted-foreground text-xs">{current.hint}</p>
+    </div>
+  );
+}
+
+// 粘贴 cc-switch 风格 env JSON（{"env":{ANTHROPIC_BASE_URL,...}}）导入配置。
+function EnvImportDialog({ onApply }: { onApply: (imp: ImportedLLMProfile) => void }) {
+  const [open, setOpen] = React.useState(false);
+  const [text, setText] = React.useState("");
+  const [err, setErr] = React.useState("");
+
+  function apply() {
+    const r = parseEnvJsonProfile(text);
+    if (typeof r === "string") {
+      setErr(r);
+      return;
+    }
+    onApply(r);
+    setText("");
+    setErr("");
+    setOpen(false);
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) {
+          setText("");
+          setErr("");
+        }
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline">
+          <ClipboardPasteIcon /> 导入配置
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>导入供应商配置</DialogTitle>
+          <DialogDescription>
+            粘贴 CC Switch 风格的配置 JSON（<code className="font-mono">{'{"env":{...}}'}</code>），识别{" "}
+            <code className="font-mono">ANTHROPIC_BASE_URL / AUTH_TOKEN / API_KEY / MODEL</code> 与{" "}
+            <code className="font-mono">OPENAI_*</code> 变量自动填充。
+          </DialogDescription>
+        </DialogHeader>
+        <Textarea
+          className="min-h-44 font-mono text-xs"
+          placeholder={
+            '{"env":{"ANTHROPIC_BASE_URL":"https://opencode.ai/zen/go","ANTHROPIC_AUTH_TOKEN":"sk-…","ANTHROPIC_MODEL":"deepseek-v4-flash"}}'
+          }
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        {err && <p className="text-destructive text-xs">{err}</p>}
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline">取消</Button>
+          </DialogClose>
+          <Button onClick={apply}>应用</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
   const [open, setOpen] = React.useState(false);
   const [name, setName] = React.useState("");
@@ -55,11 +144,37 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
   const [baseUrl, setBaseUrl] = React.useState("");
   const [proxy, setProxy] = React.useState("");
   const [apiKey, setApiKey] = React.useState("");
+  const [authMode, setAuthMode] = React.useState<LLMAuthMode>("");
   const [rps, setRps] = React.useState("0");
   const [rpm, setRpm] = React.useState("0");
   const [cw, setCw] = React.useState("0");
   const [thinkMode, setThinkMode] = React.useState<ThinkMode>("none");
   const [effort, setEffort] = React.useState("high");
+  const [preset, setPreset] = React.useState("");
+
+  function applyImported(imp: ImportedLLMProfile) {
+    setName(imp.name);
+    setFormat(imp.format);
+    setBaseUrl(imp.base_url);
+    setModel(imp.model);
+    setApiKey(imp.api_key);
+    setAuthMode(imp.auth_mode);
+    setProxy(imp.proxy ?? "");
+    setCw(String(imp.context_window_k ?? 0));
+    setPreset("");
+  }
+
+  function applyPreset(key: string) {
+    setPreset(key);
+    const p = LLM_PRESETS.find((x) => x.name === key);
+    if (!p) return;
+    setName(p.name);
+    setFormat(p.format);
+    setBaseUrl(p.base_url);
+    setModel(p.model);
+    setAuthMode(p.auth_mode);
+    setCw(String(p.context_window_k ?? 0));
+  }
 
   function reset() {
     setName("");
@@ -68,11 +183,13 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
     setBaseUrl("");
     setProxy("");
     setApiKey("");
+    setAuthMode("");
     setRps("0");
     setRpm("0");
     setCw("0");
     setThinkMode("none");
     setEffort("high");
+    setPreset("");
   }
 
   async function create() {
@@ -88,6 +205,7 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
         base_url: baseUrl.trim(),
         proxy: proxy.trim(),
         api_key: apiKey,
+        auth_mode: authMode,
         rate_per_second: Number(rps) || 0,
         rate_per_minute: Number(rpm) || 0,
         context_window_k: Number(cw) || 0,
@@ -121,6 +239,30 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
           <DialogDescription>新建后不会自动激活，请在列表中「设为激活」以启用。</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
+          <div className="grid gap-2 rounded-lg border p-3">
+            <Label>供应商预设（一键填充，再补 Key 即可）</Label>
+            <div className="flex items-center gap-2">
+              <Select value={preset} onValueChange={applyPreset}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue placeholder="选择预设或手动填写…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">手动填写</SelectItem>
+                  {LLM_PRESETS.map((p) => (
+                    <SelectItem key={p.name} value={p.name}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <EnvImportDialog onApply={applyImported} />
+            </div>
+            {preset && (
+              <p className="text-muted-foreground text-xs">
+                {(LLM_PRESETS.find((p) => p.name === preset) ?? LLM_PRESETS[0]).description}
+              </p>
+            )}
+          </div>
           <div className="grid gap-2">
             <Label htmlFor="np-name">名称</Label>
             <Input
@@ -184,6 +326,7 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
               onChange={(e) => setApiKey(e.target.value)}
             />
           </div>
+          <AuthModeField value={authMode} onChange={setAuthMode} />
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="grid gap-2">
               <Label htmlFor="np-rps">每秒限速</Label>
@@ -211,7 +354,8 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
               <div className="grid gap-0.5">
                 <Label className="text-sm">思考模式 · Extended Thinking</Label>
                 <p className="text-muted-foreground text-xs">
-                  不发送=不带思考字段（兼容 MiniMax 等不支持该字段的模型）；显式关闭=发 disabled（默认开思考的模型才需要）；开启=先推理再作答。
+                  不发送=不带思考字段（兼容 MiniMax 等不支持该字段的模型）；显式关闭=发
+                  disabled（默认开思考的模型才需要）；开启=先推理再作答。
                 </p>
               </div>
               <Select value={thinkMode} onValueChange={(v) => setThinkMode(v as ThinkMode)}>
@@ -275,6 +419,7 @@ export default function LLMPage() {
   const [cw, setCw] = React.useState("0"); // 上下文窗口(K tokens);0=默认200K
   const [thinkMode, setThinkMode] = React.useState<ThinkMode>("none");
   const [effort, setEffort] = React.useState("high");
+  const [authMode, setAuthMode] = React.useState<LLMAuthMode>("");
   const [testing, setTesting] = React.useState(false);
 
   const load = React.useCallback(async () => {
@@ -308,6 +453,7 @@ export default function LLMPage() {
     setCw(String(selected.context_window_k ?? 0));
     setThinkMode(modeFromStore(selected.reasoning_effort));
     setEffort(effortFromStore(selected.reasoning_effort));
+    setAuthMode(selected.auth_mode ?? "");
     setApiKey("");
     setKeyHint(selected.api_key_hint ?? "");
   }, [selected]);
@@ -327,8 +473,14 @@ export default function LLMPage() {
         proxy,
         toStore(thinkMode, effort),
         selectedId ? Number(selectedId) : undefined,
+        authMode,
       );
-      if (r.ok) toast.success(`连接成功 · ${r.latency_ms ?? "?"}ms · ${r.model ?? model}`);
+      if (r.ok)
+        toast.success(
+          `连接成功 · ${r.latency_ms ?? "?"}ms · ${r.model ?? model}${
+            (r.latency_ms ?? 0) > 3000 ? "（含网关冷启动，连续测试会明显更快）" : ""
+          }`,
+        );
       else toast.error(`连接失败：${r.error ?? "未知"}`);
     } catch (e) {
       toast.error(`测试出错：${(e as Error).message}`);
@@ -355,6 +507,7 @@ export default function LLMPage() {
         base_url: baseUrl.trim(),
         proxy: proxy.trim(),
         api_key: apiKey,
+        auth_mode: authMode,
         rate_per_second: Number(rps) || 0,
         rate_per_minute: Number(rpm) || 0,
         context_window_k: Number(cw) || 0,
@@ -496,6 +649,8 @@ export default function LLMPage() {
                   />
                 </div>
 
+                <AuthModeField value={authMode} onChange={setAuthMode} />
+
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="grid gap-2">
                     <Label htmlFor="rps">每秒限速</Label>
@@ -530,7 +685,8 @@ export default function LLMPage() {
                     <div className="grid gap-0.5">
                       <Label className="text-sm">思考模式 · Extended Thinking</Label>
                       <p className="text-muted-foreground text-xs">
-                        不发送=不带思考字段（兼容 MiniMax 等不支持该字段的模型）；显式关闭=发 disabled（默认开思考的模型才需要）；开启=先推理再作答。
+                        不发送=不带思考字段（兼容 MiniMax 等不支持该字段的模型）；显式关闭=发
+                        disabled（默认开思考的模型才需要）；开启=先推理再作答。
                       </p>
                     </div>
                     <Select value={thinkMode} onValueChange={(v) => setThinkMode(v as ThinkMode)}>
@@ -576,6 +732,18 @@ export default function LLMPage() {
                     {testing ? <Loader2Icon className="animate-spin" /> : <PlugZapIcon />}
                     {testing ? "测试中…" : "测试连接"}
                   </Button>
+                  <EnvImportDialog
+                    onApply={(imp) => {
+                      setName(imp.name);
+                      setFormat(imp.format);
+                      setBaseUrl(imp.base_url);
+                      setModel(imp.model);
+                      setApiKey(imp.api_key);
+                      setAuthMode(imp.auth_mode);
+                      setProxy(imp.proxy ?? "");
+                      setCw(String(imp.context_window_k ?? 0));
+                    }}
+                  />
                   <Button onClick={save}>
                     <SaveIcon /> 保存
                   </Button>
@@ -648,6 +816,7 @@ export default function LLMPage() {
                         {p.reasoning_effort && (
                           <span>思考 {p.reasoning_effort === "off" ? "关" : p.reasoning_effort}</span>
                         )}
+                        {p.auth_mode === "bearer" && <span>Bearer</span>}
                       </div>
                     </div>
                   </div>

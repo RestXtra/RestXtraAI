@@ -1,4 +1,4 @@
-// Package db is the PostgreSQL data source for ARTEX (取代旧 graph 单文件 SQLite)。
+// Package db is the PostgreSQL data source for RestXtra (取代旧 graph 单文件 SQLite)。
 // 它打开连接、应用 schema、并 seed 内置 agent 与变量目录。
 package db
 
@@ -17,7 +17,7 @@ import (
 var schemaSQL string
 
 // DSN resolves the PostgreSQL connection string and reports where it came from.
-// Precedence: env ARTEX_PG_DSN > config file (config.json). There is no
+// Precedence: env RESTXTRA_PG_DSN > config file (config.json). There is no
 // built-in default — it errors if neither source is configured.
 func DSN() (dsn, source string, err error) {
 	return config.PostgresDSN()
@@ -210,7 +210,18 @@ ON CONFLICT (name) DO NOTHING`,
 // declares `mcps: ScopeSentry`, which only takes effect once it's made visible and
 // that MCP is enabled/configured.
 var builtinSkillVisibility = map[string][]string{
-	"api-recon": {"auto", "pentest", "worker"},
+	"api-recon":                     {"auto", "pentest", "worker"},
+	"web-security-advanced":         {"worker", "pentest", "auto"},
+	"redteam-evasion-detail-pack":    {"pentest", "worker"},
+	"redteam-cloud-detail-pack":      {"pentest"},
+	"ctf-web":                       {"worker", "pentest"},
+	"redteam-sqli-detail-pack":       {"worker", "pentest"},
+	"redteam-ssrf-detail-pack":       {"worker", "pentest"},
+	"redteam-reverse-detail-pack":    {"pentest"},
+	"redteam-code-audit-detail-pack": {"pentest"},
+	"intranet-pentest-advanced":      {"pentest", "worker"},
+	"redteam-payload-detail-pack":    {"worker", "pentest"},
+	"redteam-deserialize-detail-pack": {"worker", "pentest"},
 }
 
 // seedBuiltinSkillVisibility binds the shipped built-in skills to their default

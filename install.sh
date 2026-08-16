@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ARTEX 安装脚本：① 全部 Docker  ② 本地编译运行
+# RestXtra 安装脚本：① 全部 Docker  ② 本地编译运行
 set -euo pipefail
 cd "$(cd "$(dirname "$0")" && pwd)"
 
@@ -49,7 +49,7 @@ install_docker(){
   docker compose pull || true
   docker compose up -d
   ok "启动完成 → http://localhost:8787"
-  info "查看日志：docker compose logs -f artex"
+  info "查看日志：docker compose logs -f restxtra"
 }
 
 # ── ② 本地编译运行 ──────────────────────────────
@@ -61,16 +61,16 @@ install_local(){
     2)
       ensure_docker
       local pw; pw="$(ask 'Postgres 密码（回车随机）' "$(rand)")"
-      docker run -d --name artex-pg -p 5432:5432 \
-        -e POSTGRES_USER=artex -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=artex \
-        -v artex-pg:/var/lib/postgresql/data postgres:16-alpine
-      DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=artex DB_PASS="$pw" DB_NAME=artex DB_SSL=disable ;;
+      docker run -d --name restxtra-pg -p 5432:5432 \
+        -e POSTGRES_USER=restxtra -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=restxtra \
+        -v restxtra-pg:/var/lib/postgresql/data postgres:16-alpine
+      DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=restxtra DB_PASS="$pw" DB_NAME=restxtra DB_SSL=disable ;;
     *)
       DB_HOST="$(ask '数据库地址' 127.0.0.1)"
       DB_PORT="$(ask '端口' 5432)"
-      DB_USER="$(ask '账号' artex)"
+      DB_USER="$(ask '账号' restxtra)"
       DB_PASS="$(ask '密码' '')"
-      DB_NAME="$(ask '数据库名' artex)"
+      DB_NAME="$(ask '数据库名' restxtra)"
       DB_SSL="$(ask 'sslmode (disable/require)' disable)" ;;
   esac
 

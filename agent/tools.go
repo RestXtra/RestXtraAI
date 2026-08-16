@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -114,6 +115,12 @@ func NewToolSet(ts *db.ExplorationStore, worker string) *ToolSet {
 	return &ToolSet{ts: ts, worker: worker}
 }
 
+// graph returns the exploration store, or nil-friendly: tools that only make
+// sense bound to a task's store (planner/worker per-run) must check this and
+// degrade to a clear error when called on a store-less ToolSet (e.g. the
+// server-level domain registry shared by Auto/custom agents).
+func (t *ToolSet) graph() *db.ExplorationStore { return t.ts }
+
 // SetTaskID sets the PG task id on this ToolSet so that report_finding can
 // dual-write to the standalone findings table (which survives task deletion).
 func (t *ToolSet) SetTaskID(id int64) { t.taskID = id }
@@ -196,7 +203,8 @@ func readTool(name, desc string, schema map[string]any, run func(context.Context
 		ReadOnly:    func(json.RawMessage) bool { return true },
 		Concurrent:  func(json.RawMessage) bool { return true },
 		Permissions: func(context.Context, json.RawMessage, acperm.Context) acperm.Decision { return acperm.Allowed() },
-		Run: func(ctx context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
+		Run: func(ctx context.Context, in json.RawMessage, _ *actool.ToolContext) (out actool.Result, err error) {
+			defer recoverTool(name)
 			return run(ctx, in)
 		},
 	})
@@ -206,10 +214,20 @@ func writeTool(name, desc string, schema map[string]any, run func(context.Contex
 	return actool.Build(actool.Spec{
 		Name: name, Description: desc, Schema: schema,
 		Permissions: func(context.Context, json.RawMessage, acperm.Context) acperm.Decision { return acperm.Allowed() },
-		Run: func(ctx context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
+		Run: func(ctx context.Context, in json.RawMessage, _ *actool.ToolContext) (out actool.Result, err error) {
+			defer recoverTool(name)
 			return run(ctx, in)
 		},
 	})
+}
+
+// recoverTool 兜住域工具内部可能因空壳 store（nil ExplorationStore）等触发的
+// panic，把崩溃降级为工具错误，避免整个进程 SIGSEGV 挂掉。工具自身仍应主动
+// 判空返回友好错误；这里是最后一道防线。
+func recoverTool(name string) {
+	if r := recover(); r != nil {
+		log.Printf("[tool %s] recovered panic: %v", name, r)
+	}
 }
 
 func jsonResult(v any) (actool.Result, error) {
@@ -238,6 +256,10 @@ func (t *ToolSet) graphOverview() actool.CoreTool {
 func (t *ToolSet) graphOverviewData() map[string]any {
 	{
 		out := map[string]any{}
+		if t.ts == nil {
+			out["note"] = "探索图 store 不可用（未绑定任务），无图数据"
+			return out
+		}
 		// goals summary folded in so the planner needn't call list_goals each round.
 		goals, _ := t.ts.ListByKind(db.KindGoal, 100)
 		gsum := make([]map[string]any, 0, len(goals))
@@ -354,6 +376,9 @@ func (t *ToolSet) listFindings() actool.CoreTool {
 	return readTool("list_findings", "列【确认漏洞】(紧凑：id+task_id+intent_id+vulnclass+severity+摘要+状态)。task_id=该漏洞所属任务, intent_id=产生它的意图。这里只有漏洞,不含普通探索事实(那是 list_facts)。详情用 node_detail(id)。",
 		obj(map[string]any{}),
 		func(context.Context, json.RawMessage) (actool.Result, error) {
+			if t.ts == nil {
+				return actool.Errorf("探索图 store 不可用（该 agent 未绑定任务，无法读取 findings）"), nil
+			}
 			f, _ := t.ts.ListByKind(db.KindFinding, 500)
 			intentOf, _ := t.ts.FindingIntents() // finding id -> 产生它的 intent id
 			taskID := t.ts.ID()                  // exploration id = 任务 id（本 store 内所有 finding 同属）
@@ -374,6 +399,9 @@ func (t *ToolSet) listFacts() actool.CoreTool {
 	return readTool("list_facts", "列【探索事实/结论】(紧凑：id+摘要+状态),即 worker 按意图探出的结论(含'端口关闭/不可注入'等否定结论)。详情用 node_detail(id)。漏洞看 list_findings。",
 		obj(map[string]any{}),
 		func(context.Context, json.RawMessage) (actool.Result, error) {
+			if t.ts == nil {
+				return actool.Errorf("探索图 store 不可用（该 agent 未绑定任务，无法读取 facts）"), nil
+			}
 			f, _ := t.ts.ListByKind(db.KindFact, 500)
 			out := make([]map[string]any, 0, len(f))
 			for _, n := range f {
@@ -639,6 +667,9 @@ type factItem struct {
 func (t *ToolSet) recordOneFact(it factItem, defaultIntent int64) (int64, error) {
 	if strings.TrimSpace(it.Summary) == "" {
 		return 0, fmt.Errorf("summary 不能为空")
+	}
+	if t.ts == nil {
+		return 0, fmt.Errorf("探索图 store 不可用（任务已收尾/未绑定），无法写回 fact")
 	}
 	payload := map[string]any{"summary": it.Summary}
 	if it.Detail != "" {

@@ -6,7 +6,7 @@ import (
 	"github.com/RestXtra/RestXtraAI/db"
 )
 
-// Attack-pattern library / playbook API (ported from Pentest-RestXtra M5).
+// Attack-pattern library / playbook API (platform built-in).
 
 // GET /api/playbook/patterns — list with filters (technique/cve/verification/tag).
 func (s *Server) playbookListPatterns(w http.ResponseWriter, r *http.Request) {

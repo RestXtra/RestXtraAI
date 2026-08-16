@@ -5,6 +5,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-restxtra}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 设置 POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-restxtra}
+    ports:
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -34,9 +36,6 @@ services:
       # 把数据目录（含 jwt.key、transcripts 等）绑定到项目根目录的 data/，
       # 方便在宿主机直接查看/备份，容器重建也不丢。
       - ./data:/app/data
-      # 把项目根目录的 skills 挂进容器（覆盖镜像内置的 /app/skills）；
-      # 改 skill 无需重建镜像，容器读的就是宿主机这份。
-      - ./skills:/app/skills
     restart: unless-stopped
 
 volumes:

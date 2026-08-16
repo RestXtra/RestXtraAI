@@ -184,7 +184,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		tsx.SetOwnerNode(origin) // planner-side anchors default to the task root (origin fact)
 	}
 	// 领域工具 + 基础默认工具集（Read/Write/Edit/MultiEdit/LS/Glob/Grep/Bash）
-	base := append(tsx.PlannerTools(), actool.DefaultTools()...)
+	base := append(tsx.PlannerTools(), withHostBash(actool.DefaultTools())...)
 	tools, def, cleanup := AugmentTools(ctx, "planner", base)
 	defer cleanup()
 	// 关键态势（刚完成的意图 + 预取的完整图）放进 system prompt，而不是 user 输入：

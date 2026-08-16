@@ -370,7 +370,24 @@ function ExploreNode({ data, selected }: NodeProps<ExploreRFNode>) {
   );
 }
 
-const nodeTypes = { explore: ExploreNode };
+// 攻击链节点：target=红 / action=蓝 / vulnerability=琥珀。
+const AC_TYPE: Record<string, { label: string; cls: string }> = {
+  target: { label: "目标", cls: "border-red-500/70 bg-red-500/5 text-red-600 dark:text-red-400" },
+  action: { label: "动作", cls: "border-blue-500/70 bg-blue-500/5 text-blue-600 dark:text-blue-400" },
+  vulnerability: { label: "漏洞", cls: "border-amber-500/70 bg-amber-500/5 text-amber-600 dark:text-amber-400" },
+};
+
+function AttackNode({ data }: NodeProps<RFNode<{ label: string; kind: string }>>) {
+  const m = AC_TYPE[data.kind] ?? AC_TYPE.action;
+  return (
+    <div className={cn("w-44 rounded-xl border bg-card px-3 py-2 text-xs shadow-sm", m.cls)}>
+      <div className="font-medium">{data.label}</div>
+      <div className="mt-0.5 text-[10px] opacity-70">{m.label}</div>
+    </div>
+  );
+}
+
+const nodeTypes = { explore: ExploreNode, attack: AttackNode };
 
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -481,8 +498,57 @@ function GraphInner({ taskId }: { taskId: string }) {
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
   const [isEmpty, setIsEmpty] = React.useState(true);
   const [selected, setSelected] = React.useState<TaskNode | null>(null);
+  const [mode, setMode] = React.useState<"explore" | "attack">("explore");
+  const [acNodes, setAcNodes] = useNodesState<RFNode<{ label: string; kind: string }>>([]);
+  const [acEdges, setAcEdges] = useEdgesState<RFEdge>([]);
+  const [acMeta, setAcMeta] = React.useState<{ summary: string; risk: number } | null>(null);
+  const [acLoading, setAcLoading] = React.useState(false);
+
+  const loadAttack = React.useCallback(() => {
+    setAcLoading(true);
+    api
+      .taskAttackChain(taskId)
+      .then((c) => {
+        setAcMeta({ summary: c.summary, risk: c.risk_score });
+        const x = 60;
+        const y = 60;
+        const pos = new Map(c.nodes.map((n) => [n.id, { x: x + ((n.id - 1) % 3) * 240, y: y + Math.floor((n.id - 1) / 3) * 180 }]));
+        setAcNodes(
+          c.nodes.map((n) => ({
+            id: String(n.id),
+            type: "attack",
+            position: pos.get(n.id) ?? { x, y },
+            data: { label: n.label, kind: n.type },
+          })),
+        );
+        setAcEdges(
+          c.edges.map((e, i) => ({
+            id: `a${i}-${e.from}-${e.to}`,
+            source: String(e.from),
+            target: String(e.to),
+            label: e.type,
+            labelShowBg: false,
+            labelStyle: { fontSize: 10, fontWeight: 600, fill: "#64748b" },
+            style: { stroke: "#94a3b8", strokeWidth: 1.5 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: "#94a3b8", width: 12, height: 12 },
+          })),
+        );
+      })
+      .catch(() => {
+        setAcMeta(null);
+        setAcNodes([]);
+        setAcEdges([]);
+      })
+      .finally(() => setAcLoading(false));
+  }, [taskId, setAcNodes, setAcEdges]);
+
+  // 切换到攻击链视图时生成一次。
+  React.useEffect(() => {
+    if (mode === "attack") loadAttack();
+  }, [mode, loadAttack]);
 
   React.useEffect(() => {
+    if (mode !== "explore") return;
     let cancelled = false;
     const load = () => {
       api
@@ -545,75 +611,148 @@ function GraphInner({ taskId }: { taskId: string }) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [taskId, setRfNodes, setRfEdges]);
+  }, [taskId, mode, setRfNodes, setRfEdges]);
+
+  const toggle = (
+    <Panel position="top-right">
+      <div className="bg-card/95 flex items-center gap-1 rounded-lg border p-1 text-xs shadow-sm backdrop-blur">
+        {(
+          [
+            { k: "explore", label: "探索图" },
+            { k: "attack", label: "攻击链" },
+          ] as const
+        ).map((m) => (
+          <button
+            key={m.k}
+            type="button"
+            onClick={() => setMode(m.k)}
+            className={cn(
+              "rounded-md px-2.5 py-1 transition-colors",
+              mode === m.k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent",
+            )}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+    </Panel>
+  );
 
   return (
     <>
-    <ReactFlow
-      nodes={rfNodes}
-      edges={rfEdges}
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
-      onNodeClick={(_, node) => setSelected(node.data.node)}
-      nodeTypes={nodeTypes}
-      fitView
-      fitViewOptions={{ padding: 0.2 }}
-      proOptions={{ hideAttribution: true }}
-      minZoom={0.1}
-      className="!bg-[#f0f2f7] dark:!bg-neutral-950"
-    >
-      <Background
-        variant={BackgroundVariant.Dots}
-        gap={16}
-        size={1}
-        className="text-neutral-400/50 dark:text-neutral-700/60"
-      />
-      <Controls
-        showInteractive={false}
-        className="!rounded-lg !border !shadow-sm [&>button]:!border-border [&>button]:!bg-card [&>button:hover]:!bg-accent [&_svg]:!fill-foreground"
-      />
-      <MiniMap
-        pannable
-        zoomable
-        className="!bg-card !rounded-lg !border !shadow-sm"
-        maskColor="rgb(148 163 184 / 0.18)"
-        nodeColor={(node) => {
-          const data = node.data as ExploreNodeData | undefined;
-          const k = data?.node ? viewKind(data.node) : "intent";
-          return typeMeta[k]?.hex ?? "#94a3b8";
-        }}
-        nodeStrokeWidth={0}
-        nodeBorderRadius={4}
-      />
-      <Panel position="top-left">
-        <div className="bg-card/95 flex flex-col gap-2.5 rounded-lg border p-3 text-xs shadow-sm backdrop-blur">
-          {isEmpty && <span className="text-muted-foreground">暂无探索数据</span>}
-          <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-            {(["begin", "goal", "intent", "fact", "finding", "hint"] as ExploreKind[]).map((k) => {
-              const m = typeMeta[k];
-              const Icon = m.icon;
-              return (
-                <span key={k} className="text-foreground inline-flex items-center gap-1.5">
-                  <span className={cn("flex size-4 items-center justify-center rounded", m.iconBg)}>
-                    <Icon className="size-2.5 text-white" />
+      {toggle}
+      {mode === "attack" ? (
+        <ReactFlow
+          nodes={acNodes}
+          edges={acEdges}
+          nodeTypes={nodeTypes}
+          fitView
+          fitViewOptions={{ padding: 0.2 }}
+          proOptions={{ hideAttribution: true }}
+          minZoom={0.1}
+          className="!bg-[#f0f2f7] dark:!bg-neutral-950"
+        >
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={16}
+            size={1}
+            className="text-neutral-400/50 dark:text-neutral-700/60"
+          />
+          <Controls showInteractive={false} className="!rounded-lg !border !shadow-sm [&>button]:!border-border [&>button]:!bg-card [&>button:hover]:!bg-accent [&_svg]:!fill-foreground" />
+          <MiniMap pannable zoomable className="!bg-card !rounded-lg !border !shadow-sm" maskColor="rgb(148 163 184 / 0.18)" nodeStrokeWidth={0} nodeBorderRadius={4} />
+          <Panel position="top-left">
+            <div className="bg-card/95 flex max-w-xs flex-col gap-2 rounded-lg border p-3 text-xs shadow-sm backdrop-blur">
+              {acLoading ? (
+                <span className="text-muted-foreground">正在生成攻击链…</span>
+              ) : acMeta ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">攻击链</span>
+                    <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-600">风险 {acMeta.risk}</span>
+                  </div>
+                  <p className="text-muted-foreground">{acMeta.summary}</p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    {Object.entries(AC_TYPE).map(([k, m]) => (
+                      <span key={k} className="inline-flex items-center gap-1.5">
+                        <span className={cn("size-3 rounded", m.cls.split(" ")[0])} />
+                        {m.label}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <span className="text-muted-foreground">暂无攻击链（需任务先执行过工具）</span>
+              )}
+            </div>
+          </Panel>
+        </ReactFlow>
+      ) : (
+        <ReactFlow
+          nodes={rfNodes}
+          edges={rfEdges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onNodeClick={(_, node) => setSelected(node.data.node)}
+          nodeTypes={nodeTypes}
+          fitView
+          fitViewOptions={{ padding: 0.2 }}
+          proOptions={{ hideAttribution: true }}
+          minZoom={0.1}
+          className="!bg-[#f0f2f7] dark:!bg-neutral-950"
+        >
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={16}
+            size={1}
+            className="text-neutral-400/50 dark:text-neutral-700/60"
+          />
+          <Controls
+            showInteractive={false}
+            className="!rounded-lg !border !shadow-sm [&>button]:!border-border [&>button]:!bg-card [&>button:hover]:!bg-accent [&_svg]:!fill-foreground"
+          />
+          <MiniMap
+            pannable
+            zoomable
+            className="!bg-card !rounded-lg !border !shadow-sm"
+            maskColor="rgb(148 163 184 / 0.18)"
+            nodeColor={(node) => {
+              const data = node.data as ExploreNodeData | undefined;
+              const k = data?.node ? viewKind(data.node) : "intent";
+              return typeMeta[k]?.hex ?? "#94a3b8";
+            }}
+            nodeStrokeWidth={0}
+            nodeBorderRadius={4}
+          />
+          <Panel position="top-left">
+            <div className="bg-card/95 flex flex-col gap-2.5 rounded-lg border p-3 text-xs shadow-sm backdrop-blur">
+              {isEmpty && <span className="text-muted-foreground">暂无探索数据</span>}
+              <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+                {(["begin", "goal", "intent", "fact", "finding", "hint"] as ExploreKind[]).map((k) => {
+                  const m = typeMeta[k];
+                  const Icon = m.icon;
+                  return (
+                    <span key={k} className="text-foreground inline-flex items-center gap-1.5">
+                      <span className={cn("flex size-4 items-center justify-center rounded", m.iconBg)}>
+                        <Icon className="size-2.5 text-white" />
+                      </span>
+                      {m.label}
+                    </span>
+                  );
+                })}
+              </div>
+              <div className="border-border/60 text-muted-foreground flex flex-wrap gap-x-3 gap-y-1.5 border-t pt-2">
+                {Object.entries(relLabel).map(([k, v]) => (
+                  <span key={k} className="inline-flex items-center gap-1.5">
+                    <span className="h-0.5 w-4 rounded-full" style={{ backgroundColor: relColor[k] }} />
+                    {v}
                   </span>
-                  {m.label}
-                </span>
-              );
-            })}
-          </div>
-          <div className="border-border/60 text-muted-foreground flex flex-wrap gap-x-3 gap-y-1.5 border-t pt-2">
-            {Object.entries(relLabel).map(([k, v]) => (
-              <span key={k} className="inline-flex items-center gap-1.5">
-                <span className="h-0.5 w-4 rounded-full" style={{ backgroundColor: relColor[k] }} />
-                {v}
-              </span>
-            ))}
-          </div>
-        </div>
-      </Panel>
-    </ReactFlow>
-    <NodeDetailSheet node={selected} onOpenChange={(o) => !o && setSelected(null)} />
+                ))}
+              </div>
+            </div>
+          </Panel>
+        </ReactFlow>
+      )}
+      {mode === "explore" && <NodeDetailSheet node={selected} onOpenChange={(o) => !o && setSelected(null)} />}
     </>
   );
 }

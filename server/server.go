@@ -23,6 +23,7 @@ import (
 	"github.com/Autumn-27/norma/transcript"
 	"github.com/RestXtra/RestXtraAI/agent"
 	"github.com/RestXtra/RestXtraAI/db"
+	"github.com/RestXtra/RestXtraAI/llmrec"
 	"github.com/RestXtra/RestXtraAI/report"
 )
 
@@ -41,6 +42,7 @@ type Server struct {
 	chatAgent *agent.ChatAgent // conversational runner for the chat page; nil w/o LLM
 	llmCfg    agent.Config     // current LLM config (key not exposed)
 	llmOn     bool
+	llmProf   string // active LLM profile name (for llmrec tagging)
 
 	// chatBusy guards the per-task main-agent run: the chat handler launches the
 	// agent on the server's background ctx (not the request ctx) and returns
@@ -153,6 +155,58 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 			}
 			return a.TaskTimeoutWrapupMaxTurns, true
 		}
+		// 知识库检索工具接线：worker/planner/mainagent/pentest/auto 任务内可查 KB。
+		agent.KnowledgeSearch = func(ctx context.Context, q string, limit int) (string, error) {
+			items, err := m.pg.SearchKnowledge(q, limit)
+			if err != nil {
+				return "", err
+			}
+			rows := make([]struct{ Title, Content, Tags string }, 0, len(items))
+			for _, it := range items {
+				rows = append(rows, struct{ Title, Content, Tags string }{Title: it.Title, Content: it.Content, Tags: it.Tags})
+			}
+			return agent.FmtKnowledgeResult(rows), nil
+		}
+		// 攻击模式库检索工具接线：agent 按 CVE/技术/关键词复用已验证 playbook。
+		agent.PlaybookSearch = func(ctx context.Context, cve, technique, keywords string, limit int) (string, error) {
+			results, err := m.pg.SearchPlaybook(db.PlaybookQuery{
+				CVE: cve, Technique: technique, Keywords: keywords,
+			}, limit)
+			if err != nil {
+				return "", err
+			}
+			rows := make([]struct{ Title, CveID, Tags, Verification, ExecutionSteps string }, 0, len(results))
+			for _, r := range results {
+				if r.Pattern == nil {
+					continue
+				}
+				rows = append(rows, struct{ Title, CveID, Tags, Verification, ExecutionSteps string }{
+					Title: r.Pattern.Title, CveID: r.Pattern.CveID, Tags: r.Pattern.Tags,
+					Verification: r.Pattern.Verification, ExecutionSteps: r.Pattern.ExecutionSteps,
+				})
+			}
+			return agent.FmtPlaybookResults(rows), nil
+		}
+		// search_playbook 默认绑定（一次性）。
+		if v, _, _ := m.pg.GetSetting("playbook_tool_bind_v1"); v != "true" {
+			_ = m.pg.AddAgentToToolBinding("search_playbook", []string{"worker", "pentest", "auto"})
+			_ = m.pg.SetSetting("playbook_tool_bind_v1", "true")
+		}
+		// TSecBenchmark 跑分工具接线：worker/红队总指挥/pentest 可用 bench_* 自主跑分。
+		agent.BenchmarkCall = s.benchmarkCallForAgent
+		if v, _, _ := m.pg.GetSetting("bench_tool_bind_v1"); v != "true" {
+			for _, t := range []string{"bench_vpn_check", "bench_challenges", "bench_start", "bench_hint", "bench_submit", "bench_close"} {
+				_ = m.pg.AddAgentToToolBinding(t, []string{"worker", "red_team_lead", "pentest"})
+			}
+			_ = m.pg.SetSetting("bench_tool_bind_v1", "true")
+		}
+		// search_knowledge 默认额外绑定 pentest/auto（一次性，不覆盖用户改动）。
+		if v, _, _ := m.pg.GetSetting("knowledge_tool_bind_v1"); v != "true" {
+			_ = m.pg.AddAgentToToolBinding("search_knowledge", []string{"pentest", "auto"})
+			_ = m.pg.SetSetting("knowledge_tool_bind_v1", "true")
+		}
+		// 六域智能体体系（幂等播种：创建领域 agent + 绑定技能/MCP/工具）。
+		s.seedSixDomainAgents()
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
 		domainReg := buildDomainReg(m.Assets())
 		wireTools(m.pg, domainReg)                      // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
@@ -243,9 +297,13 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 	cfg.RatePerSecond, cfg.RatePerMinute = p.RatePerSecond, p.RatePerMinute
 	cfg.ContextWindowK = p.ContextWindowK
 	cfg.ReasoningEffort = p.ReasoningEffort
+	cfg.AuthMode = p.AuthMode
 	if cfg.APIKey == "" {
 		return cfg, false
 	}
+	s.cfgMu.Lock()
+	s.llmProf = p.Name
+	s.cfgMu.Unlock()
 	return cfg, true
 }
 
@@ -267,7 +325,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) {
 	newID, err := s.m.pg.SaveProfile(&db.LLMProfile{
 		ID: id, Name: "default", Format: format, Model: cfg.Model, BaseURL: cfg.BaseURL, Proxy: cfg.Proxy,
 		APIKey: cfg.APIKey, RatePerSecond: cfg.RatePerSecond, RatePerMinute: cfg.RatePerMinute,
-		ContextWindowK: cfg.ContextWindowK, ReasoningEffort: cfg.ReasoningEffort, IsDefault: true,
+		ContextWindowK: cfg.ContextWindowK, ReasoningEffort: cfg.ReasoningEffort, AuthMode: cfg.AuthMode, IsDefault: true,
 	})
 	if err == nil {
 		_ = s.m.pg.SetActiveProfile(newID)
@@ -328,6 +386,11 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	if err != nil {
 		return err
 	}
+	// Wrap provider with the LLM call recorder (persists request/response to PG).
+	s.cfgMu.Lock()
+	profName := s.llmProf
+	s.cfgMu.Unlock()
+	prov = llmrec.Wrap(prov, s.m.PG(), cfg.Model, profName, s.m.LLMRecordEnabled)
 	pl, wk := s.buildPlannerWorker(prov, cfg)
 	s.engine.UseLLM(pl, wk)
 
@@ -365,6 +428,7 @@ func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
 	cfg.RatePerSecond, cfg.RatePerMinute = p.RatePerSecond, p.RatePerMinute
 	cfg.ContextWindowK = p.ContextWindowK
 	cfg.ReasoningEffort = p.ReasoningEffort
+	cfg.AuthMode = p.AuthMode
 	if cfg.APIKey == "" {
 		return cfg, false
 	}
@@ -389,6 +453,10 @@ func (s *Server) agentsForProfile(id int64) (*agent.Planner, *agent.Worker) {
 		log.Printf("[engine] build provider for LLM profile %d failed: %v", id, err)
 		return nil, nil
 	}
+	// Wrap with recorder, tagged with this profile's name.
+	if p, _ := s.m.pg.ProfileByID(id); p != nil {
+		prov = llmrec.Wrap(prov, s.m.PG(), cfg.Model, p.Name, s.m.LLMRecordEnabled)
+	}
 	pl, wk := s.buildPlannerWorker(prov, cfg)
 	s.profAgents[id] = &profBundle{pl: pl, wk: wk}
 	log.Printf("[engine] built dedicated planner/worker for LLM profile %d (%s / %s)", id, cfg.Provider(), cfg.Model)
@@ -411,6 +479,10 @@ func (s *Server) chatAgentForProfile(id int64) *agent.ChatAgent {
 	if err != nil {
 		log.Printf("[chat] build provider for LLM profile %d failed: %v", id, err)
 		return nil
+	}
+	// Wrap with recorder, tagged with this profile's name.
+	if p, _ := s.m.pg.ProfileByID(id); p != nil {
+		prov = llmrec.Wrap(prov, s.m.PG(), cfg.Model, p.Name, s.m.LLMRecordEnabled)
 	}
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
 	win := cfg.CompactionWindow()
@@ -461,6 +533,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/tasks", s.listTasks)
 	mux.HandleFunc("POST /api/tasks", s.createTask)
 	mux.HandleFunc("GET /api/tasks/{id}", s.getTask)
+	mux.HandleFunc("GET /api/tasks/{id}/attack-chain", s.taskAttackChain)
 	mux.HandleFunc("POST /api/tasks/{id}/control", s.control)
 	mux.HandleFunc("POST /api/active", s.setActive)
 
@@ -497,6 +570,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/gc", s.gc)
 	mux.HandleFunc("GET /api/traffic", s.getTraffic)
 	mux.HandleFunc("GET /api/traffic/exchange", s.getTrafficExchange)
+	mux.HandleFunc("GET /api/commands", s.pgListCommands)
+	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
+	mux.HandleFunc("GET /api/llm/records/{id}", s.pgGetLLMRecord)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("POST /api/settings/web-search/test", s.testWebSearch)
@@ -622,6 +698,7 @@ func (s *Server) Handler() http.Handler {
 	// 攻击模式库 / playbook
 	mux.HandleFunc("GET /api/playbook/patterns", s.rbac("playbook.read", s.playbookListPatterns))
 	mux.HandleFunc("POST /api/playbook/patterns", s.rbac("playbook.write", s.playbookCreatePattern))
+	mux.HandleFunc("POST /api/playbook/reproduce", s.rbac("playbook.write", s.playbookReproduce))
 	mux.HandleFunc("DELETE /api/playbook/patterns/{id}", s.rbac("playbook.write", s.playbookDeletePattern))
 	mux.HandleFunc("POST /api/playbook/search", s.rbac("playbook.read", s.playbookSearch))
 	mux.HandleFunc("GET /api/playbook/stats", s.rbac("playbook.read", s.playbookStats))
@@ -634,6 +711,58 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/batch/queues/{id}/tasks", s.rbac("batch.read", s.batchListTasks))
 	mux.HandleFunc("POST /api/batch/queues/{id}/tasks", s.rbac("batch.write", s.batchAddTask))
 	mux.HandleFunc("DELETE /api/batch/tasks/{id}", s.rbac("batch.write", s.batchDeleteTask))
+
+	// 沙箱管理（主机 / 容器 / 出口范围）
+	mux.HandleFunc("GET /api/sandbox/hosts", s.rbac("sandbox.read", s.sandboxListHosts))
+	mux.HandleFunc("POST /api/sandbox/hosts", s.rbac("sandbox.write", s.sandboxUpsertHost))
+	mux.HandleFunc("DELETE /api/sandbox/hosts/{id}", s.rbac("sandbox.write", s.sandboxDeleteHost))
+	mux.HandleFunc("POST /api/sandbox/hosts/{id}/ping", s.rbac("sandbox.read", s.sandboxPingHost))
+	mux.HandleFunc("GET /api/sandbox/hosts/{id}/containers", s.rbac("sandbox.read", s.sandboxListContainers))
+	mux.HandleFunc("GET /api/sandbox/hosts/{id}/images", s.rbac("sandbox.read", s.sandboxListImages))
+	mux.HandleFunc("POST /api/sandbox/hosts/{id}/containers", s.rbac("sandbox.write", s.sandboxCreateContainer))
+	mux.HandleFunc("POST /api/sandbox/hosts/{id}/containers/{cid}/{action}", s.rbac("sandbox.write", s.sandboxContainerAction))
+	mux.HandleFunc("GET /api/sandbox/egress", s.rbac("sandbox.read", s.sandboxListEgress))
+	mux.HandleFunc("POST /api/sandbox/egress", s.rbac("sandbox.write", s.sandboxUpsertEgress))
+	mux.HandleFunc("DELETE /api/sandbox/egress/{id}", s.rbac("sandbox.write", s.sandboxDeleteEgress))
+
+	// 工作流图引擎
+	mux.HandleFunc("POST /api/workflows/validate", s.workflowValidate)
+	mux.HandleFunc("POST /api/workflows/save", s.workflowSave)
+	mux.HandleFunc("GET /api/workflows", s.workflowList)
+	mux.HandleFunc("GET /api/workflows/{id}", s.workflowGet)
+	mux.HandleFunc("PUT /api/workflows/{id}", s.workflowSave)
+	mux.HandleFunc("DELETE /api/workflows/{id}", s.workflowDelete)
+	mux.HandleFunc("POST /api/workflows/{id}/run", s.workflowRun)
+	mux.HandleFunc("GET /api/workflows/{id}/runs", s.workflowRuns)
+	mux.HandleFunc("GET /api/workflow-runs/{id}", s.workflowRunDetail)
+	mux.HandleFunc("POST /api/workflows/dry-run", s.workflowDryRun)
+
+	// 平台扩展：工作空间 / 知识库 / WebShell / C2
+	mux.HandleFunc("GET /api/workspace/list", s.workspaceList)
+	mux.HandleFunc("GET /api/workspace/read", s.workspaceRead)
+	mux.HandleFunc("GET /api/knowledge", s.knowledgeList)
+	mux.HandleFunc("POST /api/knowledge", s.knowledgeSave)
+	mux.HandleFunc("POST /api/knowledge/search", s.knowledgeSearch)
+	mux.HandleFunc("DELETE /api/knowledge/{id}", s.knowledgeDelete)
+	mux.HandleFunc("GET /api/webshell", s.webshellList)
+	mux.HandleFunc("POST /api/webshell", s.webshellSave)
+	mux.HandleFunc("DELETE /api/webshell/{id}", s.webshellDelete)
+	mux.HandleFunc("POST /api/webshell/test", s.webshellTest)
+	mux.HandleFunc("GET /api/c2", s.c2List)
+	mux.HandleFunc("POST /api/c2/listeners", s.c2SaveListener)
+	mux.HandleFunc("DELETE /api/c2/listeners/{id}", s.c2DeleteListener)
+	mux.HandleFunc("POST /api/c2/ingest", s.c2Ingest)
+	mux.HandleFunc("POST /api/c2/status", s.c2SetStatus)
+
+	// TSecBenchmark 跑分
+	mux.HandleFunc("GET /api/benchmark/config", s.benchGetConfig)
+	mux.HandleFunc("POST /api/benchmark/config", s.benchSetConfig)
+	mux.HandleFunc("GET /api/benchmark/vpn", s.benchVPNCheck)
+	mux.HandleFunc("GET /api/benchmark/challenges", s.benchChallenges)
+	mux.HandleFunc("POST /api/benchmark/start", s.benchStart)
+	mux.HandleFunc("GET /api/benchmark/hint", s.benchHint)
+	mux.HandleFunc("POST /api/benchmark/submit", s.benchSubmit)
+	mux.HandleFunc("POST /api/benchmark/close", s.benchClose)
 
 	// /api/* goes through CORS + JWT; everything else is served by the embedded
 	// frontend (public — auth is enforced client-side and on the API). With the
@@ -834,6 +963,7 @@ func (s *Server) getLLM(w http.ResponseWriter, r *http.Request) {
 		"rate_per_minute":  s.llmCfg.RatePerMinute,
 		"context_window_k": s.llmCfg.ContextWindowK,
 		"reasoning_effort": s.llmCfg.ReasoningEffort,
+		"auth_mode":        s.llmCfg.AuthMode,
 	})
 }
 
@@ -849,6 +979,7 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		RatePerMinute   float64 `json:"rate_per_minute"`
 		ContextWindowK  int     `json:"context_window_k"`
 		ReasoningEffort string  `json:"reasoning_effort"`
+		AuthMode        string  `json:"auth_mode"` // ""|x-api-key|bearer
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -857,6 +988,7 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
 	cfg.RatePerSecond, cfg.RatePerMinute = req.RatePerSecond, req.RatePerMinute
 	cfg.ReasoningEffort = req.ReasoningEffort
+	cfg.AuthMode = req.AuthMode
 	if k := req.ContextWindowK; k > 0 { // 0 = keep default (200K); cap at 1M
 		if k > 1000 {
 			k = 1000
@@ -890,6 +1022,7 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		Proxy           string `json:"proxy"`
 		APIKey          string `json:"api_key"`
 		ReasoningEffort string `json:"reasoning_effort"`
+		AuthMode        string `json:"auth_mode"` // ""|x-api-key|bearer
 		ProfileID       *int64 `json:"profile_id"` // 测已存 profile 时传入：api_key 为空则用它存的 key
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -900,6 +1033,13 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// mirror production: send the SAME thinking params so a provider that rejects the
 	// reasoning_effort/thinking field fails the test too (no false "test ok, run 400").
 	cfg.ReasoningEffort = req.ReasoningEffort
+	// 认证头与已存 profile 一致（profile 存的 auth_mode 优先于表单，因表单可能未选）。
+	if req.AuthMode == "" && req.ProfileID != nil {
+		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
+			req.AuthMode = p.AuthMode
+		}
+	}
+	cfg.AuthMode = req.AuthMode
 	// API Key 解析优先级：表单输入 > 指定 profile 存的 key > 全局配置的 key。
 	// 已存 profile 的 key 不回传浏览器，所以测试已存配置时表单为空，需从 DB 取。
 	if cfg.APIKey == "" && req.ProfileID != nil {
@@ -924,11 +1064,29 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "latency_ms": lat.Milliseconds(), "model": cfg.Model})
 }
 
+// TaskWorkflow is the optional user-authored "工作流" attached to a task: a
+// curated list of initial exploration directions (intents) + strategic hints.
+// 工作流不是写死的步骤编排，而是给引擎一个聚焦的
+// 起点：steps 作为初始 intent 预填进 frontier（优先级递减、按顺序领取），
+// hints 作为战略提示供 planner 首轮读取。随后引擎照常自治推进。
+type TaskWorkflow struct {
+	Steps []TaskWorkflowStep `json:"steps,omitempty"`
+	Hints []string           `json:"hints,omitempty"`
+}
+
+type TaskWorkflowStep struct {
+	Summary  string `json:"summary"`
+	Priority *int   `json:"priority,omitempty"` // 0/缺省 = 按步骤序号自动递减(100-i)
+	Agent    string `json:"agent,omitempty"`    // 指定执行 agent key；""=默认 worker
+	Kind     string `json:"kind,omitempty"`     // "step"|"decision"；decision=判断节点
+}
+
 type createTaskReq struct {
-	Description    string `json:"description"`
-	Goal           string `json:"goal"`
-	LLMProfileID   *int64 `json:"llm_profile_id,omitempty"` // 指定运行本任务的 LLM 配置;省略/null=用激活配置
-	TimeoutSeconds int    `json:"timeout_seconds"`          // 任务级超时(秒);0/省略=不限时
+	Description    string        `json:"description"`
+	Goal           string        `json:"goal"`
+	LLMProfileID   *int64        `json:"llm_profile_id,omitempty"` // 指定运行本任务的 LLM 配置;省略/null=用激活配置
+	TimeoutSeconds int           `json:"timeout_seconds"`          // 任务级超时(秒);0/省略=不限时
+	Workflow       *TaskWorkflow `json:"workflow,omitempty"`       // 可选：初始探索方向 + 战略提示
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
@@ -977,8 +1135,60 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 			}
 			s.engine.emitActivity(t, db.Activity{Worker: "planner", Kind: "text", Summary: summary})
 		}
+		s.seedWorkflow(t, req.Workflow) // 预填初始探索方向 + 提示，再启动引擎
 		s.engine.Run(s.ctx, t)
 	}()
+}
+
+// seedWorkflow materializes a user-authored workflow into the exploration graph:
+// each step becomes an open intent on the frontier (priority descending → claimed
+// in workflow order), each hint becomes a hint node the planner reads on round one.
+func (s *Server) seedWorkflow(t *Task, wf *TaskWorkflow) {
+	if wf == nil {
+		return
+	}
+	origin, _ := t.Store.OriginFactID()
+	if len(wf.Steps) > 0 {
+		log.Printf("[workflow] task %s: 预填 %d 个初始探索方向", t.ID, len(wf.Steps))
+	}
+	for i, st := range wf.Steps {
+		summary := strings.TrimSpace(st.Summary)
+		if summary == "" {
+			continue
+		}
+		prio := 100 - i // 步骤 1 最高优先级，按顺序领取
+		if st.Priority != nil && *st.Priority > 0 {
+			prio = *st.Priority
+		}
+		payload := map[string]any{"summary": summary, "workflow_step": i + 1}
+		if strings.TrimSpace(st.Agent) != "" {
+			payload["agent"] = strings.TrimSpace(st.Agent)
+		}
+		if strings.TrimSpace(st.Kind) != "" {
+			payload["kind"] = strings.TrimSpace(st.Kind)
+		}
+		id, err := t.Store.AddIntent(payload, prio, nil, "human")
+		if err != nil {
+			log.Printf("[workflow] task %s: 播种步骤 %d 失败: %v", t.ID, i+1, err)
+			continue
+		}
+		if origin > 0 && id > 0 {
+			_ = t.Store.Link(origin, db.RelSpawns, id)
+		}
+		s.engine.emitActivity(t, db.Activity{Worker: "planner", Kind: "intent", Summary: summary})
+	}
+	for _, h := range wf.Hints {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			continue
+		}
+		if _, err := t.Store.AddNode(db.KindHint, map[string]any{"text": h}, 0, "active", "human", nil); err != nil {
+			log.Printf("[workflow] task %s: 播种提示失败: %v", t.ID, err)
+			continue
+		}
+		s.engine.emitActivity(t, db.Activity{Worker: "planner", Kind: "hint", Summary: h})
+	}
+	t.Notify()
 }
 
 var (
@@ -1474,6 +1684,7 @@ func (s *Server) settingsPayload() map[string]any {
 	pyStored, _, _ := s.m.pg.GetSetting(settingPythonInterp)
 	return map[string]any{
 		"traffic_capture":     s.m.TrafficEnabled(),
+		"llm_record":          s.m.LLMRecordEnabled(),
 		"web_search_enabled":  on,
 		"web_search_backend":  backend,
 		"brave_key_set":       strings.TrimSpace(braveKey) != "",
@@ -1504,6 +1715,7 @@ func (s *Server) pgDetectPython(w http.ResponseWriter, r *http.Request) {
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TrafficCapture *bool `json:"traffic_capture"`
+		LLMRecord      *bool `json:"llm_record"` // LLM 录制开关（默认关）；即时生效，无需重建 agent
 		// Web search. WebSearchEnabled/Backend toggle the tool + backend; BraveKey/TavilyKey
 		// are optional — omit (null) to leave a stored key untouched, send "" to clear.
 		WebSearchEnabled *bool   `json:"web_search_enabled"`
@@ -1526,6 +1738,13 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.PythonInterp != nil {
 		if err := s.m.pg.SetSetting(settingPythonInterp, strings.TrimSpace(*req.PythonInterp)); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.LLMRecord != nil {
+		// 录制器每次调用读该标志，切换即时生效，无需 applyLLM 重建。
+		if err := s.m.SetLLMRecordEnabled(*req.LLMRecord); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}

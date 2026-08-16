@@ -1,0 +1,23 @@
+name: nuclei
+command: nuclei
+description: 模板化漏洞扫描器：批量跑已知 CVE/配置缺陷模板（-u 目标 / -l 列表）。
+short_description: 漏洞扫描：CVE/配置缺陷模板批量检测
+enabled: true
+parameters:
+  - name: target
+    type: string
+    flag: "-u"
+    format: flag
+  - name: list
+    type: string
+    flag: "-l"
+    format: flag
+  - name: tags
+    type: string
+    flag: "-tags"
+    format: flag
+  - name: severity
+    type: string
+    flag: "-severity"
+    format: flag
+additional_args: ["-silent"]

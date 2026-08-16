@@ -10,7 +10,7 @@ import (
 )
 
 // DTO/serialization layer: each handler emits EXACTLY the frontend's spec shapes
-// (artex/web/src/lib/types.ts). These reshape db package structs so the
+// (web/src/lib/types.ts). These reshape db package structs so the
 // internal DB model never leaks over the API. The db structs and the frontend are
 // the canonical contracts; this file maps one onto the other.
 
@@ -348,6 +348,7 @@ type LLMProfileDTO struct {
 	RatePerMinute   float64 `json:"rate_per_minute"`
 	ContextWindowK  int     `json:"context_window_k"`
 	ReasoningEffort string  `json:"reasoning_effort"`
+	AuthMode        string  `json:"auth_mode,omitempty"`
 	IsDefault       bool    `json:"is_default"`
 }
 
@@ -364,6 +365,7 @@ func llmProfileDTO(p *db.LLMProfile) LLMProfileDTO {
 		RatePerMinute:   p.RatePerMinute,
 		ContextWindowK:  p.ContextWindowK,
 		ReasoningEffort: p.ReasoningEffort,
+		AuthMode:        p.AuthMode,
 		IsDefault:       p.IsDefault,
 	}
 }

@@ -1,0 +1,23 @@
+name: ffuf
+command: ffuf
+description: 快速模糊测试：目录/参数/子域（-u + -w 字典；常用 -u URL/FUZZ）。
+short_description: 模糊测试：目录/参数/子域（ffuf）
+enabled: true
+parameters:
+  - name: url
+    type: string
+    flag: "-u"
+    format: flag
+  - name: wordlist
+    type: string
+    flag: "-w"
+    format: flag
+  - name: mc
+    type: string
+    flag: "-mc"
+    format: flag
+  - name: threads
+    type: string
+    flag: "-t"
+    format: flag
+additional_args: ["-ac"]

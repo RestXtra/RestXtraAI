@@ -1,0 +1,19 @@
+name: subfinder
+command: subfinder
+description: 子域名枚举：从被动源收集目标子域（-d 域名 / -dL 列表）。
+short_description: 子域名枚举（被动源收集）
+enabled: true
+parameters:
+  - name: domain
+    type: string
+    flag: "-d"
+    format: flag
+  - name: list
+    type: string
+    flag: "-dL"
+    format: flag
+  - name: silent
+    type: boolean
+    flag: "-silent"
+    format: flag
+additional_args: []

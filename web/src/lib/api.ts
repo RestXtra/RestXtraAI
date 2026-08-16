@@ -6,20 +6,64 @@
 import { MOCK } from "@/lib/mock/enabled";
 import { mockHandle } from "@/lib/mock/handler";
 import type {
-  Task, Stats, Asset, AssetNode, Edge, Company, TaskNode, Finding, Activity,
-  Audit, TrafficResp, TrafficDetail, Settings, LLMProfile, Agent, AgentDetail, PromptVar,
-  PromptVersion, MCPServer, MCPTool, SkillItem, TokenUsage, TokenTotal, DailyTokenBucket,
-  Tool, Conversation, AgentTrigger,
-  InterceptRule, InterceptPending, InterceptApprovalRow,
-  TaskAssetView, SSProject, SSTask, ConvTokenSummary,
-  MyProfile, PermissionPoint, PlatformUser, PlatformRole, AuditLogEntry,
-  AttackPattern, PlaybookResult,
-  BatchQueue, BatchTask,
+  Activity,
+  Agent,
+  AgentDetail,
+  AgentTrigger,
+  Asset,
+  AttackPattern,
+  Audit,
+  AuditLogEntry,
+  BatchQueue,
+  BatchTask,
+  CommandRecord,
+  Company,
+  Conversation,
+  ConvTokenSummary,
+  DailyTokenBucket,
+  DockerImage,
+  Edge,
+  Finding,
+  InterceptApprovalRow,
+  InterceptPending,
+  InterceptRule,
+  LLMProfile,
+  LLMRecordDetail,
+  LLMRecordItem,
+  MCPServer,
+  MCPTool,
+  MyProfile,
+  PermissionPoint,
+  PlatformRole,
+  PlatformUser,
+  PlaybookResult,
+  PromptVar,
+  PromptVersion,
+  SandboxContainer,
+  SandboxEgress,
+  SandboxHost,
+  Settings,
+  SkillItem,
+  SSProject,
+  SSTask,
+  Stats,
+  Task,
+  TaskNode,
+  TaskWorkflow,
+  TokenTotal,
+  TokenUsage,
+  Tool,
+  TrafficDetail,
+  TrafficResp,
+  WorkflowGraphDef,
+  WorkflowGraphMeta,
+  WorkflowRunItem,
+  KnowledgeItem, WebshellConn, C2Listener, C2Session, WorkspaceEntry,
 } from "@/lib/types";
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("artex_token");
+  return localStorage.getItem("restxtra_token");
 }
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
@@ -35,8 +79,8 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (r.status === 401) {
     if (typeof window !== "undefined") {
-      localStorage.removeItem("artex_token");
-      document.cookie = "artex_token=; path=/; max-age=0";
+      localStorage.removeItem("restxtra_token");
+      document.cookie = "restxtra_token=; path=/; max-age=0";
       window.location.href = "/login";
     }
     throw new Error("未授权");
@@ -56,7 +100,7 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 // browser does not send cookies cross-port.
 // mockReport returns a canned Markdown report for the demo.
 function mockReport(_task?: string): string {
-  return `# ARTEX 渗透测试报告 — Acme Corp
+  return `# RestXtra 渗透测试报告 — Acme Corp
 
 ## 概览
 - 范围：acme.com（含 www / admin / api / shop / vpn 子域）
@@ -80,18 +124,19 @@ function mockReport(_task?: string): string {
 export function sseUrl(path: string): string {
   const base =
     process.env.NEXT_PUBLIC_SSE_BASE ??
-    (typeof window !== "undefined"
-      ? `${window.location.protocol}//${window.location.hostname}:8787`
-      : "");
+    (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8787` : "");
   const token = getToken();
   const sep = path.includes("?") ? "&" : "?";
   return token ? `${base}${path}${sep}token=${encodeURIComponent(token)}` : `${base}${path}`;
 }
 
 const get = <T>(p: string) => http<T>(p);
-const post = <T>(p: string, body?: unknown) => http<T>(p, { method: "POST", body: body ? JSON.stringify(body) : undefined });
-const put = <T>(p: string, body?: unknown) => http<T>(p, { method: "PUT", body: body ? JSON.stringify(body) : undefined });
-const patch = <T>(p: string, body?: unknown) => http<T>(p, { method: "PATCH", body: body ? JSON.stringify(body) : undefined });
+const post = <T>(p: string, body?: unknown) =>
+  http<T>(p, { method: "POST", body: body ? JSON.stringify(body) : undefined });
+const put = <T>(p: string, body?: unknown) =>
+  http<T>(p, { method: "PUT", body: body ? JSON.stringify(body) : undefined });
+const patch = <T>(p: string, body?: unknown) =>
+  http<T>(p, { method: "PATCH", body: body ? JSON.stringify(body) : undefined });
 const del = <T>(p: string) => http<T>(p, { method: "DELETE" });
 
 // Go serializes nil slices as JSON null — coerce to [].
@@ -101,19 +146,38 @@ const tq = (task?: string, sep: "?" | "&" = "?") => (task ? `${sep}task=${encode
 export const api = {
   // ---- auth ----
   authStatus: () => get<{ initialized: boolean }>("/auth/status"),
-  login: (username: string, password: string) =>
-    post<{ token: string }>("/auth/login", { username, password }),
-  initPassword: (password: string) =>
-    post<{ token: string }>("/auth/init", { password }),
+  login: (username: string, password: string) => post<{ token: string }>("/auth/login", { username, password }),
+  initPassword: (password: string) => post<{ token: string }>("/auth/init", { password }),
   changePassword: (oldPassword: string, newPassword: string) =>
     post<{ ok: boolean }>("/auth/change-password", { old_password: oldPassword, new_password: newPassword }),
 
   // ---- tasks ----
-  tasks: () => get<{ tasks: Task[]; active: string }>("/tasks").then((r) => ({ tasks: arr(r.tasks), active: r.active ?? "" })),
-  createTask: (description: string, goal: string, llmProfileId?: number, timeoutSeconds?: number) =>
-    post<Task>("/tasks", { description, goal, llm_profile_id: llmProfileId ?? null, timeout_seconds: timeoutSeconds ?? 0 }),
+  tasks: () =>
+    get<{ tasks: Task[]; active: string }>("/tasks").then((r) => ({ tasks: arr(r.tasks), active: r.active ?? "" })),
+  createTask: (
+    description: string,
+    goal: string,
+    llmProfileId?: number,
+    timeoutSeconds?: number,
+    workflow?: TaskWorkflow,
+  ) =>
+    post<Task>("/tasks", {
+      description,
+      goal,
+      llm_profile_id: llmProfileId ?? null,
+      timeout_seconds: timeoutSeconds ?? 0,
+      workflow,
+    }),
   deleteTask: (id: string) => del<{ deleted: number }>(`/tasks/${id}`),
-  controlTask: (id: string, action: "pause" | "resume") => post<{ id: string; paused: boolean }>(`/tasks/${id}/control`, { action }),
+  controlTask: (id: string, action: "pause" | "resume") =>
+    post<{ id: string; paused: boolean }>(`/tasks/${id}/control`, { action }),
+  taskAttackChain: (id: string) =>
+    get<{
+      summary: string;
+      risk_score: number;
+      nodes: { id: number; type: string; label: string }[];
+      edges: { from: number; to: number; type: string }[];
+    }>(`/tasks/${id}/attack-chain`),
   setActive: (id: string) => post<{ active: string }>("/active", { id }),
   // ---- stats ----
   stats: (task?: string) => get<Stats>(`/stats${tq(task)}`),
@@ -121,8 +185,9 @@ export const api = {
   // ---- assets ----
   // Server-side paginated: pass limit/offset, get back the page + full match total.
   assets: (type = "", limit = 50, offset = 0) =>
-    get<{ count: number; total: number; assets: Asset[] }>(`/assets?type=${type}&limit=${limit}&offset=${offset}`)
-      .then((r) => ({ assets: r?.assets ?? [], total: r?.total ?? r?.count ?? 0 })),
+    get<{ count: number; total: number; assets: Asset[] }>(`/assets?type=${type}&limit=${limit}&offset=${offset}`).then(
+      (r) => ({ assets: r?.assets ?? [], total: r?.total ?? r?.count ?? 0 }),
+    ),
   searchAssets: (dsl: string, type = "", limit = 50, offset = 0) =>
     get<{ count: number; total: number; assets: Asset[] }>(
       `/assets?dsl=${encodeURIComponent(dsl)}${type ? `&type=${encodeURIComponent(type)}` : ""}&limit=${limit}&offset=${offset}`,
@@ -132,26 +197,45 @@ export const api = {
     http<{ deleted: number }>("/assets", { method: "DELETE", body: JSON.stringify({ ids }) }),
   // legacy — kept for task-specific views; hits the same endpoint with task_id filter
   taskAssets: (taskId: string, type = "") =>
-    get<{ count: number; assets: Asset[] }>(`/assets?task_id=${taskId}&type=${type}`)
-      .then((r) => r?.assets ?? []),
+    get<{ count: number; assets: Asset[] }>(`/assets?task_id=${taskId}&type=${type}`).then((r) => r?.assets ?? []),
 
   // ---- companies (企业 + 资产范围；归属唯一来源) ----
   companies: () => get<Company[]>("/companies").then(arr),
   createCompany: (name: string, logo: string, scope: string) =>
     post<{ id: number; created: boolean; scope_added?: number; scope_invalid?: number; scope_errors?: string[] }>(
       "/companies",
-      { name, logo, scope: scope.trim() ? scope.split("\n").map((s) => s.trim()).filter(Boolean) : [] },
+      {
+        name,
+        logo,
+        scope: scope.trim()
+          ? scope
+              .split("\n")
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : [],
+      },
     ),
   addCompanyScope: (id: number, scope: string, reason = "") =>
-    post<{ added: number; skipped: number; invalid: number; errors?: string[] }>(
-      `/companies/${id}/scope`,
-      { scope: scope.trim() ? scope.split("\n").map((s) => s.trim()).filter(Boolean) : [], reason },
-    ),
+    post<{ added: number; skipped: number; invalid: number; errors?: string[] }>(`/companies/${id}/scope`, {
+      scope: scope.trim()
+        ? scope
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [],
+      reason,
+    }),
   updateCompanyScope: (id: number, scope: string, reason = "") =>
-    post<{ added: number; skipped: number; invalid: number; errors?: string[] }>(
-      `/companies/${id}/scope`,
-      { scope: scope.trim() ? scope.split("\n").map((s) => s.trim()).filter(Boolean) : [], reason, reset: true },
-    ),
+    post<{ added: number; skipped: number; invalid: number; errors?: string[] }>(`/companies/${id}/scope`, {
+      scope: scope.trim()
+        ? scope
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [],
+      reason,
+      reset: true,
+    }),
   deleteCompany: (id: number, deleteAssets = false) =>
     http<{ deleted: number; assets_deleted: number }>(`/companies/${id}`, {
       method: "DELETE",
@@ -167,10 +251,11 @@ export const api = {
       workers: arr(r.workers),
       total: r.total,
     })),
-  tokenDaily: (days = 30) =>
-    get<DailyTokenBucket[]>(`/tokens/daily?days=${days}`).then(arr),
+  tokenDaily: (days = 30) => get<DailyTokenBucket[]>(`/tokens/daily?days=${days}`).then(arr),
   conversationTokens: () =>
-    get<ConvTokenSummary[]>("/tokens/conversations").then(arr).catch(() => [] as ConvTokenSummary[]),
+    get<ConvTokenSummary[]>("/tokens/conversations")
+      .then(arr)
+      .catch(() => [] as ConvTokenSummary[]),
   explorationGraph: (task?: string) => get<{ nodes: TaskNode[]; edges: Edge[] }>(`/exploration/graph${tq(task)}`),
   activity: (task?: string, opts?: { intent?: string; since?: number; limit?: number }) => {
     const q = new URLSearchParams();
@@ -178,7 +263,10 @@ export const api = {
     if (opts?.intent) q.set("intent", opts.intent);
     if (opts?.since) q.set("since", String(opts.since));
     if (opts?.limit) q.set("limit", String(opts.limit));
-    return get<{ items: Activity[]; cursor: number }>(`/exploration/activity?${q.toString()}`).then((r) => ({ items: arr(r.items), cursor: r.cursor ?? 0 }));
+    return get<{ items: Activity[]; cursor: number }>(`/exploration/activity?${q.toString()}`).then((r) => ({
+      items: arr(r.items),
+      cursor: r.cursor ?? 0,
+    }));
   },
   activityDetail: (id: number, task?: string) => get<{ detail: string }>(`/exploration/activity/${id}${tq(task)}`),
 
@@ -191,15 +279,18 @@ export const api = {
         (method && method !== "all" ? `&method=${encodeURIComponent(method)}` : "") +
         (q ? `&q=${encodeURIComponent(q)}` : ""),
     ),
-  trafficExchange: (id: string) =>
-    get<TrafficDetail>(`/traffic/exchange?id=${encodeURIComponent(id)}`),
+  trafficExchange: (id: string) => get<TrafficDetail>(`/traffic/exchange?id=${encodeURIComponent(id)}`),
 
   // ---- app settings (runtime toggles) ----
   settings: () => get<Settings>(`/settings`),
   setSettings: (patch: Partial<Settings>) => put<Settings>(`/settings`, patch),
   // Run a real "test" search with the given (or saved) config to verify it works.
-  testWebSearch: (patch: { web_search_backend?: string; web_search_proxy?: string; brave_search_api_key?: string; tavily_search_api_key?: string }) =>
-    post<{ ok: boolean; error?: string; count?: number; backend?: string }>(`/settings/web-search/test`, patch),
+  testWebSearch: (patch: {
+    web_search_backend?: string;
+    web_search_proxy?: string;
+    brave_search_api_key?: string;
+    tavily_search_api_key?: string;
+  }) => post<{ ok: boolean; error?: string; count?: number; backend?: string }>(`/settings/web-search/test`, patch),
   report: async (task?: string) => {
     if (MOCK) return mockReport(task);
     const token = getToken();
@@ -214,9 +305,29 @@ export const api = {
   gc: (ttl = 86400) => post<{ removed: number }>(`/gc?ttl=${ttl}`, {}),
 
   // ---- LLM ----
-  getLLM: () => get<{ configured: boolean; provider: string; model: string; base_url: string; proxy?: string; key_set: boolean; rate_per_second?: number; rate_per_minute?: number; context_window_k?: number; reasoning_effort?: string }>("/llm"),
-  setLLM: (provider: string, model: string, base_url: string, api_key: string, rate_per_second = 0, rate_per_minute = 0, proxy = "", context_window_k = 0) =>
-    post("/llm", { provider, model, base_url, proxy, api_key, rate_per_second, rate_per_minute, context_window_k }),
+  getLLM: () =>
+    get<{
+      configured: boolean;
+      provider: string;
+      model: string;
+      base_url: string;
+      proxy?: string;
+      key_set: boolean;
+      rate_per_second?: number;
+      rate_per_minute?: number;
+      context_window_k?: number;
+      reasoning_effort?: string;
+    }>("/llm"),
+  setLLM: (
+    provider: string,
+    model: string,
+    base_url: string,
+    api_key: string,
+    rate_per_second = 0,
+    rate_per_minute = 0,
+    proxy = "",
+    context_window_k = 0,
+  ) => post("/llm", { provider, model, base_url, proxy, api_key, rate_per_second, rate_per_minute, context_window_k }),
   testLLM: (
     provider: string,
     model: string,
@@ -225,6 +336,7 @@ export const api = {
     proxy = "",
     reasoning_effort = "",
     profile_id?: number,
+    auth_mode = "",
   ) =>
     post<{ ok: boolean; error?: string; latency_ms?: number; model?: string }>("/llm/test", {
       provider,
@@ -233,6 +345,7 @@ export const api = {
       proxy,
       api_key,
       reasoning_effort,
+      auth_mode,
       profile_id,
     }),
   llmProfiles: () => get<{ profiles: LLMProfile[] }>("/llm/profiles").then((r) => arr(r.profiles)),
@@ -248,6 +361,7 @@ export const api = {
     rate_per_minute?: number;
     context_window_k?: number;
     reasoning_effort?: string; // ""|"off"|"low"|"medium"|"high"|"max"
+    auth_mode?: string; // ""|"x-api-key"|"bearer" (bearer=Authorization: Bearer, 兼容 ANTHROPIC_AUTH_TOKEN)
   }) => post<{ id: number }>("/llm/profiles", p),
   deleteLLMProfile: (id: string) => del<{ deleted: number }>(`/llm/profiles/${id}`),
   activateLLMProfile: (id: string) => post<{ ok: boolean }>("/llm/profiles/active", { id: Number(id) }),
@@ -255,8 +369,7 @@ export const api = {
   // ---- agents ----
   agents: () => get<{ agents: Agent[] }>("/agents").then((r) => arr(r.agents)),
   getAgent: (key: string) => get<AgentDetail>(`/agents/${key}`),
-  createAgent: (key: string, name: string, description = "") =>
-    post<Agent>("/agents", { key, name, description }),
+  createAgent: (key: string, name: string, description = "") => post<Agent>("/agents", { key, name, description }),
   updateAgent: (key: string, name: string, description = "") =>
     patch<{ ok: boolean }>(`/agents/${key}`, { name, description }),
   deleteAgent: (key: string) => del<{ deleted: string }>(`/agents/${key}`),
@@ -278,7 +391,8 @@ export const api = {
   sendConversationMessage: (id: number, message: string) =>
     post<{ status: string }>(`/conversations/${id}/messages`, { message }),
   stopConversation: (id: number) => post<{ status: string }>(`/conversations/${id}/stop`, {}),
-  saveAgentPrompt: (key: string, template: string, note = "") => put<{ version: number }>(`/agents/${key}/prompt`, { template, note }),
+  saveAgentPrompt: (key: string, template: string, note = "") =>
+    put<{ version: number }>(`/agents/${key}/prompt`, { template, note }),
   resetAgentPrompt: (key: string) => post<{ version: number }>(`/agents/${key}/prompt/reset`, {}),
   // 收尾提示词(超时/步数耗尽的 settlement 提示);prompt 空串=清除覆盖、用内置默认;
   // max_turns 省略则不动、传 0=用内置默认轮数
@@ -290,7 +404,10 @@ export const api = {
   saveAgentTaskTimeoutWrapup: (key: string, prompt: string, maxTurns?: number) =>
     put<{ ok: boolean }>(`/agents/${key}/wrapup/task-timeout`, { prompt, max_turns: maxTurns }),
   resetAgentTaskTimeoutWrapup: (key: string) =>
-    post<{ ok: boolean; task_timeout_wrapup_default: string; task_timeout_wrapup_max_turns_default: number }>(`/agents/${key}/wrapup/task-timeout/reset`, {}),
+    post<{ ok: boolean; task_timeout_wrapup_default: string; task_timeout_wrapup_max_turns_default: number }>(
+      `/agents/${key}/wrapup/task-timeout/reset`,
+      {},
+    ),
   // P3 triggers (仅自定义 agent)
   agentTriggers: (key: string) =>
     get<{ triggers: AgentTrigger[] }>(`/agents/${key}/triggers`).then((r) => arr(r.triggers)),
@@ -299,14 +416,19 @@ export const api = {
   updateTrigger: (id: number, t: Omit<AgentTrigger, "id" | "agent_key" | "last_fire">) =>
     patch<{ ok: boolean }>(`/triggers/${id}`, t),
   deleteTrigger: (id: number) => del<{ deleted: number }>(`/triggers/${id}`),
-  saveAgentConfig: (key: string, patch: { max_turns: number; run_seconds?: number; web_search?: boolean; interactive_shell?: boolean }) =>
-    put<{ ok: boolean }>(`/agents/${key}/config`, patch),
-  agentPromptVersions: (key: string) => get<{ versions: PromptVersion[] }>(`/agents/${key}/prompts`).then((r) => arr(r.versions)),
-  agentVariables: (key: string) => get<{ variables: PromptVar[] }>(`/agents/${key}/variables`).then((r) => arr(r.variables)),
+  saveAgentConfig: (
+    key: string,
+    patch: { max_turns: number; run_seconds?: number; web_search?: boolean; interactive_shell?: boolean },
+  ) => put<{ ok: boolean }>(`/agents/${key}/config`, patch),
+  agentPromptVersions: (key: string) =>
+    get<{ versions: PromptVersion[] }>(`/agents/${key}/prompts`).then((r) => arr(r.versions)),
+  agentVariables: (key: string) =>
+    get<{ variables: PromptVar[] }>(`/agents/${key}/variables`).then((r) => arr(r.variables)),
   previewAgentPrompt: (key: string, template: string, sample?: Record<string, string>) =>
     post<{ rendered: string; error?: string }>(`/agents/${key}/prompt/preview`, { template, sample }),
   getAgentVisibility: (key: string) => get<{ mcp: number[]; skill: string[] }>(`/agents/${key}/visibility`),
-  setAgentVisibility: (key: string, mcp: number[], skill: string[]) => put<{ ok: boolean }>(`/agents/${key}/visibility`, { mcp, skill }),
+  setAgentVisibility: (key: string, mcp: number[], skill: string[]) =>
+    put<{ ok: boolean }>(`/agents/${key}/visibility`, { mcp, skill }),
 
   // ---- tools (内置工具目录) ----
   tools: () => get<{ tools: Tool[] }>("/tools").then((r) => arr(r.tools)),
@@ -314,10 +436,13 @@ export const api = {
     put<{ ok: boolean }>(`/tools/${key}`, patch),
   resetTool: (key: string) => post<{ ok: boolean }>(`/tools/${key}/reset`, {}),
   // custom tools (自定义工具)
-  createCustomTool: (t: Pick<Tool, "key" | "description" | "schema" | "agents" | "enabled" | "kind" | "exec" | "deferred">) =>
-    post<{ key: string }>("/tools/custom", t),
-  updateCustomTool: (key: string, t: Pick<Tool, "description" | "schema" | "agents" | "enabled" | "kind" | "exec" | "deferred">) =>
-    put<{ ok: boolean }>(`/tools/custom/${key}`, t),
+  createCustomTool: (
+    t: Pick<Tool, "key" | "description" | "schema" | "agents" | "enabled" | "kind" | "exec" | "deferred">,
+  ) => post<{ key: string }>("/tools/custom", t),
+  updateCustomTool: (
+    key: string,
+    t: Pick<Tool, "description" | "schema" | "agents" | "enabled" | "kind" | "exec" | "deferred">,
+  ) => put<{ ok: boolean }>(`/tools/custom/${key}`, t),
   deleteCustomTool: (key: string) => del<{ deleted: string }>(`/tools/custom/${key}`),
   testCustomTool: (body: { kind: string; exec: Record<string, unknown>; params: Record<string, unknown> }) =>
     post<{ output: string; is_error: boolean }>("/tools/custom/test", body),
@@ -361,8 +486,14 @@ export const api = {
 
   // ---- skills (文件系统) ----
   skills: () => get<{ skills: SkillItem[] }>("/skills").then((r) => arr(r.skills)),
-  createSkill: (s: { name: string; description: string; license?: string; compatibility?: string; mcps?: string[]; instructions?: string }) =>
-    post<{ name: string }>("/skills", s),
+  createSkill: (s: {
+    name: string;
+    description: string;
+    license?: string;
+    compatibility?: string;
+    mcps?: string[];
+    instructions?: string;
+  }) => post<{ name: string }>("/skills", s),
   // uploadSkill installs a skill from a .zip (multipart). Surfaces the backend
   // error text (e.g. 已存在 / 缺少 SKILL.md) so the UI can show a precise message.
   uploadSkill: async (file: File, overwrite = false): Promise<{ name: string; files: number }> => {
@@ -380,20 +511,21 @@ export const api = {
     return body;
   },
   deleteSkill: (name: string) => del<{ deleted: string }>(`/skills/${name}`),
-  updateSkillMeta: (name: string, meta: { mcps?: string[]; description?: string; license?: string; compatibility?: string }) =>
-    put<{ ok: boolean }>(`/skills/${name}/meta`, meta),
-  createSkillDir: (skill: string, path: string) =>
-    post<{ dir: string }>(`/skills/${skill}/dirs`, { path }),
+  updateSkillMeta: (
+    name: string,
+    meta: { mcps?: string[]; description?: string; license?: string; compatibility?: string },
+  ) => put<{ ok: boolean }>(`/skills/${name}/meta`, meta),
+  createSkillDir: (skill: string, path: string) => post<{ dir: string }>(`/skills/${skill}/dirs`, { path }),
   skillFiles: (name: string) => get<{ files: string[] }>(`/skills/${name}/files`).then((r) => r.files),
   readSkillFile: (name: string, file: string) =>
     get<{ content: string; file: string }>(`/skills/${name}/files/${file}`).then((r) => r.content),
   writeSkillFile: (name: string, file: string, content: string) =>
     put<{ ok: boolean }>(`/skills/${name}/files/${file}`, { content }),
-  deleteSkillPath: (skill: string, path: string) =>
-    del<{ deleted: string }>(`/skills/${skill}/files/${path}`),
+  deleteSkillPath: (skill: string, path: string) => del<{ deleted: string }>(`/skills/${skill}/files/${path}`),
 
   // ---- visibility (MCP resource side) ---- (agent ids are strings per spec)
-  resourceVisibility: (kind: string, id: number) => get<{ agents: string[] }>(`/visibility/${kind}/${id}`).then((r) => arr(r.agents)),
+  resourceVisibility: (kind: string, id: number) =>
+    get<{ agents: string[] }>(`/visibility/${kind}/${id}`).then((r) => arr(r.agents)),
   toggleVisibility: (agentId: string, kind: string, resourceId: number, visible: boolean) =>
     post<{ ok: boolean }>("/visibility/toggle", { agent_id: agentId, kind, resource_id: resourceId, visible }),
 
@@ -418,7 +550,8 @@ export const api = {
   interceptDecide: (id: number, decision: "allowed" | "denied") =>
     post<{ ok: boolean }>(`/intercept/pending/${id}/decide`, { decision }),
   interceptHistory: () => get<{ items: InterceptApprovalRow[] }>("/intercept/history").then((r) => arr(r.items)),
-  interceptTask: (taskId: string) => get<{ items: InterceptApprovalRow[] }>(`/intercept/task/${taskId}`).then((r) => arr(r.items)),
+  interceptTask: (taskId: string) =>
+    get<{ items: InterceptApprovalRow[] }>(`/intercept/task/${taskId}`).then((r) => arr(r.items)),
 
   // ---- intercept tool-config (全局工具拦截范围) ----
   interceptGetToolConfig: async (): Promise<{ enabled_tools: string[] }> => {
@@ -446,7 +579,8 @@ export const api = {
 
   // ---- 平台层：RBAC 多用户 + 审计（RestXtra 移植）----
   platformMy: () => get<MyProfile>("/platform/my"),
-  platformPermissions: () => get<{ permissions: PermissionPoint[] }>("/platform/permissions").then((r) => arr(r.permissions)),
+  platformPermissions: () =>
+    get<{ permissions: PermissionPoint[] }>("/platform/permissions").then((r) => arr(r.permissions)),
   platformUsers: () => get<{ users: PlatformUser[] }>("/platform/users").then((r) => arr(r.users)),
   createPlatformUser: (body: { username: string; display_name?: string; password: string; roles?: string[] }) =>
     post<{ id: number }>("/platform/users", body),
@@ -455,8 +589,7 @@ export const api = {
   deletePlatformUser: (id: number) => del<{ deleted: number }>(`/platform/users/${id}`),
   resetUserPassword: (id: number, password: string) =>
     post<{ ok: boolean }>(`/platform/users/${id}/password`, { password }),
-  setUserRoles: (id: number, roles: string[]) =>
-    post<{ ok: boolean }>(`/platform/users/${id}/roles`, { roles }),
+  setUserRoles: (id: number, roles: string[]) => post<{ ok: boolean }>(`/platform/users/${id}/roles`, { roles }),
   platformRoles: () => get<{ roles: PlatformRole[] }>("/platform/roles").then((r) => arr(r.roles)),
   createPlatformRole: (body: { name: string; description?: string; scope?: string; permissions?: string[] }) =>
     post<{ id: number }>("/platform/roles", body),
@@ -466,7 +599,9 @@ export const api = {
   rolePermissions: (id: number) => get<{ keys: string[] }>(`/platform/roles/${id}/permissions`).then((r) => r.keys),
   setRolePermissions: (id: number, keys: string[]) =>
     put<{ ok: boolean }>(`/platform/roles/${id}/permissions`, { keys }),
-  auditLogs: (f: { category?: string; action?: string; result?: string; actor?: string; limit?: number; offset?: number } = {}) => {
+  auditLogs: (
+    f: { category?: string; action?: string; result?: string; actor?: string; limit?: number; offset?: number } = {},
+  ) => {
     const q = new URLSearchParams();
     if (f.category) q.set("category", f.category);
     if (f.action) q.set("action", f.action);
@@ -480,7 +615,9 @@ export const api = {
   auditGC: (days = 90) => post<{ removed: number }>(`/audit/gc?days=${days}`, {}),
 
   // ---- 攻击模式库 / playbook ----
-  playbookPatterns: (f: { technique?: string; cve?: string; verification?: string; tag?: string; limit?: number; offset?: number } = {}) => {
+  playbookPatterns: (
+    f: { technique?: string; cve?: string; verification?: string; tag?: string; limit?: number; offset?: number } = {},
+  ) => {
     const q = new URLSearchParams();
     if (f.technique) q.set("technique", f.technique);
     if (f.cve) q.set("cve", f.cve);
@@ -492,6 +629,23 @@ export const api = {
   },
   createPlaybookPattern: (p: Partial<AttackPattern>) =>
     post<AttackPattern>("/playbook/patterns", p),
+  playbookReproduce: (p: {
+    host_id?: number;
+    image: string;
+    cve_id: string;
+    title?: string;
+    poc: string;
+    port?: number;
+    marker?: string;
+    attack_technique_id?: string;
+    tags?: string;
+    confidence?: number;
+    keep_running?: boolean;
+  }) =>
+    post<{ ok: boolean; success: boolean; exit_code?: number; verification?: string; seconds?: number; output?: string; pattern_id?: string; error?: string }>(
+      "/playbook/reproduce",
+      p,
+    ),
   deletePlaybookPattern: (id: string) => del<{ deleted: number }>(`/playbook/patterns/${id}`),
   playbookSearch: (q: { cve?: string; technique?: string; components?: string[]; keywords?: string; limit?: number }) =>
     post<{ results: PlaybookResult[] }>("/playbook/search", q).then((r) => r.results ?? []),
@@ -505,8 +659,123 @@ export const api = {
     patch<{ ok: boolean }>(`/batch/queues/${id}`, q),
   deleteBatchQueue: (id: number) => del<{ deleted: number }>(`/batch/queues/${id}`),
   runBatchQueue: (id: number) => post<{ ran: number }>(`/batch/queues/${id}/run`, {}),
-  batchTasks: (queueId: number) => get<{ tasks: BatchTask[] }>(`/batch/queues/${queueId}/tasks`).then((r) => ({ tasks: arr(r.tasks) })),
+  batchTasks: (queueId: number) =>
+    get<{ tasks: BatchTask[] }>(`/batch/queues/${queueId}/tasks`).then((r) => ({ tasks: arr(r.tasks) })),
   addBatchTask: (queueId: number, title: string, payload: Record<string, unknown>) =>
     post<{ id: number }>(`/batch/queues/${queueId}/tasks`, { title, payload }),
   deleteBatchTask: (id: number) => del<{ deleted: number }>(`/batch/tasks/${id}`),
+
+  // ---- 工具执行记录（任意工具的 tool_use + tool_result）----
+  commands: (params?: { task?: string; q?: string; page?: number; size?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.task) sp.set("task", params.task);
+    if (params?.q) sp.set("q", params.q);
+    sp.set("page", String(params?.page ?? 0));
+    sp.set("size", String(params?.size ?? 50));
+    return get<{ commands: CommandRecord[]; total: number }>(`/commands?${sp.toString()}`);
+  },
+
+  // ---- LLM 录制 ----
+  llmRecords: (params?: { model?: string; session?: string; page?: number; size?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.model) sp.set("model", params.model);
+    if (params?.session) sp.set("session", params.session);
+    sp.set("page", String(params?.page ?? 0));
+    sp.set("size", String(params?.size ?? 50));
+    return get<{ records: LLMRecordItem[]; total: number }>(`/llm/records?${sp.toString()}`);
+  },
+  llmRecordDetail: (id: number) => get<LLMRecordDetail>(`/llm/records/${id}`),
+
+  // ---- 沙箱管理（主机 / 容器 / 出口范围）----
+  sandboxHosts: () => get<{ hosts: SandboxHost[] }>("/sandbox/hosts").then((r) => arr(r.hosts)),
+  saveSandboxHost: (h: { id?: number; name: string; addr: string; description?: string }) =>
+    post<{ id: number }>("/sandbox/hosts", h),
+  deleteSandboxHost: (id: string) => del<{ deleted: number }>(`/sandbox/hosts/${id}`),
+  pingSandboxHost: (id: string) =>
+    post<{ ok: boolean; version?: string; api_version?: string; os?: string; arch?: string; error?: string }>(
+      `/sandbox/hosts/${id}/ping`,
+      {},
+    ),
+  sandboxContainers: (hostId: string, opts?: { all?: boolean; managed?: boolean }) => {
+    const sp = new URLSearchParams();
+    if (opts?.all) sp.set("all", "1");
+    if (opts?.managed) sp.set("managed", "1");
+    return get<{ containers: SandboxContainer[] }>(`/sandbox/hosts/${hostId}/containers?${sp.toString()}`);
+  },
+  sandboxImages: (hostId: string) => get<{ images: DockerImage[] }>(`/sandbox/hosts/${hostId}/images`),
+  createSandboxContainer: (
+    hostId: string,
+    req: {
+      name?: string;
+      image: string;
+      memory_mb?: number;
+      cpus?: number;
+      pids_limit?: number;
+      read_only?: boolean;
+      cap_drop_all?: boolean;
+      network_mode?: string;
+      auto_start?: boolean;
+      env?: string[];
+      managed?: boolean;
+    },
+  ) => post<{ id: string }>(`/sandbox/hosts/${hostId}/containers`, req),
+  sandboxContainerAction: (hostId: string, cid: string, action: "start" | "stop" | "restart" | "kill" | "remove") =>
+    post<{ ok: boolean }>(`/sandbox/hosts/${hostId}/containers/${encodeURIComponent(cid)}/${action}`, {}),
+  sandboxEgress: () => get<{ rules: SandboxEgress[] }>("/sandbox/egress").then((r) => arr(r.rules)),
+  saveSandboxEgress: (e: {
+    id?: number;
+    kind: string;
+    value: string;
+    action?: string;
+    note?: string;
+    enabled?: boolean;
+  }) => post<{ id: number }>("/sandbox/egress", e),
+  deleteSandboxEgress: (id: string) => del<{ deleted: number }>(`/sandbox/egress/${id}`),
+
+  // ---- 工作流图引擎 ----
+  workflowValidate: (g: WorkflowGraphDef) => post<{ ok: boolean; errors?: string[] }>("/workflows/validate", g),
+  workflowSave: (req: {
+    id?: number;
+    name: string;
+    description?: string;
+    enabled?: boolean;
+    graph: WorkflowGraphDef;
+  }) => post<{ id: number }>(`/workflows/save`, req),
+  workflows: () => get<{ workflows: WorkflowGraphMeta[] }>("/workflows").then((r) => arr(r.workflows)),
+  workflowGet: (id: string) => get<WorkflowGraphMeta & { graph: WorkflowGraphDef }>(`/workflows/${id}`),
+  workflowDelete: (id: string) => del<{ deleted: number }>(`/workflows/${id}`),
+  workflowRun: (id: string, inputs?: Record<string, string>) =>
+    post<{ run_id: number }>(`/workflows/${id}/run`, { inputs }),
+  workflowRuns: (id: string) => get<{ runs: WorkflowRunItem[] }>(`/workflows/${id}/runs`).then((r) => arr(r.runs)),
+  workflowRunDetail: (runId: string) => get<WorkflowRunItem>(`/workflow-runs/${runId}`),
+  workflowDryRun: (g: WorkflowGraphDef, inputs?: Record<string, string>) =>
+    post<{ status: string; outputs?: Record<string, string>; node_runs?: unknown[]; final?: string }>(
+      "/workflows/dry-run",
+      { graph: g, inputs },
+    ),
+
+  // ---- 工作空间 ----
+  workspaceList: (path = "") => get<{ path: string; entries: WorkspaceEntry[] }>(`/workspace/list?path=${encodeURIComponent(path)}`),
+  workspaceRead: (path: string) => get<{ path: string; content: string }>(`/workspace/read?path=${encodeURIComponent(path)}`),
+
+  // ---- 知识库 ----
+  knowledge: () => get<{ items: KnowledgeItem[] }>("/knowledge").then((r) => arr(r.items)),
+  knowledgeSearch: (q: string, limit = 8) => post<{ items: KnowledgeItem[] }>("/knowledge/search", { q, limit }).then((r) => arr(r.items)),
+  saveKnowledge: (k: { id?: number; title: string; content: string; tags?: string }) => post<{ id: number }>("/knowledge", k),
+  deleteKnowledge: (id: string) => del<{ deleted: number }>(`/knowledge/${id}`),
+
+  // ---- WebShell ----
+  webshells: () => get<{ connections: WebshellConn[] }>("/webshell").then((r) => arr(r.connections)),
+  saveWebshell: (w: Partial<WebshellConn>) => post<{ id: number }>("/webshell", w),
+  deleteWebshell: (id: string) => del<{ deleted: number }>(`/webshell/${id}`),
+  webshellTest: (w: Partial<WebshellConn>) =>
+    post<{ ok: boolean; status?: number; snippet?: string; error?: string }>("/webshell/test", w),
+
+  // ---- C2 ----
+  c2: () => get<{ listeners: C2Listener[]; sessions: C2Session[] }>("/c2"),
+  saveC2Listener: (l: Partial<C2Listener>) => post<{ id: number }>("/c2/listeners", l),
+  deleteC2Listener: (id: string) => del<{ deleted: number }>(`/c2/listeners/${id}`),
+  c2Ingest: (p: { listener_id?: number; session_id: string; host?: string; meta?: string; status?: string }) =>
+    post<{ ok: boolean }>("/c2/ingest", p),
+  c2SetStatus: (session_id: string, status: string) => post<{ ok: boolean }>("/c2/status", { session_id, status }),
 };

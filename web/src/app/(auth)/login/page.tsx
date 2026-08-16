@@ -12,7 +12,7 @@ import { auth } from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("ARTEX");
+  const [username, setUsername] = useState("RestXtra");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -37,7 +37,7 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
-      const { token } = await api.login(username.trim() || "ARTEX", password);
+      const { token } = await api.login(username.trim() || "RestXtra", password);
       auth.setToken(token);
       router.replace("/function/tasks");
     } catch {
@@ -63,7 +63,7 @@ export default function LoginPage() {
             alt="RestXtra AI"
             width={160}
             height={160}
-            className="relative brightness-0 invert"
+            className="relative"
           />
         </div>
       </div>

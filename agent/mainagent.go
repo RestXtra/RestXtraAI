@@ -71,7 +71,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, as *db.AssetStore, t
 	tsx.SetTaskID(taskID)
 	tsx.SetNotify(notify) // add_hint wakes this task's planner (debounced)
 	// 领域工具 + 基础默认工具集（Read/Write/Edit/MultiEdit/LS/Glob/Grep/Bash）
-	base := append(tsx.MainAgentTools(), actool.DefaultTools()...)
+	base := append(tsx.MainAgentTools(), withHostBash(actool.DefaultTools())...)
 	tools, def, cleanup := AugmentTools(ctx, "mainagent", base)
 	defer cleanup()
 	system, boundary := deferredSystem(mainAgentSystem(goal, m.workDir), def)

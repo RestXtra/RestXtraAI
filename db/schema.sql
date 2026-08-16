@@ -1,4 +1,4 @@
--- ARTEX PostgreSQL schema (单一数据源)
+-- RestXtra PostgreSQL schema (单一数据源)
 -- 幂等：可重复执行（IF NOT EXISTS / OR REPLACE / DROP TRIGGER IF EXISTS）。
 
 -- =====================================================================
@@ -210,10 +210,15 @@ CREATE TABLE IF NOT EXISTS llm_profiles (
     rate_per_minute  DOUBLE PRECISION NOT NULL DEFAULT 0,
     context_window_k INTEGER NOT NULL DEFAULT 0,
     reasoning_effort TEXT NOT NULL DEFAULT '',
+    -- auth_mode 选择认证头：''/x-api-key = Anthropic 默认 x-api-key（OpenAI 用 Bearer）；
+    -- 'bearer' = Authorization: Bearer（兼容 ANTHROPIC_AUTH_TOKEN 类中转网关）。
+    auth_mode        TEXT NOT NULL DEFAULT '',
     is_default       BOOLEAN NOT NULL DEFAULT false,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- 迁移：老库升级补列（幂等，可重复执行）。
+ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS auth_mode TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS uq_llm_one_default ON llm_profiles(is_default) WHERE is_default;
 DROP TRIGGER IF EXISTS trg_llm_upd ON llm_profiles;
 CREATE TRIGGER trg_llm_upd BEFORE UPDATE ON llm_profiles
@@ -513,7 +518,31 @@ CREATE TABLE IF NOT EXISTS server_logs (
 CREATE INDEX IF NOT EXISTS idx_server_logs_id ON server_logs(id DESC);
 
 -- =====================================================================
--- N. 平台层：多用户 RBAC + 审计日志（自 Pentest-RestXtra 移植，PostgreSQL 化）
+-- M2. LLM 录制（每次 LLM API 调用的完整 request/response）
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS llm_records (
+    id            BIGSERIAL PRIMARY KEY,
+    ts            TIMESTAMPTZ DEFAULT now(),
+    model         TEXT,
+    profile_name  TEXT,
+    session_id    TEXT,
+    task_id       TEXT,
+    worker        TEXT,
+    latency_ms    INTEGER,
+    input_tokens  INTEGER,
+    output_tokens INTEGER,
+    cache_read    INTEGER,
+    cache_write   INTEGER,
+    status        TEXT,
+    error         TEXT,
+    request_body  TEXT,
+    response_body TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_llm_records_ts ON llm_records(ts);
+CREATE INDEX IF NOT EXISTS idx_llm_records_session ON llm_records(session_id);
+
+-- =====================================================================
+-- N. 平台层：多用户 RBAC + 审计日志（PostgreSQL 化）
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS users (
@@ -575,7 +604,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_time  ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor);
 
 -- =====================================================================
--- O. 攻击模式库 attack_patterns（自 Pentest-RestXtra 移植）
+-- O. 攻击模式库 attack_patterns（平台内置）
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS attack_patterns (
     id                    TEXT PRIMARY KEY,
@@ -605,7 +634,7 @@ CREATE INDEX IF NOT EXISTS idx_attack_patterns_cve       ON attack_patterns(cve_
 CREATE INDEX IF NOT EXISTS idx_attack_patterns_tags      ON attack_patterns(tags);
 
 -- =====================================================================
--- P. 批量任务 batch_queues / batch_tasks（自 Pentest-RestXtra 移植）
+-- P. 批量任务 batch_queues / batch_tasks（平台内置）
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS batch_queues (
     id          BIGSERIAL PRIMARY KEY,
@@ -634,3 +663,106 @@ CREATE TABLE IF NOT EXISTS batch_tasks (
     finished_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_batch_tasks_queue ON batch_tasks(queue_id, status);
+
+-- =====================================================================
+-- Q. 沙箱管理（Docker 主机 + 受管沙箱容器 + 出口范围）
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS sandbox_hosts (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE,
+    addr        TEXT NOT NULL,  -- docker daemon 地址: tcp://host:2375 | unix:///var/run/docker.sock | http(s)://host:2375
+    description TEXT NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_sandbox_hosts_name ON sandbox_hosts(name);
+
+-- 出口范围（授权 scope）：容器可访问的 CIDR / 域名白名单（
+-- 参照通用 egress 治理的 authorized-cidr/domain + scope-guard 语义）。创建沙箱容器时按此登记。
+CREATE TABLE IF NOT EXISTS sandbox_egress (
+    id         BIGSERIAL PRIMARY KEY,
+    kind       TEXT NOT NULL CHECK (kind IN ('cidr','domain')),
+    value      TEXT NOT NULL,
+    action     TEXT NOT NULL DEFAULT 'allow' CHECK (action IN ('allow','deny')),
+    note       TEXT NOT NULL DEFAULT '',
+    enabled    BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_sandbox_egress_kind ON sandbox_egress(kind, enabled);
+
+-- =====================================================================
+-- R. 工作流图引擎（workflow_graphs / workflow_runs）
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS workflow_graphs (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    graph_json  TEXT NOT NULL DEFAULT '{}',
+    enabled     BOOLEAN NOT NULL DEFAULT true,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_graphs_id ON workflow_graphs(id DESC);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    id         BIGSERIAL PRIMARY KEY,
+    graph_id   BIGINT REFERENCES workflow_graphs(id) ON DELETE CASCADE,
+    status     TEXT NOT NULL DEFAULT 'running',
+    inputs     TEXT,
+    result     TEXT,
+    error      TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_graph ON workflow_runs(graph_id, id DESC);
+
+-- =====================================================================
+-- S. 知识库 / WebShell / C2（平台扩展能力）
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS knowledge_items (
+    id         BIGSERIAL PRIMARY KEY,
+    title      TEXT NOT NULL,
+    content    TEXT NOT NULL DEFAULT '',
+    tags       TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_title ON knowledge_items(title);
+
+CREATE TABLE IF NOT EXISTS webshell_conns (
+    id         BIGSERIAL PRIMARY KEY,
+    name       TEXT NOT NULL,
+    url        TEXT NOT NULL,
+    type       TEXT NOT NULL DEFAULT 'php', -- php|jsp|aspx|asp|generic
+    password   TEXT NOT NULL DEFAULT '',
+    headers    TEXT NOT NULL DEFAULT '{}',
+    note       TEXT NOT NULL DEFAULT '',
+    enabled    BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS c2_listeners (
+    id         BIGSERIAL PRIMARY KEY,
+    name       TEXT NOT NULL,
+    protocol   TEXT NOT NULL DEFAULT 'http', -- http|https|tcp
+    host       TEXT NOT NULL DEFAULT '0.0.0.0',
+    port       INTEGER NOT NULL DEFAULT 0,
+    enabled    BOOLEAN NOT NULL DEFAULT true,
+    note       TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS c2_sessions (
+    id          BIGSERIAL PRIMARY KEY,
+    listener_id BIGINT REFERENCES c2_listeners(id) ON DELETE SET NULL,
+    session_id  TEXT NOT NULL,
+    host        TEXT NOT NULL DEFAULT '',
+    meta        TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'active', -- active|lost|closed
+    last_seen   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_c2_sessions_sid ON c2_sessions(session_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_c2_sessions_sid ON c2_sessions(session_id);

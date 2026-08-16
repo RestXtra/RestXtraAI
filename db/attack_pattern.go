@@ -12,7 +12,7 @@ import (
 )
 
 // AttackPattern is one attack-pattern library entry (ported from
-// Pentest-RestXtra). verification: draft | validated | reference.
+// RestXtra). verification: draft | validated | reference.
 type AttackPattern struct {
 	ID                   string    `json:"id"`
 	Title                string    `json:"title"`

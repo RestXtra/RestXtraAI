@@ -23,7 +23,7 @@ const (
 	authPassKey    = "auth.password_hash"
 	jwtTTL         = 7 * 24 * time.Hour
 	keyChars       = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	adminUsername  = "ARTEX" // 默认首个管理员用户名（保持与旧前端兼容）
+	adminUsername  = "RestXtra" // 默认首个管理员用户名（与登录页预填一致）
 )
 
 // loadOrCreateJWTKey reads the 32-byte signing key from dataDir/jwt.key.
@@ -79,12 +79,12 @@ func verifyUserJWT(tokenStr string, key []byte) (*tokenClaims, bool) {
 }
 
 // extractToken reads the JWT from Authorization: Bearer header,
-// artex_token cookie, or ?token= query param (for SSE connections).
+// restxtra_token cookie, or ?token= query param (for SSE connections).
 func extractToken(r *http.Request) string {
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
-	if c, err := r.Cookie("artex_token"); err == nil && c.Value != "" {
+	if c, err := r.Cookie("restxtra_token"); err == nil && c.Value != "" {
 		return c.Value
 	}
 	return r.URL.Query().Get("token")
@@ -283,7 +283,7 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/auth/login — validates username/password against the platform users
 // table and returns a JWT. Legacy fallback: a pre-existing settings hash with
-// username "ARTEX" (from before multi-user) is adopted into the users table on
+// username "RestXtra" (from before multi-user) is adopted into the users table on
 // first successful login.
 func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)

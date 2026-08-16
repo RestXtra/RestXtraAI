@@ -216,6 +216,14 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool) {
 			log.Printf("[tools] seed %s 失败: %v", s.Key, err)
 		}
 	}
+	// Seed the YAML 工具配方（nmap/nuclei/…）——数据驱动 CLI 工具，默认绑 worker。
+	for _, s := range agent.RecipeSeeds() {
+		schema, _ := json.Marshal(s.Schema)
+		agents, _ := json.Marshal(s.Agents)
+		if err := pg.SeedTool(s.Key, s.Desc, schema, agents); err != nil {
+			log.Printf("[tools] seed recipe %s 失败: %v", s.Key, err)
+		}
+	}
 	// Seed the traffic host tools so they're bindable per-agent like built-ins.
 	// Default binding = worker (preserves prior behavior). Their runtime availability
 	// is still gated by the global capture switch (hostTools() returns them only when
@@ -340,6 +348,10 @@ func buildDomainReg(as *db.AssetStore) map[string]actool.CoreTool {
 	serverTS.SetAssetStore(as, as.Companies())
 	reg := make(map[string]actool.CoreTool)
 	for _, t := range serverTS.AllDomainTools() {
+		reg[t.Name()] = t
+	}
+	// YAML 工具配方（nmap/nuclei/…）加入域工具注册表，DB 绑定后注入各 agent。
+	for _, t := range agent.RecipeTools() {
 		reg[t.Name()] = t
 	}
 	return reg

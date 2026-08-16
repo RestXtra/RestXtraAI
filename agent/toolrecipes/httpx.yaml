@@ -1,0 +1,27 @@
+name: httpx
+command: httpx
+description: HTTP 探活/指纹：批量探测 URL 存活、状态码、标题、技术栈、CDN。
+short_description: HTTP 探活与指纹（httpx）
+enabled: true
+parameters:
+  - name: target
+    type: string
+    position: 1
+    format: positional
+  - name: list
+    type: string
+    flag: "-l"
+    format: flag
+  - name: status_code
+    type: boolean
+    flag: "-sc"
+    format: flag
+  - name: title
+    type: boolean
+    flag: "-title"
+    format: flag
+  - name: tech
+    type: boolean
+    flag: "-tech-detect"
+    format: flag
+additional_args: ["-silent"]

@@ -4,7 +4,7 @@
 
 AI 自主渗透测试平台（Go 后端 + Next.js 前端）
 
-**ARTEX 自主探索引擎 × Pentest-RestXtra 平台能力** 的融合项目
+**自主探索引擎 × 平台治理能力** 的一体化产品
 
 </div>
 
@@ -12,13 +12,12 @@ AI 自主渗透测试平台（Go 后端 + Next.js 前端）
 
 ## 项目简介
 
-RestXtra AI 由两个上游项目融合而来（详见 [NOTICE](NOTICE) 与融合蓝图
-[AI-Pentest-Fusion-Blueprint](https://github.com/RestXtra/RestXtraAI)）：
+RestXtra AI 是统一的自主渗透测试平台（详见 [NOTICE](NOTICE)）：
 
-| 来源 | 提供能力 |
+| 能力面 | 内容 |
 |---|---|
-| **ARTEX**（基层） | Next.js 前端、norma agent 驱动的 Planner/Worker 自主探索引擎、探索图、流量录制、拦截审批、资产/漏洞/Agent/LLM/MCP 管理 |
-| **Pentest-RestXtra**（移植） | RBAC 多用户权限、审计日志、知识库、攻击模式库（playbook）、批量任务、确定性报告与证据门控、C2 / WebShell / 沙箱 / 机器人（规划中） |
+| **自主探索引擎** | Next.js 前端、norma agent 驱动的 Planner/Worker 自主探索引擎、探索图、流量录制、拦截审批、资产/漏洞/Agent/LLM/MCP 管理 |
+| **平台治理** | RBAC 多用户权限、审计日志、知识库、攻击模式库（playbook）、批量任务、确定性报告与证据门控、沙箱管理、C2 / WebShell / 机器人（规划中） |
 
 核心不变量：**Agent 运行时统一 norma SDK**（不引入 Eino ADK）、**数据库统一 PostgreSQL**、
 **前端统一 Next.js**、**统一 JWT + RBAC 鉴权**。
@@ -65,7 +64,7 @@ CGO_ENABLED=0 go build -tags embedui -o restxtra ./cmd/restxtra
 
 ## 配置
 
-**数据库**（`config.json`，或用环境变量 `RESTXTRA_PG_DSN` 覆盖；旧 `ARTEX_PG_DSN` 仍兼容）：
+**数据库**（`config.json`，或用环境变量 `RESTXTRA_PG_DSN` 覆盖）：
 
 ```json
 {

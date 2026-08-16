@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// BatchQueue is a named batch-task queue (ported from Pentest-RestXtra).
+// BatchQueue is a named batch-task queue (platform built-in).
 type BatchQueue struct {
 	ID          int64     `json:"id"`
 	Name        string    `json:"name"`

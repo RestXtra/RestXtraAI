@@ -1,0 +1,24 @@
+name: nmap
+command: nmap
+description: 网络扫描：端口/服务/OS/脚本枚举。适合开局侦察与端口服务识别。
+short_description: 网络扫描：端口/服务/脚本（-sT -sV -sC）
+enabled: true
+parameters:
+  - name: target
+    type: string
+    required: true
+    position: 1
+    format: positional
+  - name: ports
+    type: string
+    flag: "-p"
+    format: flag
+  - name: timing
+    type: string
+    template: "-T{value}"
+    format: template
+  - name: output
+    type: string
+    flag: "-oN"
+    format: flag
+additional_args: ["-sT", "-sV", "-sC"]

@@ -472,14 +472,18 @@ func splitLines(s string) []string {
 
 // WorkerTools returns the tool set for a work agent.
 func (t *ToolSet) WorkerTools() []actool.CoreTool {
-	return []actool.CoreTool{
+	out := []actool.CoreTool{
 		t.listFindings(), t.listFacts(), t.nodeDetail(),
 		t.addFinding(), t.recordFact(),
 		// cross-work retrieval
 		t.searchAllWorkerTraces(), t.listWorkerTraces(), t.getWorkerTrace(),
 		// asset management (handlers guard nil store internally)
 		t.insertAssets(), t.addCompanyScope(), t.listAssets(), t.listCompanies(),
+		// knowledge base + attack playbook + TSecBenchmark 跑分
+		t.KnowledgeSearchTool(), t.PlaybookSearchTool(),
 	}
+	out = append(out, t.BenchTools()...)
+	return out
 }
 
 // MainAgentTools returns the human-interface tool set.
@@ -489,6 +493,8 @@ func (t *ToolSet) MainAgentTools() []actool.CoreTool {
 		t.getWorkerOutput(), t.getWorkerTrace(), t.searchAllWorkerTraces(), t.addHint(), t.addIntent(),
 		// asset management (handlers guard nil store internally)
 		t.insertAssets(), t.addCompanyScope(), t.listAssets(),
+		// knowledge base + attack playbook
+		t.KnowledgeSearchTool(), t.PlaybookSearchTool(),
 	}
 }
 
