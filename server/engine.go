@@ -14,6 +14,7 @@ import (
 	"github.com/RestXtra/RestXtraAI/agent"
 	"github.com/RestXtra/RestXtraAI/db"
 	"github.com/RestXtra/RestXtraAI/intercept"
+	"github.com/RestXtra/RestXtraAI/metrics"
 )
 
 // model_error（provider/API 故障：LLM 层瞬时重试耗尽，或流已开始后中途断流）
@@ -523,6 +524,7 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		triggers := t.drainTriggers()
 		e.incInflight(t.ID)
 		taskIDInt, _ := strconv.ParseInt(t.ID, 10, 64)
+		metrics.M.Inc(&metrics.M.PlannerRounds) // P5.4
 		met, reason, err := planner.Plan(ectx, taskIDInt, e.m.assets, t.Store, t.Goal, triggers, emit)
 		e.decInflight(t.ID)
 		switch {
@@ -621,6 +623,7 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 		wTaskID, _ := strconv.ParseInt(t.ID, 10, 64)
 		notifyFinding := func(intentID int64, summary string) { t.NotifyFinding(intentID, summary) }
 		e.incInflight(t.ID) // 计入在跑,供收尾时序 drain 等待
+		metrics.M.Inc(&metrics.M.WorkerRuns) // P5.4
 		reason, wrote, err := worker.Execute(workCtx, name, wTaskID, e.m.assets, t.Store, intent, hooks, emit, e.m.enrich, notifyFinding)
 		// model_error 收场 → 额外重跑几次（退避后再试）。仅在意图仍属本 work、任务
 		// 未暂停/未终止/未取消【且未进入收尾】时重试；否则让位给对应分支处理(收尾期不
@@ -634,6 +637,13 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 				break // 退避期间被取消（终止/暂停）→ 交给下方分支处理
 			}
 			reason, wrote, err = worker.Execute(workCtx, name, wTaskID, e.m.assets, t.Store, intent, hooks, emit, e.m.enrich, notifyFinding)
+		}
+		// P5.4 指标：写回分项 + model_error 计数。
+		metrics.M.Add(&metrics.M.WritesFacts, int64(wrote.Facts))
+		metrics.M.Add(&metrics.M.WritesAssets, int64(wrote.Assets))
+		metrics.M.Add(&metrics.M.WritesFindings, int64(wrote.Findings))
+		if reason == harness.ReasonModelError {
+			metrics.M.Inc(&metrics.M.ModelErrors)
 		}
 		e.decInflight(t.ID)
 		// CAPTURE kill state BEFORE unregisterWork cancels workCtx. kill = this work's
@@ -673,9 +683,11 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 			case "requeue":
 				_ = t.Store.SetIntentState(intent.ID, "open")
 				log.Printf("[worker %s] task %s 意图 #%d 卡死被取消，重新开放(requeue)", name, t.ID, intent.ID)
+				metrics.M.Inc(&metrics.M.StuckRequeues) // P5.4
 			case "blocked":
 				_ = t.Store.SetIntentState(intent.ID, "blocked")
 				log.Printf("[worker %s] task %s 意图 #%d 卡死重试超限，标记 blocked 放弃", name, t.ID, intent.ID)
+				metrics.M.Inc(&metrics.M.StuckBlocked) // P5.4
 			default:
 				_ = t.Store.SetIntentState(intent.ID, "stopped")
 				log.Printf("[worker %s] task %s 意图 #%d 被终止(stopped)", name, t.ID, intent.ID)
@@ -730,6 +742,7 @@ func (e *Engine) claimNext(t *Task, name string) *db.Node {
 		// P3.1 依赖门控认领：前置依赖未满足（串行链父意图还没产 fact）的意图不认领，
 		// 避免下游 worker 抢跑空转。ready 判断出错时按"可认领"处理，不阻塞任务。
 		if ready, err := t.Store.IntentReady(in.ID); err == nil && !ready {
+			metrics.M.Inc(&metrics.M.IntentReadySkip) // P5.4
 			continue
 		}
 		if ok, _ := t.Store.ClaimIntent(in.ID, name); ok {

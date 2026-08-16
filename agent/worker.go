@@ -15,6 +15,7 @@ import (
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/Autumn-27/norma/transcript"
+	"github.com/RestXtra/RestXtraAI/metrics"
 )
 
 // Worker is an LLM work agent (docs §4.4): it claims ONE intent, completes it
@@ -311,9 +312,10 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 	}
 	// 证据闸门（反幻觉）：记录本轮所有工具输出，完成时校验最终总结。
 	// Reflexion（失败升级）：工具被拦/连败时，注入 L0-L4 绕过提示。
+	// P5.1 ToolCallFixer：畸形 JSON 参数在最内层先修复（toolFixHooks）。
 	ev := NewEvidenceStore()
 	rx := NewReflexion()
-	opts.Hooks = reflexionHooks{inner: evidenceHooks{inner: hooks, ev: ev}, rx: rx}
+	opts.Hooks = reflexionHooks{inner: evidenceHooks{inner: toolFixHooks{inner: hooks}, ev: ev}, rx: rx}
 	if w.mem != nil {
 		opts.Memory = &agentcore.MemoryOptions{Store: w.mem, AutoInject: true, MaxInject: 3}
 	}
@@ -372,6 +374,7 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 		reason == harness.ReasonCompleted && tsx.Writes().Total() == 0 {
 		emitWrap(db.Activity{Kind: "text", IsError: true,
 			Summary: "Reflector：本 run 正常结束但无任何写回", Detail: "将回注一次落地结论提示"})
+		metrics.M.Inc(&metrics.M.ReflectorHints) // P5.4
 		finalText, reason, err = captureRunSession(runCtx, s,
 			"你已正常结束，但【没有写回任何东西】。若你实际得到了一些结论——哪怕是“端口关闭/参数不可注入/未发现登录入口”这类**否定结论**——请用 record_fact 把它们落地（否定结论记得标 confidence，弱证据标 inferred）；有新资产用 insert_assets；确认为漏洞用 report_finding。若确实还什么都没得到，就先做一次最小推进（换参数/换路径/再探一层）再写回。完成后给出最终总结。"+
 				"\n\n【再次提醒你的意图】"+renderIntentTask(intent), emitWrap)
@@ -391,6 +394,7 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 			}
 			emitWrap(db.Activity{Kind: "text", IsError: true,
 				Summary: "完成闸门拒绝：" + firstLine(why, 200), Detail: why})
+			metrics.M.Inc(&metrics.M.GateRejections) // P5.4
 			finalText, reason, err = captureRunSession(runCtx, s,
 				"完成闸门拒绝："+why+
 					"\n【本修正轮禁止调用任何工具】。只对照上面已有的工具输出与证据：核对你引用的证据 id 是否真实存在、声称的 flag 是否逐字出现在工具输出里；然后直接改写你的最终总结。若证据确实不足，就如实说明哪些结论没有证据支撑，不要编造。",

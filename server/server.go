@@ -24,6 +24,7 @@ import (
 	"github.com/RestXtra/RestXtraAI/agent"
 	"github.com/RestXtra/RestXtraAI/db"
 	"github.com/RestXtra/RestXtraAI/llmrec"
+	"github.com/RestXtra/RestXtraAI/metrics"
 	"github.com/RestXtra/RestXtraAI/report"
 )
 
@@ -554,6 +555,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/stats", s.stats)
+	mux.HandleFunc("GET /api/metrics", s.metrics) // P5.4 关键路径指标
 	mux.HandleFunc("GET /api/logs", s.getLogs)
 	mux.HandleFunc("GET /api/logs/history", s.getLogsHistory)
 	mux.HandleFunc("GET /api/logs/stream", s.streamLogs)
@@ -808,6 +810,11 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "service": "restxtra"})
+}
+
+// metrics 返回进程级关键路径计数器（P5.4）。
+func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, metrics.M.Snapshot())
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {

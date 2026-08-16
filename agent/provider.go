@@ -197,11 +197,46 @@ func (c Config) Provider() string {
 // NewProvider builds an llm.Provider from the config. When a rate is set, the
 // limiter lives on the single provider instance — so planner + all workers +
 // main agent (which share this provider) are bounded by one shared rate limit.
+// P5.2：APIKey 支持逗号分隔多 key → 构建 keyPoolProvider（鉴权/限流失败自动切换）。
 func (c Config) NewProvider() (llm.Provider, error) {
+	keys := splitAPIKeys(c.APIKey)
+	provs := make([]llm.Provider, 0, len(keys))
+	for _, key := range keys {
+		p, err := c.buildProvider(key)
+		if err != nil {
+			return nil, err
+		}
+		provs = append(provs, p)
+	}
+	if len(provs) == 1 {
+		return provs[0], nil
+	}
+	return newKeyPool(provs), nil
+}
+
+// splitAPIKeys 按逗号切分多 key（去空格、去空项）。空串 → 单元素 [""]（保持原行为）。
+func splitAPIKeys(apiKey string) []string {
+	if !strings.Contains(apiKey, ",") {
+		return []string{apiKey}
+	}
+	var out []string
+	for _, part := range strings.Split(apiKey, ",") {
+		if s := strings.TrimSpace(part); s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		out = []string{apiKey}
+	}
+	return out
+}
+
+// buildProvider 用单个 key 构建 provider（含 bearer 认证 / 限流 / thinking 参数）。
+func (c Config) buildProvider(key string) (llm.Provider, error) {
 	lc := llm.Config{
 		Format:  c.Format,
 		BaseURL: c.BaseURL,
-		APIKey:  c.APIKey,
+		APIKey:  key,
 		Model:   c.Model,
 		Proxy:   c.Proxy,
 	}
@@ -222,7 +257,7 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	// Anthropic 格式 + bearer 认证：注入一个把 x-api-key 换成 Authorization: Bearer 的
 	// transport（SDK 硬编码 x-api-key，在 RoundTrip 层改写头，无需 fork SDK）。
 	if c.Format == llm.FormatAnthropic && c.AuthMode == AuthModeBearer {
-		client, err := bearerHTTPClient(c.Proxy, c.APIKey)
+		client, err := bearerHTTPClient(c.Proxy, key)
 		if err != nil {
 			return nil, err
 		}
