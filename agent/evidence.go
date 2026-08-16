@@ -12,7 +12,7 @@ import (
 	"github.com/Autumn-27/norma/llm"
 )
 
-// 证据闸门（反幻觉）：借鉴 AgentState + _completion_gate。
+// 证据闸门（反幻觉）：基于 AgentState + completion gate 双重要求。
 //   - 每次工具调用结果进入 EvidenceStore（原文完整保留 + sha256 去重）。
 //   - 完成前校验：FINAL 引用的证据 id 必须真实存在；目标含 flag 时，声称的
 //     flag 必须【逐字出现在工具输出】里——杜绝模型编造结论/flag。

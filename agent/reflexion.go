@@ -11,7 +11,7 @@ import (
 	"github.com/Autumn-27/norma/llm"
 )
 
-// Reflexion（借鉴 VulnClaw reflexion.py）：失败自动分类 + L0-L4 payload 升级。
+// Reflexion：失败自动分类 + L0-L4 payload 升级。
 // worker 内某工具反复失败（被 WAF/403 拦截或执行出错）时，累计连败 → 达到阈值把
 // 升级提示排进队列，下一次工具调用前由 reflexionHooks 拦截并交给模型，让它在
 // 编码/关键字/语法上换招重试，而不是原地空转。

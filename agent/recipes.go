@@ -12,7 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// 工具配方（借鉴 YAML 工具配方）：把 CLI 渗透工具以数据驱动接入 agent。
+// 工具配方：以数据驱动（YAML）把 CLI 渗透工具接入 agent。
 // toolrecipes/*.yaml 定义命令、参数格式(positional/flag/combined/template)与
 // short_description（压 token）。启动时解析 → 构建 CoreTool → 播种进 tools 表，
 // 运行时渲染命令行并复用 Bash 底层执行（继承代理/超时/拦截）。

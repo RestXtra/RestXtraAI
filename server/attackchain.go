@@ -12,7 +12,7 @@ import (
 	acperm "github.com/Autumn-27/norma/permission"
 )
 
-// 攻击链 DAG 自动建模（借鉴 CyberStrikeAI attackchain/builder.go）：
+// 攻击链 DAG 自动建模：
 // 读取任务真实工具执行轨迹 → 一次 LLM 调用转成 attack-chain DAG
 // （target/action/vulnerability 节点 + leads_to/discovers/enables 边 + risk_score）。
 // 反幻觉：没有实际工具执行记录时返回空链（严禁杜撰）。

@@ -1,5 +1,5 @@
-// Package workflow implements a DAG-based workflow graph engine (借鉴
-// 可视化工作流设计)：start / tool / agent / condition / hitl / output / end
+// Package workflow implements a DAG-based workflow graph engine (基于
+// 可视化工作流设计思路)：start / tool / agent / condition / hitl / output / end
 // 七类节点，{{inputs/previous/outputs/节点ID}} 模板变量 + 条件表达式。
 // 校验（必须 DAG、有 start+output、无自环、全可达）通过后可 dry-run 或正式运行。
 package workflow

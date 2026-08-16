@@ -50,7 +50,7 @@ const toStore = (mode: ThinkMode, effort: string) => (mode === "on" ? effort : m
 const modeFromStore = (v?: string): ThinkMode => (!v ? "none" : v === "off" ? "off" : "on");
 const effortFromStore = (v?: string) => (v && v !== "off" ? v : "high");
 
-// 认证头选择（cc-switch 的「认证字段」概念）：x-api-key（默认）| Bearer（ANTHROPIC_AUTH_TOKEN）。
+// 认证头选择（「认证字段」概念）：x-api-key（默认）| Bearer（ANTHROPIC_AUTH_TOKEN）。
 function AuthModeField({ value, onChange }: { value: LLMAuthMode; onChange: (v: LLMAuthMode) => void }) {
   const current = AUTH_MODE_OPTIONS.find((o) => o.value === value) ?? AUTH_MODE_OPTIONS[0];
   return (
@@ -73,7 +73,7 @@ function AuthModeField({ value, onChange }: { value: LLMAuthMode; onChange: (v: 
   );
 }
 
-// 粘贴 cc-switch 风格 env JSON（{"env":{ANTHROPIC_BASE_URL,...}}）导入配置。
+// 粘贴环境变量 JSON（{"env":{ANTHROPIC_BASE_URL,...}}）导入配置。
 function EnvImportDialog({ onApply }: { onApply: (imp: ImportedLLMProfile) => void }) {
   const [open, setOpen] = React.useState(false);
   const [text, setText] = React.useState("");
@@ -111,7 +111,7 @@ function EnvImportDialog({ onApply }: { onApply: (imp: ImportedLLMProfile) => vo
         <DialogHeader>
           <DialogTitle>导入供应商配置</DialogTitle>
           <DialogDescription>
-            粘贴 CC Switch 风格的配置 JSON（<code className="font-mono">{'{"env":{...}}'}</code>），识别{" "}
+            粘贴供应商配置 JSON（<code className="font-mono">{'{"env":{...}}'}</code>），识别{" "}
             <code className="font-mono">ANTHROPIC_BASE_URL / AUTH_TOKEN / API_KEY / MODEL</code> 与{" "}
             <code className="font-mono">OPENAI_*</code> 变量自动填充。
           </DialogDescription>

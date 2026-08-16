@@ -3,7 +3,6 @@
 web/.next
 web/out
 server/webui/dist
-/artex
 data
 *.db
 transcripts

@@ -24,7 +24,7 @@ import (
 
 // Auth header selection for the Anthropic format. The SDK sends x-api-key by
 // default; some Anthropic-compatible relay gateways (OpenCode GO, …) authenticate
-// via Authorization: Bearer instead — cc-switch calls that credential
+// via Authorization: Bearer instead — that credential is named
 // "ANTHROPIC_AUTH_TOKEN". Values map to llm_profiles.auth_mode.
 const (
 	AuthModeDefault = ""        // 默认：anthropic→x-api-key，openai→Bearer（SDK 原生行为）

@@ -1,5 +1,5 @@
-// LLM 供应商预设 + cc-switch 风格 env 配置导入。
-// 借鉴 CC Switch 的「供应商预设」概念：一键填充格式/端点/模型/认证头，
+// LLM 供应商预设 + 环境变量配置导入。
+// 「供应商预设」概念：一键填充格式/端点/模型/认证头，
 // 只需补 API Key 即可连接。含 OpenCode GO 等常用网关。
 
 export type LLMAuthMode = "" | "x-api-key" | "bearer";
