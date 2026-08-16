@@ -2,6 +2,10 @@ module github.com/RestXtra/RestXtraAI
 
 go 1.26.3
 
+// P7.3 本地 fork norma agentcore：注入自定义 compaction Summarizer（免 LLM 的确定性摘要）。
+// 同步上游时：更新 third_party/norma 后再 go mod tidy。
+replace github.com/Autumn-27/norma => ./third_party/norma
+
 require (
 	github.com/Autumn-27/norma v0.2.7
 	github.com/golang-jwt/jwt/v5 v5.3.1

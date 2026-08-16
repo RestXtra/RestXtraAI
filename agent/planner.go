@@ -298,6 +298,8 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		MaxTurns:          p.maxTurns,                           // 0 = unlimited (configurable in agent management)
 		MaxDuration:       maxDur,                               // 0=不限;有 deadline 时=距 deadline 剩余
 		Compaction:        compactionConfig(p.window),
+		// P7.3：免 LLM 的确定性摘要。
+		Summarizer: DeterministicSummarizer,
 		// 跨唤醒共享的规划待办：让串行链在多轮之间保留（session 是新的，store 不是）。
 		Todos: p.todoFor(ts.ID()),
 		// 命中【本轮】步数预算→ SDK 跑收尾:把本轮已想清楚的结论落地(该派的 add_intent、

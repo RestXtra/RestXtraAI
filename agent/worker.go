@@ -314,7 +314,9 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 		// full output preserved on disk. 截断上限用 SDK 默认(30000 字符)。
 		ToolOutputDir: filepath.Join(w.workDir, "cmd-output"),
 		Compaction:    compactionConfig(w.window), // long tool-heavy runs stay within the window
-		Todos:         actool.NewTodoStore(),      // 会话级临时待办（TodoWrite），纯规划用，退出即丢
+		// P7.3：免 LLM 的确定性摘要（避免 compaction 触发时的额外模型调用）。
+		Summarizer: DeterministicSummarizer,
+		Todos:      actool.NewTodoStore(), // 会话级临时待办（TodoWrite），纯规划用，退出即丢
 	}
 	// 证据闸门（反幻觉）：记录本轮所有工具输出，完成时校验最终总结。
 	// Reflexion（失败升级）：工具被拦/连败时，注入 L0-L4 绕过提示。
