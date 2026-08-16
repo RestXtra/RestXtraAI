@@ -50,6 +50,33 @@ type Task struct {
 	// a burst into one round, so several may pile up before drainTriggers() clears them.
 	trigMu          sync.Mutex
 	pendingTriggers []agent.TriggerEvent
+
+	// P4.2 stall guard：连续零产出意图计数。worker 连续 emptyRuns>=3 个意图都没写回 →
+	// 大概率所有活跃方向都是死路，记警告供观察（planner 心跳会重新审视）。
+	emptyRunMu sync.Mutex
+	emptyRuns  int
+}
+
+// BumpEmptyRun 记录一个零产出意图并返回累计次数。
+func (t *Task) BumpEmptyRun() int {
+	t.emptyRunMu.Lock()
+	defer t.emptyRunMu.Unlock()
+	t.emptyRuns++
+	return t.emptyRuns
+}
+
+// ResetEmptyRuns 有产出时清零连续计数。
+func (t *Task) ResetEmptyRuns() {
+	t.emptyRunMu.Lock()
+	defer t.emptyRunMu.Unlock()
+	t.emptyRuns = 0
+}
+
+// EmptyRuns 返回当前连续零产出意图数。
+func (t *Task) EmptyRuns() int {
+	t.emptyRunMu.Lock()
+	defer t.emptyRunMu.Unlock()
+	return t.emptyRuns
 }
 
 // Manager owns the PostgreSQL data source (asset graph + every task's exploration

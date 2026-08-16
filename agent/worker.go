@@ -267,6 +267,11 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 	if tc.DeadlineUnix > 0 {
 		settle = wrapupSettlementForTask("worker", []string{"Bash"}, clamped)
 	}
+	// P4.3 目标/意图重注入：收尾阶段也把意图钉在提示里——预算耗尽收尾时模型若忘了任务
+	// 会乱写/空写，这里保证它至少知道"自己在做哪条意图"。
+	if settle != nil && settle.Prompt != "" {
+		settle.Prompt += "\n\n【收尾时请记得你的意图（P4.3 重注入）】\n" + renderIntentTask(intent)
+	}
 	opts := agentcore.Options{
 		Provider:        w.prov,
 		SystemPrompt:    system,
@@ -361,6 +366,16 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 		defer runCancel()
 	}
 	finalText, reason, err := captureRunSession(runCtx, s, input, emitWrap)
+	// P4.1 Reflector：正常完成(ReasonCompleted)但没有写回任何东西 → 回注一次"把结论落地"，
+	// 避免模型空转一轮就收尾（pentagi reflector 思路）。仅在确实零产出时触发，最多 1 次。
+	if err == nil && ctx.Err() == nil && runCtx.Err() == nil &&
+		reason == harness.ReasonCompleted && tsx.Writes().Total() == 0 {
+		emitWrap(db.Activity{Kind: "text", IsError: true,
+			Summary: "Reflector：本 run 正常结束但无任何写回", Detail: "将回注一次落地结论提示"})
+		finalText, reason, err = captureRunSession(runCtx, s,
+			"你已正常结束，但【没有写回任何东西】。若你实际得到了一些结论——哪怕是“端口关闭/参数不可注入/未发现登录入口”这类**否定结论**——请用 record_fact 把它们落地（否定结论记得标 confidence，弱证据标 inferred）；有新资产用 insert_assets；确认为漏洞用 report_finding。若确实还什么都没得到，就先做一次最小推进（换参数/换路径/再探一层）再写回。完成后给出最终总结。"+
+				"\n\n【再次提醒你的意图】"+renderIntentTask(intent), emitWrap)
+	}
 	// 证据闸门：正常完成时校验最终总结——引用的证据 id 必须真实、声称的 flag 必须
 	// 逐字出现在工具输出。不通过则把拒绝原因回注给模型修正后重答（P2.3：最多 1 次，
 	// 且该轮【禁止调用工具】——只核对既有证据、改写最终总结，避免整轮重跑烧 token）。

@@ -317,7 +317,15 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	if len(triggers) == 0 {
 		lead = "本轮是**定时巡检（心跳到点）/无具体变动信号**的唤醒——图不一定有新变动。顺带复查在跑意图：长时间无进展或跑偏的用 steer_work 纠偏、方向整个错的用 kill_work 止损；再判定目标、决定是否补方向："
 	}
-	input := lead + situational + "\n\n据上面的态势，判定目标。**本轮若无未被覆盖的新方向，直接结束即可（生成 0 个意图是正常且常见的，尤其刚派完意图在等 worker 产出时）。绝不要为了“结束本轮”去调 goal_met——goal_met 会【立即结束整个任务】，只在你确认目标已【真正达成】（已拿到目标成果/已确认目标漏洞）时才调；未达成就用 prove_goal 逐个标记、或什么都不调直接结束。**" +
+	// P4.4 Refiner：上轮有意图结束时，先"修订"而非从头重规划——把已被产出满足/已无意义
+	// 的 TodoWrite 待办更新掉、收敛已覆盖方向，再决定是否新增。避免重复派已覆盖方向。
+	refine := ""
+	if len(triggers) > 0 {
+		refine = "\n\n【先修订再规划】上轮有意图已结束。先对照上面的【实际变动】：" +
+			"把 TodoWrite 待办里**已被产出满足的步骤标 completed**、**已无意义/可合并的方向移除或更新**，" +
+			"再决定是否新增方向。已被覆盖、或已尝试过且无新机理的方向【不要重复派】。"
+	}
+	input := lead + situational + refine + "\n\n据上面的态势，判定目标。**本轮若无未被覆盖的新方向，直接结束即可（生成 0 个意图是正常且常见的，尤其刚派完意图在等 worker 产出时）。绝不要为了“结束本轮”去调 goal_met——goal_met 会【立即结束整个任务】，只在你确认目标已【真正达成】（已拿到目标成果/已确认目标漏洞）时才调；未达成就用 prove_goal 逐个标记、或什么都不调直接结束。**" +
 		renderPlannerTodos(opts.Todos.List())
 	// 有 deadline 夹逼时加硬 ctx 兜底(软预算 + grace),防单轮卡死绕过轮边界软超时。
 	runCtx := ctx

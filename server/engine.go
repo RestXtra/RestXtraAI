@@ -702,6 +702,14 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 		}
 		_ = t.Store.SetIntentState(intent.ID, state)
 		log.Printf("[worker %s] task %s 意图 #%d 结束: %s (写回 %s)", name, t.ID, intent.ID, state, wrote)
+		// P4.2 stall guard：连续零产出计数，达到阈值记警告（方向可能全是死路）。
+		if wrote.Total() == 0 {
+			if n := t.BumpEmptyRun(); n >= 3 {
+				log.Printf("[worker %s] task %s 连续 %d 个意图零产出，活跃方向疑似死路（stall guard）", name, t.ID, n)
+			}
+		} else {
+			t.ResetEmptyRuns()
+		}
 		e.touch(t.ID)
 		t.NotifyDone(intent.ID) // results changed the graph -> wake the planner (with the just-finished intent id)
 	}
