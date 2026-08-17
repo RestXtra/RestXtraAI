@@ -799,7 +799,6 @@ export interface WorkflowRunItem {
   created_at: string;
 }
 
-
 // ---- 平台扩展：知识库 / WebShell / C2 / 工作空间 ----
 export interface KnowledgeItem {
   id: string;
@@ -845,4 +844,61 @@ export interface WorkspaceEntry {
   dir: boolean;
   size: number;
   mod: number;
+}
+
+// ---- 能力：代理池 ----
+export interface ProxyItem {
+  id: string;
+  name: string;
+  protocol: "http" | "https" | "socks5" | "socks5h";
+  host: string;
+  port: number;
+  username: string;
+  password_set: boolean;
+  region: string;
+  enabled: boolean;
+  note: string;
+  source: "manual" | "import" | "subscription";
+  last_check_at: string | null;
+  last_check_ok: boolean;
+  latency_ms: number;
+  fail_count: number;
+  created_at: string;
+  updated_at: string;
+}
+export interface ProxyPoolStats {
+  total: number;
+  enabled: number;
+  healthy: number;
+  unchecked: number;
+  failing: number;
+  avg_latency_ms: number;
+}
+export interface ProxySourceItem {
+  id: string;
+  name: string;
+  url: string;
+  interval_sec: number;
+  enabled: boolean;
+  last_checked_at: string | null;
+  last_error: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---- 代理入口（本地 mixed HTTP/SOCKS5 桥） ----
+export interface ProxyBridgeRule {
+  kind: "ip-cidr" | "domain" | "domain-suffix" | "process" | "match";
+  value: string;
+  direct: boolean;
+}
+export interface ProxyBridgeStatus {
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  node_id: number;
+  node_name: string;
+  rules: ProxyBridgeRule[];
+  client_auth: boolean;
+  client_username: string;
 }

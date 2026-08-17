@@ -16,6 +16,8 @@ import type {
   AuditLogEntry,
   BatchQueue,
   BatchTask,
+  C2Listener,
+  C2Session,
   CommandRecord,
   Company,
   CompanyStat,
@@ -28,6 +30,7 @@ import type {
   InterceptApprovalRow,
   InterceptPending,
   InterceptRule,
+  KnowledgeItem,
   LLMProfile,
   LLMRecordDetail,
   LLMRecordItem,
@@ -40,6 +43,11 @@ import type {
   PlaybookResult,
   PromptVar,
   PromptVersion,
+  ProxyBridgeRule,
+  ProxyBridgeStatus,
+  ProxyItem,
+  ProxyPoolStats,
+  ProxySourceItem,
   SandboxContainer,
   SandboxEgress,
   SandboxHost,
@@ -56,10 +64,11 @@ import type {
   Tool,
   TrafficDetail,
   TrafficResp,
+  WebshellConn,
   WorkflowGraphDef,
   WorkflowGraphMeta,
   WorkflowRunItem,
-  KnowledgeItem, WebshellConn, C2Listener, C2Session, WorkspaceEntry,
+  WorkspaceEntry,
 } from "@/lib/types";
 
 function getToken(): string | null {
@@ -195,9 +204,10 @@ export const api = {
   assets: (type = "", limit = 50, offset = 0, companyId?: number) => {
     const q = new URLSearchParams({ type, limit: String(limit), offset: String(offset) });
     if (companyId) q.set("company_id", String(companyId));
-    return get<{ count: number; total: number; assets: Asset[] }>(`/assets?${q.toString()}`).then(
-      (r) => ({ assets: r?.assets ?? [], total: r?.total ?? r?.count ?? 0 }),
-    );
+    return get<{ count: number; total: number; assets: Asset[] }>(`/assets?${q.toString()}`).then((r) => ({
+      assets: r?.assets ?? [],
+      total: r?.total ?? r?.count ?? 0,
+    }));
   },
   searchAssets: (dsl: string, type = "", limit = 50, offset = 0, companyId?: number) => {
     const q = new URLSearchParams({ dsl });
@@ -205,9 +215,10 @@ export const api = {
     q.set("limit", String(limit));
     q.set("offset", String(offset));
     if (companyId) q.set("company_id", String(companyId));
-    return get<{ count: number; total: number; assets: Asset[] }>(`/assets?${q.toString()}`).then(
-      (r) => ({ assets: r?.assets ?? [], total: r?.total ?? r?.count ?? 0 }),
-    );
+    return get<{ count: number; total: number; assets: Asset[] }>(`/assets?${q.toString()}`).then((r) => ({
+      assets: r?.assets ?? [],
+      total: r?.total ?? r?.count ?? 0,
+    }));
   },
   assetCounts: (companyId?: number) =>
     get<Record<string, number>>(`/assets/counts${companyId ? `?company_id=${companyId}` : ""}`),
@@ -269,8 +280,7 @@ export const api = {
     const qs = q.toString();
     return get<Finding[]>(`/exploration/findings${qs ? `?${qs}` : ""}`).then(arr);
   },
-  dashboardCompanies: () =>
-    get<{ companies: CompanyStat[] }>("/dashboard/companies").then((r) => arr(r.companies)),
+  dashboardCompanies: () => get<{ companies: CompanyStat[] }>("/dashboard/companies").then((r) => arr(r.companies)),
   intents: (task?: string) => get<TaskNode[]>(`/exploration/intents${tq(task)}`).then(arr),
   tokenStats: (task?: string) =>
     get<{ workers: TokenUsage[]; total: TokenTotal }>(`/exploration/tokens${tq(task)}`).then((r) => ({
@@ -297,9 +307,9 @@ export const api = {
   activityDetail: (id: number, task?: string) => get<{ detail: string }>(`/exploration/activity/${id}${tq(task)}`),
   // 企业级活动流（仪表盘选中企业时用）：跨任务最新活动。
   activityByCompany: (companyId: number, limit = 60) =>
-    get<{ items: Activity[]; cursor: number }>(`/exploration/activity/company?company_id=${companyId}&limit=${limit}`).then(
-      (r) => ({ items: arr(r.items), cursor: r.cursor ?? 0 }),
-    ),
+    get<{ items: Activity[]; cursor: number }>(
+      `/exploration/activity/company?company_id=${companyId}&limit=${limit}`,
+    ).then((r) => ({ items: arr(r.items), cursor: r.cursor ?? 0 })),
 
   // ---- traffic / audit / report / chat ----
   audit: (task?: string) => get<Audit>(`/audit${tq(task)}`),
@@ -311,7 +321,8 @@ export const api = {
         (q ? `&q=${encodeURIComponent(q)}` : ""),
     ),
   trafficExchange: (id: string) => get<TrafficDetail>(`/traffic/exchange?id=${encodeURIComponent(id)}`),
-  deleteTraffic: (ids: string[]) => http<{ deleted: number; removed?: number }>("/traffic", { method: "DELETE", body: JSON.stringify({ ids }) }),
+  deleteTraffic: (ids: string[]) =>
+    http<{ deleted: number; removed?: number }>("/traffic", { method: "DELETE", body: JSON.stringify({ ids }) }),
   clearTraffic: () => post<{ removed: number; deleted?: number }>("/traffic/clear", {}),
 
   // ---- app settings (runtime toggles) ----
@@ -621,7 +632,10 @@ export const api = {
     patch<{ ok: boolean }>(`/platform/users/${id}`, body),
   deletePlatformUser: (id: number) => del<{ deleted: number }>(`/platform/users/${id}`),
   deletePlatformUsers: (ids: number[], all = false) =>
-    http<{ deleted: number[]; skipped?: string[] }>("/platform/users", { method: "DELETE", body: JSON.stringify({ ids, all }) }),
+    http<{ deleted: number[]; skipped?: string[] }>("/platform/users", {
+      method: "DELETE",
+      body: JSON.stringify({ ids, all }),
+    }),
   resetUserPassword: (id: number, password: string) =>
     post<{ ok: boolean }>(`/platform/users/${id}/password`, { password }),
   setUserRoles: (id: number, roles: string[]) => post<{ ok: boolean }>(`/platform/users/${id}/roles`, { roles }),
@@ -632,7 +646,10 @@ export const api = {
     patch<{ ok: boolean }>(`/platform/roles/${id}`, body),
   deletePlatformRole: (id: number) => del<{ deleted: number }>(`/platform/roles/${id}`),
   deletePlatformRoles: (ids: number[], all = false) =>
-    http<{ deleted: number[]; skipped?: string[] }>("/platform/roles", { method: "DELETE", body: JSON.stringify({ ids, all }) }),
+    http<{ deleted: number[]; skipped?: string[] }>("/platform/roles", {
+      method: "DELETE",
+      body: JSON.stringify({ ids, all }),
+    }),
   rolePermissions: (id: number) => get<{ keys: string[] }>(`/platform/roles/${id}/permissions`).then((r) => r.keys),
   setRolePermissions: (id: number, keys: string[]) =>
     put<{ ok: boolean }>(`/platform/roles/${id}/permissions`, { keys }),
@@ -650,7 +667,8 @@ export const api = {
   },
   auditStats: () => get<{ total: number }>("/audit/stats"),
   auditGC: (days = 90) => post<{ removed: number }>(`/audit/gc?days=${days}`, {}),
-  deleteLogs: (ids: number[]) => http<{ deleted: number }>("/logs", { method: "DELETE", body: JSON.stringify({ ids }) }),
+  deleteLogs: (ids: number[]) =>
+    http<{ deleted: number }>("/logs", { method: "DELETE", body: JSON.stringify({ ids }) }),
   clearLogs: () => post<{ removed: number }>("/logs/clear", {}),
 
   // ---- 攻击模式库 / playbook ----
@@ -666,8 +684,7 @@ export const api = {
     q.set("offset", String(f.offset ?? 0));
     return get<{ patterns: AttackPattern[]; total: number }>(`/playbook/patterns?${q.toString()}`);
   },
-  createPlaybookPattern: (p: Partial<AttackPattern>) =>
-    post<AttackPattern>("/playbook/patterns", p),
+  createPlaybookPattern: (p: Partial<AttackPattern>) => post<AttackPattern>("/playbook/patterns", p),
   playbookReproduce: (p: {
     host_id?: number;
     image: string;
@@ -681,10 +698,16 @@ export const api = {
     confidence?: number;
     keep_running?: boolean;
   }) =>
-    post<{ ok: boolean; success: boolean; exit_code?: number; verification?: string; seconds?: number; output?: string; pattern_id?: string; error?: string }>(
-      "/playbook/reproduce",
-      p,
-    ),
+    post<{
+      ok: boolean;
+      success: boolean;
+      exit_code?: number;
+      verification?: string;
+      seconds?: number;
+      output?: string;
+      pattern_id?: string;
+      error?: string;
+    }>("/playbook/reproduce", p),
   deletePlaybookPattern: (id: string) => del<{ deleted: number }>(`/playbook/patterns/${id}`),
   playbookSearch: (q: { cve?: string; technique?: string; components?: string[]; keywords?: string; limit?: number }) =>
     post<{ results: PlaybookResult[] }>("/playbook/search", q).then((r) => r.results ?? []),
@@ -727,7 +750,10 @@ export const api = {
   },
   llmRecordDetail: (id: number) => get<LLMRecordDetail>(`/llm/records/${id}`),
   deleteLLMRecords: (ids: number[], all = false) =>
-    http<{ deleted: number; removed?: number }>("/llm/records", { method: "DELETE", body: JSON.stringify({ ids, all }) }),
+    http<{ deleted: number; removed?: number }>("/llm/records", {
+      method: "DELETE",
+      body: JSON.stringify({ ids, all }),
+    }),
   clearLLMRecords: () => post<{ removed: number; deleted?: number }>("/llm/records/clear", {}),
 
   // ---- 沙箱管理（主机 / 容器 / 出口范围）----
@@ -781,7 +807,10 @@ export const api = {
   }) => post<{ id: number }>("/sandbox/egress", e),
   deleteSandboxEgress: (id: string) => del<{ deleted: number }>(`/sandbox/egress/${id}`),
   deleteSandboxEgresses: (ids: string[], all = false) =>
-    http<{ deleted: number }>("/sandbox/egress", { method: "DELETE", body: JSON.stringify({ ids: ids.map(Number), all }) }),
+    http<{ deleted: number }>("/sandbox/egress", {
+      method: "DELETE",
+      body: JSON.stringify({ ids: ids.map(Number), all }),
+    }),
 
   // ---- 工作流图引擎 ----
   workflowValidate: (g: WorkflowGraphDef) => post<{ ok: boolean; errors?: string[] }>("/workflows/validate", g),
@@ -806,13 +835,17 @@ export const api = {
     ),
 
   // ---- 工作空间 ----
-  workspaceList: (path = "") => get<{ path: string; entries: WorkspaceEntry[] }>(`/workspace/list?path=${encodeURIComponent(path)}`),
-  workspaceRead: (path: string) => get<{ path: string; content: string }>(`/workspace/read?path=${encodeURIComponent(path)}`),
+  workspaceList: (path = "") =>
+    get<{ path: string; entries: WorkspaceEntry[] }>(`/workspace/list?path=${encodeURIComponent(path)}`),
+  workspaceRead: (path: string) =>
+    get<{ path: string; content: string }>(`/workspace/read?path=${encodeURIComponent(path)}`),
 
   // ---- 知识库 ----
   knowledge: () => get<{ items: KnowledgeItem[] }>("/knowledge").then((r) => arr(r.items)),
-  knowledgeSearch: (q: string, limit = 8) => post<{ items: KnowledgeItem[] }>("/knowledge/search", { q, limit }).then((r) => arr(r.items)),
-  saveKnowledge: (k: { id?: number; title: string; content: string; tags?: string }) => post<{ id: number }>("/knowledge", k),
+  knowledgeSearch: (q: string, limit = 8) =>
+    post<{ items: KnowledgeItem[] }>("/knowledge/search", { q, limit }).then((r) => arr(r.items)),
+  saveKnowledge: (k: { id?: number; title: string; content: string; tags?: string }) =>
+    post<{ id: number }>("/knowledge", k),
   deleteKnowledge: (id: string) => del<{ deleted: number }>(`/knowledge/${id}`),
 
   // ---- WebShell ----
@@ -829,10 +862,65 @@ export const api = {
   saveC2Listener: (l: Partial<C2Listener>) => post<{ id: number }>("/c2/listeners", l),
   deleteC2Listener: (id: string) => del<{ deleted: number }>(`/c2/listeners/${id}`),
   deleteC2Listeners: (ids: string[], all = false) =>
-    http<{ deleted: number }>("/c2/listeners", { method: "DELETE", body: JSON.stringify({ ids: ids.map(Number), all }) }),
+    http<{ deleted: number }>("/c2/listeners", {
+      method: "DELETE",
+      body: JSON.stringify({ ids: ids.map(Number), all }),
+    }),
   deleteC2Sessions: (ids: string[], all = false) =>
-    http<{ deleted: number }>("/c2/sessions", { method: "DELETE", body: JSON.stringify({ ids: ids.map(Number), all }) }),
+    http<{ deleted: number }>("/c2/sessions", {
+      method: "DELETE",
+      body: JSON.stringify({ ids: ids.map(Number), all }),
+    }),
   c2Ingest: (p: { listener_id?: number; session_id: string; host?: string; meta?: string; status?: string }) =>
     post<{ ok: boolean }>("/c2/ingest", p),
   c2SetStatus: (session_id: string, status: string) => post<{ ok: boolean }>("/c2/status", { session_id, status }),
+
+  // ---- 能力：代理池 ----
+  proxies: () => get<{ proxies: ProxyItem[]; stats: ProxyPoolStats }>("/proxies"),
+  saveProxy: (
+    p: Partial<
+      Omit<
+        ProxyItem,
+        "id" | "created_at" | "updated_at" | "last_check_at" | "password_set" | "fail_count" | "latency_ms" | "source"
+      >
+    > & { id?: number; password?: string },
+  ) => post<{ id: number }>("/proxies", p),
+  deleteProxy: (id: string) => del<{ deleted: number }>(`/proxies/${id}`),
+  deleteProxies: (ids: string[], all = false) =>
+    http<{ deleted: number }>("/proxies", { method: "DELETE", body: JSON.stringify({ ids: ids.map(Number), all }) }),
+  proxyImport: (p: { text?: string; url?: string }) =>
+    post<{
+      imported: number;
+      total: number;
+      errors: string[];
+      skipped?: number;
+      format?: string;
+      groups?: string[];
+      rules_count?: number;
+    }>("/proxies/import", p),
+  proxyTest: (id: string) => post<{ ok: boolean; latency_ms?: number; error?: string }>(`/proxies/${id}/test`, {}),
+  proxyTestAll: () => post<{ tested: number; ok: number; fail: number }>("/proxies/test-all", {}),
+  proxyPick: (p: { region?: string; protocol?: string; strategy?: "random" | "round-robin" | "fastest" }) =>
+    post<{
+      ok: boolean;
+      id?: number;
+      name?: string;
+      protocol?: string;
+      host?: string;
+      port?: number;
+      url?: string;
+      error?: string;
+    }>("/proxies/pick", p),
+  proxySources: () => get<{ sources: ProxySourceItem[] }>("/proxy-sources").then((r) => arr(r.sources)),
+  saveProxySource: (s: Partial<ProxySourceItem>) => post<{ id: number }>("/proxy-sources", s),
+  deleteProxySource: (id: string) => del<{ deleted: number }>(`/proxy-sources/${id}`),
+  proxySourceRefresh: (id: string) => post<{ ok: boolean }>(`/proxy-sources/${id}/refresh`, {}),
+
+  // ---- 代理入口（本地 mixed 桥） ----
+  proxyBridgeStatus: () => get<ProxyBridgeStatus>("/proxy-bridge"),
+  proxyBridgeSave: (cfg: Partial<ProxyBridgeStatus>) => post<ProxyBridgeStatus>("/proxy-bridge", cfg),
+  proxyBridgeStart: () => post<ProxyBridgeStatus>("/proxy-bridge/start", {}),
+  proxyBridgeStop: () => post<{ ok: boolean; running: boolean }>("/proxy-bridge/stop", {}),
+  proxyBridgeImportRules: (rules: string[]) =>
+    post<{ rules: ProxyBridgeRule[] }>("/proxy-bridge/import-rules", { rules }),
 };

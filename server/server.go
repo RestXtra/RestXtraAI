@@ -76,6 +76,10 @@ type Server struct {
 	profMu         sync.Mutex
 	profAgents     map[int64]*profBundle
 	profChatAgents map[int64]*agent.ChatAgent // per-profile ChatAgent cache (chat page)
+
+	// proxyBridge is the local mixed HTTP/SOCKS5 proxy bridge bound to the proxy
+	// pool (Clash-style mixed-port). Restored at startup if enabled.
+	proxyBridge *bridgeManager
 }
 
 // profBundle is a planner/worker pair built from one LLM profile.
@@ -102,7 +106,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 	}
 	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, chatBusy: map[string]bool{},
 		chatCancel: map[string]context.CancelFunc{}, triggerQ: map[string][]triggeredRun{}, triggerRun: map[string]bool{},
-		profAgents: map[int64]*profBundle{}, profChatAgents: map[int64]*agent.ChatAgent{}}
+		profAgents: map[int64]*profBundle{}, profChatAgents: map[int64]*agent.ChatAgent{}, proxyBridge: newBridgeManager()}
 	// per-task LLM: a task pinned to a specific profile runs on that profile's
 	// dedicated planner/worker; unpinned tasks fall back to the global active pair.
 	s.engine.SetAgentResolver(func(t *Task) (*agent.Planner, *agent.Worker) {
@@ -223,6 +227,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		// seeded browser MCP on first run). Async so it never blocks startup.
 		go s.discoverEmptyMCPsOnStartup()
 		logSink.SetDB(ctx, m.pg) // restore last 100 log rows and enable async persistence
+		s.ensureProxyBridgeRecovery() // 若上次启用过本地代理入口，重启后恢复
 	}
 	// precedence: persisted DB config > env.
 	if cfg, ok := s.loadLLMConfig(); ok {
@@ -807,6 +812,27 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/c2/sessions", s.c2DeleteSessionsBatch)
 	mux.HandleFunc("POST /api/c2/ingest", s.c2Ingest)
 	mux.HandleFunc("POST /api/c2/status", s.c2SetStatus)
+
+	// 能力：代理池
+	mux.HandleFunc("GET /api/proxies", s.rbac("cap.proxy.read", s.proxyList))
+	mux.HandleFunc("POST /api/proxies", s.rbac("cap.proxy.write", s.proxySave))
+	mux.HandleFunc("DELETE /api/proxies/{id}", s.rbac("cap.proxy.write", s.proxyDelete))
+	mux.HandleFunc("DELETE /api/proxies", s.rbac("cap.proxy.write", s.proxyDeleteBatch))
+	mux.HandleFunc("POST /api/proxies/import", s.rbac("cap.proxy.write", s.proxyImport))
+	mux.HandleFunc("POST /api/proxies/{id}/test", s.rbac("cap.proxy.write", s.proxyTest))
+	mux.HandleFunc("POST /api/proxies/test-all", s.rbac("cap.proxy.write", s.proxyTestAll))
+	mux.HandleFunc("POST /api/proxies/pick", s.rbac("cap.proxy.read", s.proxyPick))
+	mux.HandleFunc("GET /api/proxy-sources", s.rbac("cap.proxy.read", s.proxySourceList))
+	mux.HandleFunc("POST /api/proxy-sources", s.rbac("cap.proxy.write", s.proxySourceSave))
+	mux.HandleFunc("DELETE /api/proxy-sources/{id}", s.rbac("cap.proxy.write", s.proxySourceDelete))
+	mux.HandleFunc("POST /api/proxy-sources/{id}/refresh", s.rbac("cap.proxy.write", s.proxySourceRefresh))
+
+	// 代理入口（本地 mixed HTTP/SOCKS5 桥）
+	mux.HandleFunc("GET /api/proxy-bridge", s.rbac("cap.proxy.read", s.bridgeStatus))
+	mux.HandleFunc("POST /api/proxy-bridge", s.rbac("cap.proxy.write", s.bridgeSaveConfig))
+	mux.HandleFunc("POST /api/proxy-bridge/start", s.rbac("cap.proxy.write", s.bridgeStart))
+	mux.HandleFunc("POST /api/proxy-bridge/stop", s.rbac("cap.proxy.write", s.bridgeStop))
+	mux.HandleFunc("POST /api/proxy-bridge/import-rules", s.rbac("cap.proxy.write", s.bridgeImportRules))
 
 	// TSecBenchmark 跑分
 	mux.HandleFunc("GET /api/benchmark/config", s.benchGetConfig)

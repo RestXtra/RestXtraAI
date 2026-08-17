@@ -7,8 +7,8 @@ import type {
   Activity, Agent, AgentDetail, Asset, Audit, Company, Conversation,
   ConvTokenSummary, DailyTokenBucket, Edge, Finding, InterceptApprovalRow,
   InterceptPending, InterceptRule, LLMProfile, MCPServer, MCPTool, PromptVar,
-  PromptVersion, Settings, SkillItem, Stats, TaskNode, Task, TokenTotal,
-  TokenUsage, Tool, TrafficResp, TrafficDetail,
+  PromptVersion, ProxyItem, ProxyPoolStats, ProxySourceItem, Settings, SkillItem,
+  Stats, TaskNode, Task, TokenTotal, TokenUsage, Tool, TrafficResp, TrafficDetail,
 } from "@/lib/types";
 
 const T = (iso: string) => iso; // readability helper for timestamps
@@ -521,3 +521,23 @@ export const conversationMessages: Record<number, Activity[]> = {
     { seq: 7, worker: "mainagent", ts: T("2026-07-24T16:01:00Z"), kind: "text", summary: "越权面有两条：① /v1/orders?id= 是自增数字 id → 典型 IDOR，改 id 试读他人订单；② JWT 用 HS256，试 john/hashcat 爆密钥→可伪造任意 sub 越权。我把这两条各派生成一个意图。建议先做 IDOR（成本低、影响直接）。" },
   ],
 };
+
+// ── 能力：代理池 ───────────────────────────────────────────────────────────
+export const proxies: ProxyItem[] = [
+  { id: "1", name: "海外-住宅A", protocol: "http", host: "10.0.0.1", port: 8080, username: "rx", password_set: true, region: "us", enabled: true, note: "住宅代理主节点", source: "import", last_check_at: T("2026-07-26T09:00:00Z"), last_check_ok: true, latency_ms: 120, fail_count: 0, created_at: T("2026-07-20T00:00:00Z"), updated_at: T("2026-07-26T09:00:00Z") },
+  { id: "2", name: "香港-中转", protocol: "socks5", host: "10.0.0.2", port: 1080, username: "", password_set: false, region: "hk", enabled: true, note: "", source: "manual", last_check_at: T("2026-07-26T08:55:00Z"), last_check_ok: true, latency_ms: 85, fail_count: 0, created_at: T("2026-07-21T00:00:00Z"), updated_at: T("2026-07-26T08:55:00Z") },
+  { id: "3", name: "欧洲-数据中心", protocol: "http", host: "10.0.0.3", port: 3128, username: "eu", password_set: true, region: "de", enabled: false, note: "限速，待观察", source: "subscription", last_check_at: T("2026-07-26T08:50:00Z"), last_check_ok: false, latency_ms: 0, fail_count: 2, created_at: T("2026-07-22T00:00:00Z"), updated_at: T("2026-07-26T08:50:00Z") },
+];
+
+export const proxyStats: ProxyPoolStats = {
+  total: proxies.length,
+  enabled: proxies.filter((p) => p.enabled).length,
+  healthy: proxies.filter((p) => p.enabled && p.last_check_ok).length,
+  unchecked: 0,
+  failing: proxies.filter((p) => p.enabled && p.last_check_at && !p.last_check_ok).length,
+  avg_latency_ms: 102,
+};
+
+export const proxySources: ProxySourceItem[] = [
+  { id: "1", name: "机场订阅-主", url: "https://example.com/api/v1/client/subscribe?token=xxx", interval_sec: 3600, enabled: true, last_checked_at: T("2026-07-26T08:00:00Z"), last_error: "", created_at: T("2026-07-18T00:00:00Z"), updated_at: T("2026-07-26T08:00:00Z") },
+];

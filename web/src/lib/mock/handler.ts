@@ -40,7 +40,13 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     return { tasks: list, active: D.ACTIVE_TASK };
   }
   if (path === "/tasks" && m === "POST")
-    return { ...D.tasks[0], id: "t-new", description: String(b.description ?? "新任务"), goal: String(b.goal ?? ""), status: "created" };
+    return {
+      ...D.tasks[0],
+      id: "t-new",
+      description: String(b.description ?? "新任务"),
+      goal: String(b.goal ?? ""),
+      status: "created",
+    };
   if (seg[0] === "tasks" && seg.length === 2 && m === "DELETE") return { deleted: 1 };
   if (seg[0] === "tasks" && seg[2] === "control") return { id: seg[1], paused: b.action === "pause" };
   if (seg[0] === "tasks" && seg[2] === "chat" && seg[3] === "stop") return { status: "stopped" };
@@ -57,7 +63,8 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     };
 
   // ── assets ──
-  if (path === "/assets/counts") return D.assetCounts;  if (path === "/assets" && m === "GET") {
+  if (path === "/assets/counts") return D.assetCounts;
+  if (path === "/assets" && m === "GET") {
     const type = q.get("type") ?? "";
     const list = type ? D.assets.filter((a) => a.type === type) : D.assets;
     const limit = Number(q.get("limit") ?? 50);
@@ -100,18 +107,18 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/traffic" && m === "DELETE") return { deleted: (b.ids as unknown[])?.length ?? 0 };
   if (path === "/traffic" && m === "POST") return { removed: 1 };
   if (path === "/traffic/exchange") return D.trafficDetail;
-  if (path === "/commands" && m === "DELETE")
-    return { deleted: b.all ? 1 : (b.ids as unknown[])?.length ?? 0 };
+  if (path === "/commands" && m === "DELETE") return { deleted: b.all ? 1 : ((b.ids as unknown[])?.length ?? 0) };
   if (path === "/logs" && m === "DELETE") return { deleted: (b.ids as unknown[])?.length ?? 0 };
   if (path === "/logs/clear" && m === "POST") return { removed: 1 };
   if (seg[0] === "llm" && seg[1] === "records" && m === "DELETE" && seg.length === 2)
-    return { deleted: b.all ? 1 : (b.ids as unknown[])?.length ?? 0 };
+    return { deleted: b.all ? 1 : ((b.ids as unknown[])?.length ?? 0) };
   if (seg[0] === "llm" && seg[1] === "records" && seg[2] === "clear" && m === "POST") return { removed: 1 };
   if (path === "/settings" && m === "GET") return D.settings;
   if (path === "/settings" && m === "PUT") return { ...D.settings, ...b };
   if (path === "/settings/web-search/test") return { ok: true, count: 5, backend: D.settings.web_search_backend };
   if (path === "/settings/python/detect") return { python_interpreter: "/usr/bin/python3" };
-  if (path === "/chat") return { reply: "（demo）我已把该建议注入为一条高优意图，work agent 会尽快执行。", mode: "hint" };
+  if (path === "/chat")
+    return { reply: "（demo）我已把该建议注入为一条高优意图，work agent 会尽快执行。", mode: "hint" };
   if (path === "/gc") return { removed: 0 };
 
   // ── LLM ──
@@ -121,11 +128,20 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/llm/profiles" && m === "GET") return { profiles: D.llmProfiles };
   if (path === "/llm/profiles" && m === "POST") return { id: Number(b.id) || 3 };
   if (path === "/llm/profiles/active") return { ok: true };
-  if (seg[0] === "llm" && seg[1] === "profiles" && seg.length === 3 && m === "DELETE") return { deleted: Number(seg[2]) };
+  if (seg[0] === "llm" && seg[1] === "profiles" && seg.length === 3 && m === "DELETE")
+    return { deleted: Number(seg[2]) };
 
   // ── agents ──
   if (path === "/agents" && m === "GET") return { agents: D.agents };
-  if (path === "/agents" && m === "POST") return { id: "9", key: String(b.key ?? "custom"), name: String(b.name ?? ""), role: "custom", builtin: false, enabled: true };
+  if (path === "/agents" && m === "POST")
+    return {
+      id: "9",
+      key: String(b.key ?? "custom"),
+      name: String(b.name ?? ""),
+      role: "custom",
+      builtin: false,
+      enabled: true,
+    };
   if (seg[0] === "agents" && seg.length === 2 && m === "GET") return D.agentDetail(seg[1]);
   if (seg[0] === "agents" && seg[2] === "triggers" && m === "GET") return { triggers: [] };
   if (seg[0] === "agents" && seg[2] === "prompts") return { versions: D.agentDetail(seg[1]).versions };
@@ -136,7 +152,14 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
 
   // ── conversations ──
   if (path === "/conversations" && m === "GET") return { conversations: D.conversations };
-  if (path === "/conversations" && m === "POST") return { id: 3, agent_key: String(b.agent_key ?? "mainagent"), title: String(b.title ?? "新会话"), created_at: "2026-07-26T04:00:00Z", updated_at: "2026-07-26T04:00:00Z" };
+  if (path === "/conversations" && m === "POST")
+    return {
+      id: 3,
+      agent_key: String(b.agent_key ?? "mainagent"),
+      title: String(b.title ?? "新会话"),
+      created_at: "2026-07-26T04:00:00Z",
+      updated_at: "2026-07-26T04:00:00Z",
+    };
   if (seg[0] === "conversations" && seg[2] === "messages" && seg.length === 3 && m === "GET") {
     const items = D.conversationMessages[Number(seg[1])] ?? [];
     return { items, cursor: items.length ? items[items.length - 1].seq : 0, running: false };
@@ -162,7 +185,8 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (seg[0] === "mcp" && seg.length === 2 && m === "DELETE") return { deleted: Number(seg[1]) };
 
   // ── scopesentry（demo：未配置）──
-  if (path === "/sync/scopesentry/status") return { exists: false, configured: false, enabled: false, reachable: false, tools: [] };
+  if (path === "/sync/scopesentry/status")
+    return { exists: false, configured: false, enabled: false, reachable: false, tools: [] };
   if (path === "/sync/scopesentry/projects") return { projects: [], tag: {} };
   if (path === "/sync/scopesentry/tasks") return { tasks: [] };
   if (path === "/sync/scopesentry/sync") return { synced: {}, companies: null, warnings: null, errors: null };
@@ -179,7 +203,8 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
 
   // ── intercept ──
   if (path === "/intercept/rules" && m === "GET") return { rules: D.interceptRules };
-  if (seg[0] === "intercept" && seg[1] === "rules" && seg[3] === "toggle") return { ok: true, enabled: b.enabled ?? true };
+  if (seg[0] === "intercept" && seg[1] === "rules" && seg[3] === "toggle")
+    return { ok: true, enabled: b.enabled ?? true };
   if (path === "/intercept/pending" && m === "GET") return { pending: D.interceptPending };
   if (seg[0] === "intercept" && seg[1] === "pending" && seg[3] === "decide") return { ok: true };
   if (seg[0] === "intercept" && seg[1] === "pending" && seg.length === 3 && m === "GET")
@@ -189,9 +214,75 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     return { items: D.interceptHistory.filter((r) => r.task_id === seg[2]) };
   if (path === "/intercept/tool-config") return { enabled_tools: ["bash"] };
 
+  // ── 能力：代理池 ──
+  if (path === "/proxies" && m === "GET") return { proxies: D.proxies, stats: D.proxyStats };
+  if (path === "/proxies" && m === "POST") return { id: D.proxies.length + 1 };
+  if (path === "/proxies" && m === "DELETE")
+    return { deleted: b.all ? D.proxies.length : ((b.ids as unknown[])?.length ?? 0) };
+  if (path === "/proxies/import") return { imported: 3, total: 3, errors: [] };
+  if (path === "/proxies/test-all")
+    return { tested: D.proxies.length, ok: D.proxies.filter((p) => p.last_check_ok).length, fail: 0 };
+  if (path === "/proxies/pick")
+    return {
+      ok: true,
+      id: 1,
+      name: "海外-住宅A",
+      protocol: "http",
+      host: "10.0.0.1",
+      port: 8080,
+      url: "http://10.0.0.1:8080",
+      latency_ms: 120,
+    };
+  if (seg[0] === "proxies" && seg[1] && seg[2] === "test") return { ok: true, latency_ms: 96 };
+  if (path === "/proxy-sources" && m === "GET") return { sources: D.proxySources };
+  if (path === "/proxy-sources" && m === "POST") return { id: D.proxySources.length + 1 };
+  if (seg[0] === "proxy-sources" && seg[1] && m === "DELETE") return { deleted: 1 };
+  if (seg[0] === "proxy-sources" && seg[1] && seg[2] === "refresh") return { ok: true };
+
+  // ── 代理入口（本地 mixed 桥）──
+  if (path === "/proxy-bridge" && m === "GET")
+    return {
+      enabled: false,
+      running: false,
+      port: 7890,
+      node_id: 0,
+      node_name: "",
+      rules: [],
+      client_auth: false,
+      client_username: "",
+    };
+  if (path === "/proxy-bridge" && m === "POST")
+    return {
+      enabled: true,
+      running: true,
+      port: Number(b.port ?? 7890),
+      node_id: Number(b.node_id ?? 0),
+      node_name: "",
+      rules: b.rules ?? [],
+      client_auth: false,
+      client_username: "",
+    };
+  if (path === "/proxy-bridge/start")
+    return {
+      enabled: true,
+      running: true,
+      port: 7890,
+      node_id: 0,
+      node_name: "",
+      rules: [],
+      client_auth: false,
+      client_username: "",
+    };
+  if (path === "/proxy-bridge/stop") return { ok: true, running: false };
+  if (path === "/proxy-bridge/import-rules") return { rules: ((b.rules as string[]) ?? []).slice(0, 0) };
+
   // ── 写操作兜底：成功但不落库 ──
   if (["POST", "PUT", "PATCH", "DELETE"].includes(m)) return { ok: true };
 
   // ── 读兜底：集合类给 []，其余 {} ──
-  return /(\/(tasks|profiles|conversations|rules|history|projects|tokens|agents|servers|skills|tools|findings|intents)s?$)|s$/.test(path) ? [] : {};
+  return /(\/(tasks|profiles|conversations|rules|history|projects|tokens|agents|servers|skills|tools|findings|intents)s?$)|s$/.test(
+    path,
+  )
+    ? []
+    : {};
 }

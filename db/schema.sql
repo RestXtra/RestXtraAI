@@ -820,3 +820,48 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_task_scope ON task_scope(
 CREATE INDEX IF NOT EXISTS idx_ts_domain  ON task_scope(domain) WHERE kind IN ('root_domain','subdomain');
 CREATE INDEX IF NOT EXISTS idx_ts_net     ON task_scope USING GIST(net inet_ops) WHERE kind IN ('ip','cidr');
 CREATE INDEX IF NOT EXISTS idx_ts_company ON task_scope(company_id) WHERE kind = 'company';
+
+-- =====================================================================
+-- X. 代理池（Proxy Pool）：统一管理出站代理资源，支持测活与按策略挑选。
+--    凭证与 llm_profiles.api_key 同策略：明文落库、读接口不回显（password_set）。
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS proxies (
+    id            BIGSERIAL PRIMARY KEY,
+    name          TEXT NOT NULL DEFAULT '',
+    protocol      TEXT NOT NULL DEFAULT 'http',   -- http | https | socks5 | socks5h
+    host          TEXT NOT NULL,
+    port          INTEGER NOT NULL,
+    username      TEXT NOT NULL DEFAULT '',
+    password      TEXT NOT NULL DEFAULT '',
+    region        TEXT NOT NULL DEFAULT '',       -- 区域/标签，如 "us" "cn" "residential"
+    enabled       BOOLEAN NOT NULL DEFAULT true,
+    note          TEXT NOT NULL DEFAULT '',
+    source        TEXT NOT NULL DEFAULT 'manual', -- manual | import | subscription
+    last_check_at TIMESTAMPTZ,
+    last_check_ok BOOLEAN NOT NULL DEFAULT false,
+    latency_ms    INTEGER NOT NULL DEFAULT 0,
+    fail_count    INTEGER NOT NULL DEFAULT 0,     -- 连续测活失败次数
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_proxies_enabled ON proxies(enabled);
+CREATE INDEX IF NOT EXISTS idx_proxies_region  ON proxies(region);
+DROP TRIGGER IF EXISTS trg_proxies_upd ON proxies;
+CREATE TRIGGER trg_proxies_upd BEFORE UPDATE ON proxies
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- 代理订阅源：远程 URL 或粘贴文本，供批量导入节点。
+CREATE TABLE IF NOT EXISTS proxy_sources (
+    id              BIGSERIAL PRIMARY KEY,
+    name            TEXT NOT NULL,
+    url             TEXT NOT NULL DEFAULT '',     -- 远程订阅 URL（空=仅粘贴文本）
+    interval_sec    INTEGER NOT NULL DEFAULT 3600, -- 刷新间隔（仅 URL 订阅生效）
+    enabled         BOOLEAN NOT NULL DEFAULT true,
+    last_checked_at TIMESTAMPTZ,
+    last_error      TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+DROP TRIGGER IF EXISTS trg_proxy_sources_upd ON proxy_sources;
+CREATE TRIGGER trg_proxy_sources_upd BEFORE UPDATE ON proxy_sources
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
