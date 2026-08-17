@@ -97,7 +97,7 @@ func sha256Hex(s string) string {
 }
 
 var (
-	reEvidenceID = regexp.MustCompile(`\be(\d{3,})\b`)
+	reEvidenceID = regexp.MustCompile(`\be(\d+)\b`)
 	reFlag       = regexp.MustCompile(`(?:flag|ctf)\{[^}\s]{0,200}\}`)
 )
 

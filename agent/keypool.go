@@ -48,8 +48,7 @@ func (k *keyPoolProvider) Stream(ctx context.Context, req llm.CompletionRequest)
 						switchKey = true
 						break
 					}
-					k.recordSuccess(idx)
-					if !yield(ev, nil) {
+					if !yield(ev, err) {
 						return
 					}
 					return
@@ -90,6 +89,9 @@ func (k *keyPoolProvider) recordFail(idx int) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.fails[idx]++
+	// 立即推进游标，让下次 nextActive 从下一个 key 开始扫描（实时故障切换，
+	// 不必等 3 次失败才熔断）。
+	k.cur = (idx + 1) % len(k.provs)
 	if k.fails[idx] >= 3 {
 		k.cooldown[idx] = time.Now().Add(30 * time.Second) // 熔断 30s
 		k.fails[idx] = 0

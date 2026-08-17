@@ -57,3 +57,15 @@ func TestRecipesLoadAndRender(t *testing.T) {
 		t.Error("nmap not in RecipeSeeds")
 	}
 }
+
+func TestRecipeEnabledFilter(t *testing.T) {
+	enabled := ToolRecipe{Name: "on", Command: "true"}
+	if !recipeEnabled(enabled) {
+		t.Error("recipe without enabled field should default to enabled")
+	}
+	f := false
+	explicitOff := ToolRecipe{Name: "off", Command: "true", Enabled: &f}
+	if recipeEnabled(explicitOff) {
+		t.Error("recipe with enabled:false should be disabled")
+	}
+}

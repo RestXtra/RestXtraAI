@@ -17,6 +17,7 @@ func TestEvidenceGate(t *testing.T) {
 		{"flag not in evidence", "拿到 flag：flag{FAKEFAKE}", "拿到 flag", false},
 		{"missing flag", "未发现漏洞", "目标：拿下 flag", false},
 		{"unknown evidence id", "结论见 e999", "", false},
+		{"unknown low evidence id", "结论见 e5", "", false},
 		{"no flag goal, ok", "完成：admin 面板无鉴权，见 e2", "测试后台", true},
 	}
 	for _, c := range cases {

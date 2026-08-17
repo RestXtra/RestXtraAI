@@ -22,13 +22,13 @@ var recipesFS embed.FS
 
 // ToolRecipe 是一个 YAML 工具配方。
 type ToolRecipe struct {
-	Name            string         `yaml:"name"`
-	Command         string         `yaml:"command"`
-	Description     string         `yaml:"description"`
-	ShortDescription string        `yaml:"short_description"`
-	Enabled         bool           `yaml:"enabled"`
-	Parameters      []RecipeParam  `yaml:"parameters"`
-	AdditionalArgs  []string       `yaml:"additional_args"`
+	Name             string         `yaml:"name"`
+	Command          string         `yaml:"command"`
+	Description      string         `yaml:"description"`
+	ShortDescription string         `yaml:"short_description"`
+	Enabled          *bool          `yaml:"enabled"` // 未声明默认启用；显式 false 关闭
+	Parameters       []RecipeParam  `yaml:"parameters"`
+	AdditionalArgs   []string       `yaml:"additional_args"`
 }
 
 // RecipeParam 描述一个命令行参数。
@@ -77,11 +77,17 @@ func RecipeTools() []actool.CoreTool {
 	}
 	var out []actool.CoreTool
 	for _, r := range recipes {
-		if r.Enabled || true { // enabled 默认 true，允许手动关闭
-			out = append(out, buildRecipeTool(r))
+		if !recipeEnabled(r) {
+			continue
 		}
+		out = append(out, buildRecipeTool(r))
 	}
 	return out
+}
+
+// recipeEnabled 判断配方是否启用：YAML 未声明 enabled 时默认启用，显式 false 关闭。
+func recipeEnabled(r ToolRecipe) bool {
+	return r.Enabled == nil || *r.Enabled
 }
 
 // RecipeSeeds 生成 tools 表播种快照（默认绑 worker）。
@@ -92,6 +98,9 @@ func RecipeSeeds() []ToolSeed {
 	}
 	var out []ToolSeed
 	for _, r := range recipes {
+		if !recipeEnabled(r) {
+			continue
+		}
 		desc := r.ShortDescription
 		if desc == "" {
 			desc = r.Description
