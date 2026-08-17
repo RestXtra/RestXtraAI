@@ -17,6 +17,17 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -103,6 +114,56 @@ export default function C2Page() {
   const [listeners, setListeners] = React.useState<C2Listener[]>([]);
   const [sessions, setSessions] = React.useState<C2Session[]>([]);
 
+  // batch selection & delete
+  const [checkedListeners, setCheckedListeners] = React.useState<Set<string>>(new Set());
+  const [checkedSessions, setCheckedSessions] = React.useState<Set<string>>(new Set());
+  const [deleteAll, setDeleteAll] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+
+  const toggleListener = (id: string) => {
+    setCheckedListeners((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSession = (id: string) => {
+    setCheckedSessions((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const confirmBatchDelete = async () => {
+    setDeleting(true);
+    const l = Array.from(checkedListeners);
+    const s = Array.from(checkedSessions);
+    try {
+      let msg = "";
+      if (deleteAll || l.length > 0) {
+        const res = await api.deleteC2Listeners(l, deleteAll);
+        msg += `已删除 ${res.deleted} 个监听器；`;
+      }
+      if (deleteAll || s.length > 0) {
+        const res = await api.deleteC2Sessions(s, deleteAll);
+        msg += `已删除 ${res.deleted} 个会话；`;
+      }
+      toast.success(msg || "无已选项");
+      setCheckedListeners(new Set());
+      setCheckedSessions(new Set());
+      setDeleteOpen(false);
+      load();
+    } catch (e) {
+      toast.error(`删除失败：${(e as Error).message}`);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const load = React.useCallback(() => {
     api.c2().then((r) => {
       setListeners(r.listeners ?? []);
@@ -146,6 +207,21 @@ export default function C2Page() {
           <WebhookIcon className="size-5 text-muted-foreground" />
           <h1 className="text-xl font-semibold tracking-tight">C2</h1>
           <Badge variant="secondary">{sessions.length} 会话</Badge>
+          {checkedListeners.size + checkedSessions.size > 0 && (
+            <>
+              <Button variant="destructive" size="sm" onClick={() => { setDeleteAll(false); setDeleteOpen(true); }}>
+                <Trash2Icon className="size-3.5" /> 删除已选 ({checkedListeners.size + checkedSessions.size})
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+              >
+                <Trash2Icon className="size-3.5" /> 删除全部
+              </Button>
+            </>
+          )}
         </div>
         <ListenerForm onSaved={load} />
       </div>
@@ -161,13 +237,20 @@ export default function C2Page() {
         {listeners.map((l) => (
           <Card key={l.id}>
             <CardContent className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="truncate font-medium">{l.name}</span>
-                  <Badge variant="outline" className="uppercase">{l.protocol}</Badge>
-                  {l.enabled ? <Badge variant="secondary" className="text-emerald-600">运行</Badge> : <Badge variant="outline">停止</Badge>}
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={checkedListeners.has(String(l.id))}
+                  onCheckedChange={() => toggleListener(String(l.id))}
+                  aria-label={`选择 ${l.name}`}
+                />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate font-medium">{l.name}</span>
+                    <Badge variant="outline" className="uppercase">{l.protocol}</Badge>
+                    {l.enabled ? <Badge variant="secondary" className="text-emerald-600">运行</Badge> : <Badge variant="outline">停止</Badge>}
+                  </div>
+                  <code className="text-muted-foreground mt-0.5 block font-mono text-xs">{l.host}:{l.port}</code>
                 </div>
-                <code className="text-muted-foreground mt-0.5 block font-mono text-xs">{l.host}:{l.port}</code>
               </div>
               <Button size="icon" variant="outline" aria-label="删除监听器" onClick={() => removeListener(l)}>
                 <Trash2Icon className="text-destructive" />
@@ -189,6 +272,21 @@ export default function C2Page() {
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-muted-foreground text-xs">
                   <tr className="text-left">
+                    <th className="w-8 px-3 py-2">
+                      <Checkbox
+                        checked={sessions.length > 0 && sessions.every((s) => checkedSessions.has(String(s.id)))}
+                        onCheckedChange={() => {
+                          setCheckedSessions((prev) => {
+                            const allSelected = sessions.length > 0 && sessions.every((s) => prev.has(String(s.id)));
+                            const next = new Set(prev);
+                            if (allSelected) sessions.forEach((s) => next.delete(String(s.id)));
+                            else sessions.forEach((s) => next.add(String(s.id)));
+                            return next;
+                          });
+                        }}
+                        aria-label="全选会话"
+                      />
+                    </th>
                     <th className="px-3 py-2 font-medium">Session</th>
                     <th className="px-3 py-2 font-medium">Host</th>
                     <th className="px-3 py-2 font-medium">状态</th>
@@ -199,6 +297,13 @@ export default function C2Page() {
                 <tbody>
                   {sessions.map((s) => (
                     <tr key={s.id} className="border-t">
+                      <td className="w-8 px-3 py-2">
+                        <Checkbox
+                          checked={checkedSessions.has(String(s.id))}
+                          onCheckedChange={() => toggleSession(String(s.id))}
+                          aria-label={`选择 ${s.session_id}`}
+                        />
+                      </td>
                       <td className="px-3 py-2 font-mono text-xs">{s.session_id}</td>
                       <td className="px-3 py-2 font-mono text-xs">{s.host || "—"}</td>
                       <td className="px-3 py-2">
@@ -224,6 +329,32 @@ export default function C2Page() {
           </CardContent>
         </Card>
       </div>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteAll ? (
+                <>将清空全部 C2 监听器与会话，此操作不可撤销。</>
+              ) : (
+                <>将删除 <span className="font-semibold tabular-nums">{checkedListeners.size}</span> 个监听器、
+                <span className="font-semibold tabular-nums"> {checkedSessions.size}</span> 个会话，此操作不可撤销。</>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); confirmBatchDelete(); }}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "删除中…" : "确认删除"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

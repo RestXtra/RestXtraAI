@@ -17,8 +17,19 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
@@ -114,6 +125,36 @@ export default function WebshellPage() {
   const [busy, setBusy] = React.useState<Record<string, boolean>>({});
   const [result, setResult] = React.useState<Record<string, { ok: boolean; snippet?: string; error?: string }>>({});
 
+  // batch selection & delete
+  const [checked, setChecked] = React.useState<Set<string>>(new Set());
+  const [deleteAll, setDeleteAll] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+
+  const toggleCheck = (id: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const confirmBatchDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await api.deleteWebshells(Array.from(checked), deleteAll);
+      toast.success(`已删除 ${res.deleted} 条连接`);
+      setChecked(new Set());
+      setDeleteOpen(false);
+      load();
+    } catch (e) {
+      toast.error(`删除失败：${(e as Error).message}`);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const load = React.useCallback(() => {
     api.webshells().then(setConns).catch(() => setConns([]));
   }, []);
@@ -150,6 +191,21 @@ export default function WebshellPage() {
           <TerminalIcon className="size-5 text-muted-foreground" />
           <h1 className="text-xl font-semibold tracking-tight">WebShell</h1>
           <Badge variant="secondary">{conns.length}</Badge>
+          {checked.size > 0 && (
+            <>
+              <Button variant="destructive" size="sm" onClick={() => { setDeleteAll(false); setDeleteOpen(true); }}>
+                <Trash2Icon className="size-3.5" /> 删除已选 ({checked.size})
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+              >
+                <Trash2Icon className="size-3.5" /> 删除全部
+              </Button>
+            </>
+          )}
         </div>
         <ConnForm onSaved={load} />
       </div>
@@ -169,13 +225,21 @@ export default function WebshellPage() {
             <Card key={c.id}>
               <CardContent className="grid gap-2">
                 <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate font-medium">{c.name}</span>
-                      <Badge variant="outline" className="uppercase">{c.type}</Badge>
-                      {c.enabled && <Switch size="sm" checked disabled />}
+                  <div className="flex items-start gap-2">
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={checked.has(String(c.id))}
+                      onCheckedChange={() => toggleCheck(String(c.id))}
+                      aria-label={`选择 ${c.name}`}
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-medium">{c.name}</span>
+                        <Badge variant="outline" className="uppercase">{c.type}</Badge>
+                        {c.enabled && <Switch size="sm" checked disabled />}
+                      </div>
+                      <code className="mt-0.5 block truncate font-mono text-xs text-muted-foreground">{c.url}</code>
                     </div>
-                    <code className="mt-0.5 block truncate font-mono text-xs text-muted-foreground">{c.url}</code>
                   </div>
                   <Button size="icon" variant="outline" aria-label="删除" onClick={() => remove(c)}>
                     <Trash2Icon className="text-destructive" />
@@ -204,6 +268,31 @@ export default function WebshellPage() {
           );
         })}
       </div>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除连接</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteAll ? (
+                <>将清空全部 WebShell 连接记录，此操作不可撤销。</>
+              ) : (
+                <>将永久删除 <span className="font-semibold tabular-nums">{checked.size}</span> 条 WebShell 连接记录，此操作不可撤销。</>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); confirmBatchDelete(); }}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "删除中…" : "确认删除"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

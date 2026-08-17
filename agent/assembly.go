@@ -66,6 +66,7 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 var progressiveBuiltins = map[string]bool{
 	"bench_vpn_check": true, "bench_challenges": true, "bench_start": true,
 	"bench_hint": true, "bench_submit": true, "bench_close": true,
+	"wait_task": true,
 	"traffic_search": true, "traffic_get": true,
 }
 

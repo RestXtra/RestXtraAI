@@ -253,10 +253,16 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool) {
 		for _, t := range tools {
 			row, known := byKey[t.Name()]
 			if !known { // MCP/skill/host tool: no row → untouched
+				if t.Name() == "wait_task" || t.Name() == "spawn_task" {
+					log.Printf("[tools-debug] %s: no DB row (kept)", t.Name())
+				}
 				out = append(out, t)
 				continue
 			}
 			if !row.Enabled || !contains(row.Agents, agentKey) {
+				if t.Name() == "wait_task" || t.Name() == "spawn_task" {
+					log.Printf("[tools-debug] %s: DROPPED (enabled=%v agents=%v want=%s)", t.Name(), row.Enabled, row.Agents, agentKey)
+				}
 				continue // disabled globally or not bound to this agent → drop
 			}
 			var schema map[string]any

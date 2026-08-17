@@ -2,7 +2,8 @@
 
 import * as React from "react";
 
-import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon, SearchIcon, TerminalIcon, XIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon, SearchIcon, TerminalIcon, Trash2Icon, XIcon } from "lucide-react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,17 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { api } from "@/lib/api";
 import type { CommandRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -57,9 +69,52 @@ export default function ToolExecPage() {
   const [commands, setCommands] = React.useState<CommandRecord[]>([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
+  const [reloadKey, setReloadKey] = React.useState(0);
 
   // Inline detail panel (Burp-style split, not a dialog)
   const [selected, setSelected] = React.useState<CommandRecord | null>(null);
+
+  // batch selection & delete
+  const [checked, setChecked] = React.useState<Set<number>>(new Set());
+  const [deleteIds, setDeleteIds] = React.useState<number[]>([]);
+  const [deleteAll, setDeleteAll] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+
+  const toggleCheck = (id: number) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleCheckAll = (ids: number[]) => {
+    setChecked((prev) => {
+      const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await api.deleteCommands(deleteIds, deleteAll);
+      toast.success(`已删除 ${res.deleted} 条执行记录`);
+      setChecked(new Set());
+      setDeleteOpen(false);
+      setSelected(null);
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      toast.error("删除失败：" + String((e as Error)?.message ?? e));
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   // Debounce search input.
   React.useEffect(() => {
@@ -88,7 +143,7 @@ export default function ToolExecPage() {
     return () => {
       alive = false;
     };
-  }, [page, size, queryQ, taskFilter]);
+  }, [page, size, queryQ, taskFilter, reloadKey]);
 
   const totalPages = Math.max(1, Math.ceil(total / size));
   const rangeStart = total === 0 ? 0 : page * size + 1;
@@ -101,6 +156,25 @@ export default function ToolExecPage() {
           <TerminalIcon className="size-5 text-muted-foreground" />
           <h1 className="font-semibold text-xl tracking-tight">工具执行</h1>
           <Badge variant="secondary">{total}</Badge>
+          {checked.size > 0 && (
+            <>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => { setDeleteAll(false); setDeleteIds(Array.from(checked)); setDeleteOpen(true); }}
+              >
+                <Trash2Icon className="size-3.5" /> 删除已选 ({checked.size})
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+              >
+                <Trash2Icon className="size-3.5" /> 删除全部
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -167,6 +241,13 @@ export default function ToolExecPage() {
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
+                  <TableHead className="w-8 pr-0">
+                    <Checkbox
+                      checked={commands.length > 0 && commands.every((c) => checked.has(c.id))}
+                      onCheckedChange={() => toggleCheckAll(commands.map((c) => c.id))}
+                      aria-label="全选"
+                    />
+                  </TableHead>
                   <TableHead className="w-[130px]">时间</TableHead>
                   <TableHead className="w-[60px]">任务</TableHead>
                   <TableHead className="w-[90px]">Worker</TableHead>
@@ -178,13 +259,13 @@ export default function ToolExecPage() {
               <TableBody>
                 {loading && commands.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-12 text-center">
+                    <TableCell colSpan={7} className="py-12 text-center">
                       <Loader2Icon className="mx-auto size-5 animate-spin text-muted-foreground" />
                     </TableCell>
                   </TableRow>
                 ) : commands.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-12 text-center text-muted-foreground text-sm">
+                    <TableCell colSpan={7} className="py-12 text-center text-muted-foreground text-sm">
                       暂无工具执行记录
                     </TableCell>
                   </TableRow>
@@ -195,6 +276,13 @@ export default function ToolExecPage() {
                       className={cn("cursor-pointer", selected?.id === cmd.id && "bg-accent hover:bg-accent")}
                       onClick={() => setSelected(cmd)}
                     >
+                      <TableCell className="w-8 pr-0" onClick={(ev) => ev.stopPropagation()}>
+                        <Checkbox
+                          checked={checked.has(cmd.id)}
+                          onCheckedChange={() => toggleCheck(cmd.id)}
+                          aria-label="选择"
+                        />
+                      </TableCell>
                       <TableCell className="text-muted-foreground text-xs tabular-nums">
                         {fmtTime(cmd.created_at)}
                       </TableCell>
@@ -285,6 +373,31 @@ export default function ToolExecPage() {
           </Card>
         )}
       </div>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteAll ? (
+                <>将清空全部工具执行记录（含输入/输出），此操作不可撤销。</>
+              ) : (
+                <>将永久删除 <span className="font-semibold tabular-nums">{deleteIds.length}</span> 条工具执行记录（含输入/输出），此操作不可撤销。</>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); confirmDelete(); }}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "删除中…" : "确认删除"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

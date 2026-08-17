@@ -65,6 +65,7 @@ func (s *Server) orchestrationTools() []actool.CoreTool {
 		s.toolListTasks(),
 		s.toolListLLMProfiles(),
 		s.toolSpawnTask(),
+		s.toolWaitTask(),
 		s.toolPauseTask(),
 		s.toolGetTaskGraph(),
 		s.toolListTaskFindings(),
@@ -268,7 +269,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 					pin = pt.LLMProfileID
 				}
 			}
-			t, err := s.m.CreateTask(a.Description, a.Goal, pin, a.TimeoutSeconds, 0)
+			t, err := s.m.CreateTask(a.Description, a.Goal, pin, a.TimeoutSeconds, 0, nil)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
@@ -298,6 +299,103 @@ func (s *Server) toolPauseTask() actool.CoreTool {
 			}
 			s.engine.Pause(a.TaskID)
 			return actool.Text("task paused: " + a.TaskID), nil
+		})
+}
+
+// toolWaitTask blocks until ANY of the given tasks reaches a terminal state
+// (done/timeout/stopped) or the wait budget elapses, polling periodically. It
+// returns the states of ALL watched tasks so the orchestrator can immediately
+// bench_close finished containers and spawn replacements — no blind sleep.
+func (s *Server) toolWaitTask() actool.CoreTool {
+	return wrTool("wait_task",
+		"阻塞等待任务进入终态，最多等 timeout_seconds(默认 600)。支持同时等多个任务：task_id 或 task_ids 传一个/多个任务 id（来自 spawn_task）。【任一】任务到达 done/timeout/stopped 立即返回，并报告所有被等任务的当前状态。拿到结果立刻 list_task_findings 汇总、bench_close 释放已结束容器、spawn 补位。不要 sleep 盲等。",
+		objSchema(map[string]any{
+			"task_id":         strParam("要等待的任务 id(单个，来自 spawn_task)；或用 task_ids 等多个"),
+			"task_ids":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "可选：要同时等待的多个任务 id(任一结束即返回)"},
+			"timeout_seconds": map[string]any{"type": "integer", "description": "可选：最多等多少秒(默认 600，0 也按 600)"},
+		}),
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
+			var a struct {
+				TaskID         string   `json:"task_id"`
+				TaskIDs        []string `json:"task_ids"`
+				TimeoutSeconds int      `json:"timeout_seconds"`
+			}
+			if err := json.Unmarshal(in, &a); err != nil {
+				return actool.Errorf("参数解析失败: " + err.Error()), nil
+			}
+			ids := a.TaskIDs
+			if strings.TrimSpace(a.TaskID) != "" {
+				ids = append([]string{a.TaskID}, ids...)
+			}
+			if len(ids) == 0 {
+				return actool.Errorf("task_id 或 task_ids 至少提供一个"), nil
+			}
+			// 并发感知：把显式指定的任务扩展为它的"兄弟任务"(同 parent_ref 的其它在跑任务)
+			// 一起监控 —— 这样即便 agent 只传单个 task_id，也能一次感知同批任务里任意一个
+			// 结束，避免逐个 wait_task 串行等待。parent_ref 为空时扩展所有非终态任务。
+			expand := func() []string {
+				seen := map[string]bool{}
+				var out []string
+				for _, id := range ids {
+					if !seen[id] {
+						seen[id] = true
+						out = append(out, id)
+					}
+				}
+				var parentRef string
+				if t, ok := s.m.Task(ids[0]); ok {
+					parentRef = t.ParentRef
+				}
+				for _, t := range s.m.List() {
+					if isTerminalStatus(t.Status) {
+						continue
+					}
+					if parentRef != "" && t.ParentRef != parentRef {
+						continue
+					}
+					if !seen[t.ID] {
+						seen[t.ID] = true
+						out = append(out, t.ID)
+					}
+				}
+				return out
+			}
+			if len(ids) == 1 {
+				ids = expand()
+			}
+			wait := a.TimeoutSeconds
+			if wait <= 0 {
+				wait = 600
+			}
+			deadline := time.Now().Add(time.Duration(wait) * time.Second)
+			for {
+				statuses := make([]string, 0, len(ids))
+				anyDone := false
+				for _, id := range ids {
+					t, ok := s.m.Task(id)
+					if !ok {
+						statuses = append(statuses, fmt.Sprintf("%s=不存在", id))
+						anyDone = true
+						continue
+					}
+					st := s.deriveTaskStatus(t)
+					statuses = append(statuses, fmt.Sprintf("%s=%s", id, st))
+					if st == "done" || st == "timeout" || st == "stopped" || st == "failed" {
+						anyDone = true
+					}
+				}
+				if anyDone {
+					return actool.Text("任务状态: " + strings.Join(statuses, ", ")), nil
+				}
+				if time.Now().After(deadline) {
+					return actool.Text(fmt.Sprintf("等待超时(%d 秒): %s", wait, strings.Join(statuses, ", "))), nil
+				}
+				select {
+				case <-ctx.Done():
+					return actool.Text("wait_task 被取消: " + strings.Join(statuses, ", ")), nil
+				case <-time.After(5 * time.Second):
+				}
+			}
 		})
 }
 

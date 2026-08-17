@@ -655,6 +655,61 @@ FROM activity WHERE exploration_id=$1 AND id>$2 ORDER BY id LIMIT $3`, s.expID, 
 	return out, cursor, rows.Err()
 }
 
+// ActivityAllByCompany returns recent activity rows (newest first, capped at
+// limit) from tasks associated with the given company (0 = all tasks), joined
+// with the task id so the UI can group/steer. The activity seq column is the
+// global activity.id; task_id is the owning exploration's task id.
+func (d *DB) ActivityAllByCompany(companyID int64, limit int) ([]ActivityTaskRow, error) {
+	if limit <= 0 {
+		limit = 300
+	}
+	q := `
+SELECT a.id, a.exploration_id, COALESCE(a.node_id,0), COALESCE(a.worker,''), COALESCE(a.kind,''),
+       COALESCE(a.tool,''), COALESCE(a.tool_use_id,''), a.is_error, COALESCE(a.summary,''), a.created_at,
+       COALESCE(a.input_tokens,0), COALESCE(a.output_tokens,0), COALESCE(a.cache_read_tokens,0), COALESCE(a.cache_write_tokens,0)
+FROM activity a
+`
+	if companyID > 0 {
+		q += ` JOIN tasks t ON t.exploration_id = a.exploration_id
+       JOIN task_companies tc ON tc.task_id = t.id AND tc.company_id = $1
+`
+	}
+	q += ` ORDER BY a.id DESC LIMIT $` + fmt.Sprintf("%d", 1+boolArg(companyID>0))
+	args := []any{limit}
+	if companyID > 0 {
+		args = append([]any{companyID}, args...)
+	}
+	rows, err := d.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ActivityTaskRow{}
+	for rows.Next() {
+		var r ActivityTaskRow
+		if err := rows.Scan(&r.ID, &r.ExplorationID, &r.NodeID, &r.Worker, &r.Kind, &r.Tool, &r.ToolUseID, &r.IsError, &r.Summary, &r.CreatedAt,
+			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// boolArg converts a bool to 1/0 for dynamic SQL arg-position math.
+func boolArg(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// ActivityTaskRow is one activity row with its owning exploration/task id.
+type ActivityTaskRow struct {
+	Activity
+	ExplorationID int64 `json:"exploration_id"`
+}
+
 // ActivityDetail lazily returns the full detail blob for one step.
 func (s *ExplorationStore) ActivityDetail(id int64) (string, error) {
 	var d sql.NullString

@@ -555,10 +555,13 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/stats", s.stats)
+	mux.HandleFunc("GET /api/dashboard/companies", s.dashboardCompanies)
 	mux.HandleFunc("GET /api/metrics", s.metrics) // P5.4 关键路径指标
 	mux.HandleFunc("GET /api/logs", s.getLogs)
 	mux.HandleFunc("GET /api/logs/history", s.getLogsHistory)
 	mux.HandleFunc("GET /api/logs/stream", s.streamLogs)
+	mux.HandleFunc("POST /api/logs/clear", s.clearLogs)
+	mux.HandleFunc("DELETE /api/logs", s.deleteLogs)
 
 	mux.HandleFunc("GET /api/tasks", s.listTasks)
 	mux.HandleFunc("POST /api/tasks", s.createTask)
@@ -591,6 +594,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exploration/graph", s.explorationGraph)
 	mux.HandleFunc("GET /api/exploration/activity", s.activity)
 	mux.HandleFunc("GET /api/exploration/activity/stream", s.streamActivity)
+	mux.HandleFunc("GET /api/exploration/activity/company", s.activityByCompany)
 	mux.HandleFunc("GET /api/exploration/activity/{seq}", s.activityDetail)
 	mux.HandleFunc("GET /api/exploration/tokens", s.tokenStats)
 	mux.HandleFunc("GET /api/tokens/daily", s.tokenDailyStats)
@@ -600,9 +604,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/gc", s.gc)
 	mux.HandleFunc("GET /api/traffic", s.getTraffic)
 	mux.HandleFunc("GET /api/traffic/exchange", s.getTrafficExchange)
+	mux.HandleFunc("POST /api/traffic/clear", s.clearTraffic)
+	mux.HandleFunc("DELETE /api/traffic", s.deleteTraffic)
 	mux.HandleFunc("GET /api/commands", s.pgListCommands)
+	mux.HandleFunc("DELETE /api/commands", s.pgDeleteCommands)
 	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
 	mux.HandleFunc("GET /api/llm/records/{id}", s.pgGetLLMRecord)
+	mux.HandleFunc("DELETE /api/llm/records/{id}", s.pgDeleteLLMRecord)
+	mux.HandleFunc("DELETE /api/llm/records", s.pgDeleteLLMRecords)
+	mux.HandleFunc("POST /api/llm/records/clear", s.pgClearLLMRecords)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("POST /api/settings/web-search/test", s.testWebSearch)
@@ -612,6 +622,7 @@ func (s *Server) Handler() http.Handler {
 
 	// --- 管理后台 API (PostgreSQL 数据源; 新版数据库与管理后台方案) ---
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.pgDeleteTask)
+	mux.HandleFunc("PUT /api/tasks/{id}/companies", s.pgSetTaskCompanies)
 	// Agents
 	// conversations (chat page)
 	mux.HandleFunc("GET /api/conversations", s.pgListConversations)
@@ -619,6 +630,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/conversations/{id}", s.pgRenameConversation)
 	mux.HandleFunc("PATCH /api/conversations/{id}/profile", s.pgUpdateConversation)
 	mux.HandleFunc("DELETE /api/conversations/{id}", s.pgDeleteConversation)
+	mux.HandleFunc("POST /api/conversations/clear", s.pgDeleteAllConversations)
 	mux.HandleFunc("GET /api/conversations/{id}/messages", s.pgConversationMessages)
 	mux.HandleFunc("POST /api/conversations/{id}/messages", s.pgSendConversationMessage)
 	mux.HandleFunc("POST /api/conversations/{id}/stop", s.pgStopConversation)
@@ -714,6 +726,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/platform/users", s.rbac("platform.user.write", s.platformCreateUser))
 	mux.HandleFunc("PATCH /api/platform/users/{id}", s.rbac("platform.user.write", s.platformUpdateUser))
 	mux.HandleFunc("DELETE /api/platform/users/{id}", s.rbac("platform.user.write", s.platformDeleteUser))
+	mux.HandleFunc("DELETE /api/platform/users", s.rbac("platform.user.write", s.platformDeleteUsers))
 	mux.HandleFunc("POST /api/platform/users/{id}/password", s.rbac("platform.user.write", s.platformResetPassword))
 	mux.HandleFunc("POST /api/platform/users/{id}/roles", s.rbac("platform.user.role", s.platformSetUserRoles))
 	// 平台角色
@@ -721,12 +734,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/platform/roles", s.rbac("platform.role.write", s.platformCreateRole))
 	mux.HandleFunc("PATCH /api/platform/roles/{id}", s.rbac("platform.role.write", s.platformUpdateRole))
 	mux.HandleFunc("DELETE /api/platform/roles/{id}", s.rbac("platform.role.write", s.platformDeleteRole))
+	mux.HandleFunc("DELETE /api/platform/roles", s.rbac("platform.role.write", s.platformDeleteRoles))
 	mux.HandleFunc("GET /api/platform/roles/{id}/permissions", s.rbac("platform.role.read", s.platformGetRolePermissions))
 	mux.HandleFunc("PUT /api/platform/roles/{id}/permissions", s.rbac("platform.role.write", s.platformSetRolePermissions))
 	// 审计日志
 	mux.HandleFunc("GET /api/audit/logs", s.rbac("sec.audit.read", s.platformListAudit))
 	mux.HandleFunc("GET /api/audit/stats", s.rbac("sec.audit.read", s.platformAuditStats))
 	mux.HandleFunc("POST /api/audit/gc", s.rbac("sec.audit.export", s.platformAuditGC))
+	mux.HandleFunc("POST /api/audit/clear", s.rbac("sec.audit.export", s.platformAuditClear))
 	// 攻击模式库 / playbook
 	mux.HandleFunc("GET /api/playbook/patterns", s.rbac("playbook.read", s.playbookListPatterns))
 	mux.HandleFunc("POST /api/playbook/patterns", s.rbac("playbook.write", s.playbookCreatePattern))
@@ -753,9 +768,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sandbox/hosts/{id}/images", s.rbac("sandbox.read", s.sandboxListImages))
 	mux.HandleFunc("POST /api/sandbox/hosts/{id}/containers", s.rbac("sandbox.write", s.sandboxCreateContainer))
 	mux.HandleFunc("POST /api/sandbox/hosts/{id}/containers/{cid}/{action}", s.rbac("sandbox.write", s.sandboxContainerAction))
+	mux.HandleFunc("DELETE /api/sandbox/hosts/{id}/containers", s.rbac("sandbox.write", s.sandboxRemoveContainersBatch))
 	mux.HandleFunc("GET /api/sandbox/egress", s.rbac("sandbox.read", s.sandboxListEgress))
 	mux.HandleFunc("POST /api/sandbox/egress", s.rbac("sandbox.write", s.sandboxUpsertEgress))
 	mux.HandleFunc("DELETE /api/sandbox/egress/{id}", s.rbac("sandbox.write", s.sandboxDeleteEgress))
+	mux.HandleFunc("DELETE /api/sandbox/egress", s.rbac("sandbox.write", s.sandboxDeleteEgressBatch))
 
 	// 工作流图引擎
 	mux.HandleFunc("POST /api/workflows/validate", s.workflowValidate)
@@ -772,6 +789,8 @@ func (s *Server) Handler() http.Handler {
 	// 平台扩展：工作空间 / 知识库 / WebShell / C2
 	mux.HandleFunc("GET /api/workspace/list", s.workspaceList)
 	mux.HandleFunc("GET /api/workspace/read", s.workspaceRead)
+	mux.HandleFunc("DELETE /api/workspace/delete", s.workspaceDelete)
+	mux.HandleFunc("POST /api/workspace/clear", s.workspaceClear)
 	mux.HandleFunc("GET /api/knowledge", s.knowledgeList)
 	mux.HandleFunc("POST /api/knowledge", s.knowledgeSave)
 	mux.HandleFunc("POST /api/knowledge/search", s.knowledgeSearch)
@@ -779,10 +798,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/webshell", s.webshellList)
 	mux.HandleFunc("POST /api/webshell", s.webshellSave)
 	mux.HandleFunc("DELETE /api/webshell/{id}", s.webshellDelete)
+	mux.HandleFunc("DELETE /api/webshell", s.webshellDeleteBatch)
 	mux.HandleFunc("POST /api/webshell/test", s.webshellTest)
 	mux.HandleFunc("GET /api/c2", s.c2List)
 	mux.HandleFunc("POST /api/c2/listeners", s.c2SaveListener)
 	mux.HandleFunc("DELETE /api/c2/listeners/{id}", s.c2DeleteListener)
+	mux.HandleFunc("DELETE /api/c2/listeners", s.c2DeleteListenersBatch)
+	mux.HandleFunc("DELETE /api/c2/sessions", s.c2DeleteSessionsBatch)
 	mux.HandleFunc("POST /api/c2/ingest", s.c2Ingest)
 	mux.HandleFunc("POST /api/c2/status", s.c2SetStatus)
 
@@ -902,12 +924,17 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	if t := s.m.ActiveTask(); t != nil {
 		active = t.ID
 	}
+	companyID := int64(atoiDefault(r.URL.Query().Get("company_id"), 0))
 	list := s.m.List()
 	toks, _ := s.m.PG().TokenTotalsAll()     // whole-task token totals, one query for all tasks
 	lastAct, _ := s.m.PG().LastActivityAll() // persisted last-activity per task, one query
 	goalCounts, _ := s.m.PG().GoalCountsAll() // goal progress per exploration, one query
 	dtos := make([]TaskDTO, 0, len(list))
 	for _, t := range list {
+		// 按企业过滤（company_id>0）：任务直接关联该企业。
+		if companyID > 0 && !taskHasCompany(t.Companies, companyID) {
+			continue
+		}
 		status := "created"
 		switch {
 		case isTerminalStatus(t.Status): // 持久化终态优先（done/failed/timeout）
@@ -931,6 +958,16 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		dtos = append(dtos, dto)
 	}
 	writeJSON(w, 200, map[string]any{"tasks": dtos, "active": active})
+}
+
+// taskHasCompany reports whether a task's company set includes the given id.
+func taskHasCompany(cs []db.CompanyRef, id int64) bool {
+	for _, c := range cs {
+		if c.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) setActive(w http.ResponseWriter, r *http.Request) {
@@ -1126,6 +1163,7 @@ type createTaskReq struct {
 	// PlanHeartbeatSeconds 是 planner 心跳触发间隔(秒;0/省略=不心跳, <600 归一 600)。
 	PlanHeartbeatSeconds int           `json:"plan_heartbeat_seconds"`
 	Workflow             *TaskWorkflow `json:"workflow,omitempty"` // 可选：初始探索方向 + 战略提示
+	CompanyIDs           []int64       `json:"company_ids,omitempty"` // 可选：企业归属(第一个=主企业)
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
@@ -1148,7 +1186,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	if req.TimeoutSeconds < 0 {
 		req.TimeoutSeconds = 0
 	}
-	t, err := s.m.CreateTask(req.Description, req.Goal, req.LLMProfileID, req.TimeoutSeconds, req.PlanHeartbeatSeconds)
+	t, err := s.m.CreateTask(req.Description, req.Goal, req.LLMProfileID, req.TimeoutSeconds, req.PlanHeartbeatSeconds, req.CompanyIDs)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -1361,8 +1399,9 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 	// 无 task 参数 → 全局「发现」页：从独立 findings 表读取（任务删除后 finding 依然保留）。
 	// 带 task 参数 → 仅该任务（任务概览/发现 Tab 用），从 exploration_nodes 读（任务在则节点在）。
 	taskParam := r.URL.Query().Get("task")
+	companyID := int64(atoiDefault(r.URL.Query().Get("company_id"), 0))
 	if taskParam == "" {
-		fs, _ := s.m.pg.ListFindings(500)
+		fs, _ := s.m.pg.ListFindings(500, companyID)
 		out := make([]FindingDTO, 0, len(fs))
 		for _, f := range fs {
 			out = append(out, findingFromDB(f))
@@ -1422,6 +1461,26 @@ func (s *Server) activity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"items": activityDTOs(items), "cursor": cursor})
+}
+
+// activityByCompany returns recent activity across tasks of one company
+// (?company_id=0/omitted = all tasks). Used by the dashboard when a company is
+// selected so the 活动流 reflects that company only.
+func (s *Server) activityByCompany(w http.ResponseWriter, r *http.Request) {
+	companyID := int64(atoiDefault(r.URL.Query().Get("company_id"), 0))
+	limit := atoiDefault(r.URL.Query().Get("limit"), 60)
+	rows, err := s.m.pg.ActivityAllByCompany(companyID, limit)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	items := make([]ActivityDTO, 0, len(rows))
+	for _, rw := range rows {
+		d := activityDTO(rw.Activity)
+		d.TaskID = i64s(rw.ExplorationID) // the owning exploration id doubles as task id for display
+		items = append(items, d)
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "cursor": 0})
 }
 
 // tokenStats returns per-worker token usage (input/output/cache read/write) for a
@@ -1486,6 +1545,50 @@ func (s *Server) getLogs(w http.ResponseWriter, r *http.Request) {
 	limit := atoiDefault(r.URL.Query().Get("limit"), 500)
 	lines, cursor := logSink.recent(since, limit)
 	writeJSON(w, 200, map[string]any{"items": lines, "cursor": cursor})
+}
+
+// clearLogs empties the persisted server_logs table and the in-memory ring.
+func (s *Server) clearLogs(w http.ResponseWriter, r *http.Request) {
+	var removed int64
+	if s.m.pg != nil {
+		n, err := s.m.pg.ClearServerLogs()
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		removed = n
+	}
+	logSink.clear()
+	writeJSON(w, 200, map[string]any{"removed": removed})
+}
+
+// deleteLogs removes a set of persisted server_logs rows by db_id and drops the
+// matching lines from the in-memory ring.
+func (s *Server) deleteLogs(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "invalid JSON: "+err.Error())
+		return
+	}
+	var removed int64
+	if s.m.pg != nil {
+		n, err := s.m.pg.DeleteLogs(req.IDs)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		removed = n
+	}
+	if len(req.IDs) > 0 {
+		ids := make(map[int64]bool, len(req.IDs))
+		for _, id := range req.IDs {
+			ids[id] = true
+		}
+		logSink.remove(ids)
+	}
+	writeJSON(w, 200, map[string]any{"deleted": removed})
 }
 
 // getLogsHistory returns older log lines from the DB (before a given db_id).
@@ -1688,6 +1791,43 @@ func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 		"size":      size,
 		"exchanges": trafficDTOs(ex),
 	})
+}
+
+// clearTraffic empties all recorded HTTP traffic (tool executions).
+func (s *Server) clearTraffic(w http.ResponseWriter, r *http.Request) {
+	tr := s.m.Traffic()
+	if tr == nil {
+		writeJSON(w, 200, map[string]any{"removed": 0})
+		return
+	}
+	n, err := tr.Clear()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"removed": n})
+}
+
+// deleteTraffic removes a set of recorded exchanges by id.
+func (s *Server) deleteTraffic(w http.ResponseWriter, r *http.Request) {
+	tr := s.m.Traffic()
+	if tr == nil {
+		writeJSON(w, 200, map[string]any{"deleted": 0})
+		return
+	}
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "invalid JSON: "+err.Error())
+		return
+	}
+	n, err := tr.Delete(req.IDs)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": n})
 }
 
 // getTrafficExchange returns the full raw request/response of one exchange,

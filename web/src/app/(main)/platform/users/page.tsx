@@ -15,8 +15,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -56,6 +67,55 @@ export default function PlatformUsersPage() {
 
   const [form, setForm] = React.useState({ username: "", display_name: "", password: "", roles: [] as string[] });
   const [resetPwd, setResetPwd] = React.useState("");
+
+  // batch selection & delete
+  const [checked, setChecked] = React.useState<Set<number>>(new Set());
+  const [deleteAll, setDeleteAll] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+
+  const toggleCheck = (id: number) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleCheckAll = (ids: number[]) => {
+    setChecked((prev) => {
+      const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  // users that can be batch-deleted: not builtin, not self
+  const deleteableIds = React.useMemo(
+    () => users.filter((u) => !u.is_builtin && u.username !== me?.username).map((u) => u.id),
+    [users, me],
+  );
+
+  const confirmBatchDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await api.deletePlatformUsers(Array.from(checked), deleteAll);
+      const msg = res.skipped?.length
+        ? `已删除 ${res.deleted.length} 名成员；跳过：${res.skipped.join("、")}`
+        : `已删除 ${res.deleted.length} 名成员`;
+      toast.success(msg);
+      setChecked(new Set());
+      setDeleteOpen(false);
+      load();
+    } catch (e) {
+      toast.error((e as Error).message ?? "删除失败");
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const load = React.useCallback(() => {
     Promise.all([api.platformUsers(), api.platformRoles()])
@@ -138,9 +198,25 @@ export default function PlatformUsersPage() {
             <p className="text-sm text-muted-foreground">平台登录账户与角色分配（RBAC）。</p>
           </div>
           {me.admin && (
-            <Button onClick={() => setCreateOpen(true)}>
-              <PlusIcon className="size-4" /> 新建成员
-            </Button>
+            <div className="flex items-center gap-2">
+              {checked.size > 0 && (
+                <>
+                  <Button variant="destructive" onClick={() => { setDeleteAll(false); setDeleteOpen(true); }}>
+                    <Trash2Icon className="size-4" /> 删除已选 ({checked.size})
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+                  >
+                    <Trash2Icon className="size-4" /> 删除全部
+                  </Button>
+                </>
+              )}
+              <Button onClick={() => setCreateOpen(true)}>
+                <PlusIcon className="size-4" /> 新建成员
+              </Button>
+            </div>
           )}
         </div>
 
@@ -148,6 +224,15 @@ export default function PlatformUsersPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8 pr-0">
+                  {me.admin && (
+                    <Checkbox
+                      checked={deleteableIds.length > 0 && deleteableIds.every((id) => checked.has(id))}
+                      onCheckedChange={() => toggleCheckAll(deleteableIds)}
+                      aria-label="全选"
+                    />
+                  )}
+                </TableHead>
                 <TableHead>用户名</TableHead>
                 <TableHead>显示名</TableHead>
                 <TableHead>角色</TableHead>
@@ -159,20 +244,31 @@ export default function PlatformUsersPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                     加载中…
                   </TableCell>
                 </TableRow>
               ) : users.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                     暂无成员
                   </TableCell>
                 </TableRow>
               ) : (
-                users.map((u) => (
-                  <TableRow key={u.id}>
-                    <TableCell className="font-medium">
+                users.map((u) => {
+                  const canDelete = !u.is_builtin && u.username !== me?.username;
+                  return (
+                    <TableRow key={u.id}>
+                      <TableCell className="w-8 pr-0">
+                        {me.admin && canDelete && (
+                          <Checkbox
+                            checked={checked.has(u.id)}
+                            onCheckedChange={() => toggleCheck(u.id)}
+                            aria-label={`选择 ${u.username}`}
+                          />
+                        )}
+                      </TableCell>
+                      <TableCell className="font-medium">
                       {u.username}
                       {u.is_builtin && <Badge variant="secondary" className="ml-2">内置</Badge>}
                     </TableCell>
@@ -226,7 +322,8 @@ export default function PlatformUsersPage() {
                       )}
                     </TableCell>
                   </TableRow>
-                ))
+                  );
+                })
               )}
             </TableBody>
           </Table>
@@ -325,6 +422,32 @@ export default function PlatformUsersPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* 批量删除成员 */}
+        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>确认删除成员</AlertDialogTitle>
+              <AlertDialogDescription>
+                {deleteAll ? (
+                  <>将删除全部可删除的成员（内置管理员与当前账户自动跳过），此操作不可撤销。</>
+                ) : (
+                  <>将删除 <span className="font-semibold tabular-nums">{checked.size}</span> 名成员（内置管理员与当前账户自动跳过），此操作不可撤销。</>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => { e.preventDefault(); confirmBatchDelete(); }}
+                disabled={deleting}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deleting ? "删除中…" : "确认删除"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </PermissionGate>
   );

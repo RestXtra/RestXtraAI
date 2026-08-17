@@ -177,6 +177,30 @@ func (s *logSinkT) recent(since int64, limit int) (lines []LogLine, cursor int64
 	return lines, cursor
 }
 
+// clear empties the in-memory ring (backlog history) so the UI no longer shows
+// old lines after the DB is cleared. New lines continue to append.
+func (s *logSinkT) clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ring = s.ring[:0]
+	s.seq = 0
+}
+
+// remove drops ring lines whose DBID is in the given set (already deleted from
+// the DB), so the live stream reflects the deletion immediately.
+func (s *logSinkT) remove(dbIDs map[int64]bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.ring[:0]
+	for _, l := range s.ring {
+		if l.DBID != 0 && dbIDs[l.DBID] {
+			continue
+		}
+		out = append(out, l)
+	}
+	s.ring = out
+}
+
 func (s *logSinkT) subscribe() (<-chan LogLine, func()) {
 	ch := make(chan LogLine, 256)
 	s.mu.Lock()

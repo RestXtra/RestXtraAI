@@ -100,3 +100,24 @@ func (d *DB) DeleteSandboxEgress(id int64) error {
 	_, err := d.Exec(`DELETE FROM sandbox_egress WHERE id=$1`, id)
 	return err
 }
+
+// DeleteSandboxEgresses removes a set of egress rules by id. Returns rows removed.
+func (d *DB) DeleteSandboxEgresses(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res, err := d.Exec(`DELETE FROM sandbox_egress WHERE id IN (`+idList(ids)+`)`, idsToArgs(ids)...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// ClearSandboxEgresses removes all egress rules. Returns rows removed.
+func (d *DB) ClearSandboxEgresses() (int64, error) {
+	res, err := d.Exec(`DELETE FROM sandbox_egress`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

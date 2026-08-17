@@ -18,6 +18,7 @@ import type {
   BatchTask,
   CommandRecord,
   Company,
+  CompanyStat,
   Conversation,
   ConvTokenSummary,
   DailyTokenBucket,
@@ -152,14 +153,18 @@ export const api = {
     post<{ ok: boolean }>("/auth/change-password", { old_password: oldPassword, new_password: newPassword }),
 
   // ---- tasks ----
-  tasks: () =>
-    get<{ tasks: Task[]; active: string }>("/tasks").then((r) => ({ tasks: arr(r.tasks), active: r.active ?? "" })),
+  tasks: (companyId?: number) =>
+    get<{ tasks: Task[]; active: string }>(`/tasks${companyId ? `?company_id=${companyId}` : ""}`).then((r) => ({
+      tasks: arr(r.tasks),
+      active: r.active ?? "",
+    })),
   createTask: (
     description: string,
     goal: string,
     llmProfileId?: number,
     timeoutSeconds?: number,
     workflow?: TaskWorkflow,
+    companyIds?: number[],
   ) =>
     post<Task>("/tasks", {
       description,
@@ -167,8 +172,11 @@ export const api = {
       llm_profile_id: llmProfileId ?? null,
       timeout_seconds: timeoutSeconds ?? 0,
       workflow,
+      company_ids: companyIds ?? [],
     }),
   deleteTask: (id: string) => del<{ deleted: number }>(`/tasks/${id}`),
+  setTaskCompanies: (id: string, companyIds: number[]) =>
+    put<{ ok: boolean }>(`/tasks/${id}/companies`, { company_ids: companyIds }),
   controlTask: (id: string, action: "pause" | "resume") =>
     post<{ id: string; paused: boolean }>(`/tasks/${id}/control`, { action }),
   taskAttackChain: (id: string) =>
@@ -184,15 +192,25 @@ export const api = {
 
   // ---- assets ----
   // Server-side paginated: pass limit/offset, get back the page + full match total.
-  assets: (type = "", limit = 50, offset = 0) =>
-    get<{ count: number; total: number; assets: Asset[] }>(`/assets?type=${type}&limit=${limit}&offset=${offset}`).then(
+  assets: (type = "", limit = 50, offset = 0, companyId?: number) => {
+    const q = new URLSearchParams({ type, limit: String(limit), offset: String(offset) });
+    if (companyId) q.set("company_id", String(companyId));
+    return get<{ count: number; total: number; assets: Asset[] }>(`/assets?${q.toString()}`).then(
       (r) => ({ assets: r?.assets ?? [], total: r?.total ?? r?.count ?? 0 }),
-    ),
-  searchAssets: (dsl: string, type = "", limit = 50, offset = 0) =>
-    get<{ count: number; total: number; assets: Asset[] }>(
-      `/assets?dsl=${encodeURIComponent(dsl)}${type ? `&type=${encodeURIComponent(type)}` : ""}&limit=${limit}&offset=${offset}`,
-    ).then((r) => ({ assets: r?.assets ?? [], total: r?.total ?? r?.count ?? 0 })),
-  assetCounts: () => get<Record<string, number>>("/assets/counts"),
+    );
+  },
+  searchAssets: (dsl: string, type = "", limit = 50, offset = 0, companyId?: number) => {
+    const q = new URLSearchParams({ dsl });
+    if (type) q.set("type", type);
+    q.set("limit", String(limit));
+    q.set("offset", String(offset));
+    if (companyId) q.set("company_id", String(companyId));
+    return get<{ count: number; total: number; assets: Asset[] }>(`/assets?${q.toString()}`).then(
+      (r) => ({ assets: r?.assets ?? [], total: r?.total ?? r?.count ?? 0 }),
+    );
+  },
+  assetCounts: (companyId?: number) =>
+    get<Record<string, number>>(`/assets/counts${companyId ? `?company_id=${companyId}` : ""}`),
   deleteAssets: (ids: number[]) =>
     http<{ deleted: number }>("/assets", { method: "DELETE", body: JSON.stringify({ ids }) }),
   // legacy — kept for task-specific views; hits the same endpoint with task_id filter
@@ -244,7 +262,15 @@ export const api = {
 
   // ---- exploration (per task) ----
   frontier: (task?: string) => get<TaskNode[]>(`/exploration/frontier${tq(task)}`).then(arr),
-  findings: (task?: string) => get<Finding[]>(`/exploration/findings${tq(task)}`).then(arr),
+  findings: (task?: string, companyId?: number) => {
+    const q = new URLSearchParams();
+    if (task) q.set("task", task);
+    if (companyId && companyId > 0) q.set("company_id", String(companyId));
+    const qs = q.toString();
+    return get<Finding[]>(`/exploration/findings${qs ? `?${qs}` : ""}`).then(arr);
+  },
+  dashboardCompanies: () =>
+    get<{ companies: CompanyStat[] }>("/dashboard/companies").then((r) => arr(r.companies)),
   intents: (task?: string) => get<TaskNode[]>(`/exploration/intents${tq(task)}`).then(arr),
   tokenStats: (task?: string) =>
     get<{ workers: TokenUsage[]; total: TokenTotal }>(`/exploration/tokens${tq(task)}`).then((r) => ({
@@ -269,6 +295,11 @@ export const api = {
     }));
   },
   activityDetail: (id: number, task?: string) => get<{ detail: string }>(`/exploration/activity/${id}${tq(task)}`),
+  // 企业级活动流（仪表盘选中企业时用）：跨任务最新活动。
+  activityByCompany: (companyId: number, limit = 60) =>
+    get<{ items: Activity[]; cursor: number }>(`/exploration/activity/company?company_id=${companyId}&limit=${limit}`).then(
+      (r) => ({ items: arr(r.items), cursor: r.cursor ?? 0 }),
+    ),
 
   // ---- traffic / audit / report / chat ----
   audit: (task?: string) => get<Audit>(`/audit${tq(task)}`),
@@ -280,6 +311,8 @@ export const api = {
         (q ? `&q=${encodeURIComponent(q)}` : ""),
     ),
   trafficExchange: (id: string) => get<TrafficDetail>(`/traffic/exchange?id=${encodeURIComponent(id)}`),
+  deleteTraffic: (ids: string[]) => http<{ deleted: number; removed?: number }>("/traffic", { method: "DELETE", body: JSON.stringify({ ids }) }),
+  clearTraffic: () => post<{ removed: number; deleted?: number }>("/traffic/clear", {}),
 
   // ---- app settings (runtime toggles) ----
   settings: () => get<Settings>(`/settings`),
@@ -587,6 +620,8 @@ export const api = {
   updatePlatformUser: (id: number, body: { display_name?: string; enabled?: boolean }) =>
     patch<{ ok: boolean }>(`/platform/users/${id}`, body),
   deletePlatformUser: (id: number) => del<{ deleted: number }>(`/platform/users/${id}`),
+  deletePlatformUsers: (ids: number[], all = false) =>
+    http<{ deleted: number[]; skipped?: string[] }>("/platform/users", { method: "DELETE", body: JSON.stringify({ ids, all }) }),
   resetUserPassword: (id: number, password: string) =>
     post<{ ok: boolean }>(`/platform/users/${id}/password`, { password }),
   setUserRoles: (id: number, roles: string[]) => post<{ ok: boolean }>(`/platform/users/${id}/roles`, { roles }),
@@ -596,6 +631,8 @@ export const api = {
   updatePlatformRole: (id: number, body: { description?: string; scope?: string }) =>
     patch<{ ok: boolean }>(`/platform/roles/${id}`, body),
   deletePlatformRole: (id: number) => del<{ deleted: number }>(`/platform/roles/${id}`),
+  deletePlatformRoles: (ids: number[], all = false) =>
+    http<{ deleted: number[]; skipped?: string[] }>("/platform/roles", { method: "DELETE", body: JSON.stringify({ ids, all }) }),
   rolePermissions: (id: number) => get<{ keys: string[] }>(`/platform/roles/${id}/permissions`).then((r) => r.keys),
   setRolePermissions: (id: number, keys: string[]) =>
     put<{ ok: boolean }>(`/platform/roles/${id}/permissions`, { keys }),
@@ -613,6 +650,8 @@ export const api = {
   },
   auditStats: () => get<{ total: number }>("/audit/stats"),
   auditGC: (days = 90) => post<{ removed: number }>(`/audit/gc?days=${days}`, {}),
+  deleteLogs: (ids: number[]) => http<{ deleted: number }>("/logs", { method: "DELETE", body: JSON.stringify({ ids }) }),
+  clearLogs: () => post<{ removed: number }>("/logs/clear", {}),
 
   // ---- 攻击模式库 / playbook ----
   playbookPatterns: (
@@ -674,6 +713,8 @@ export const api = {
     sp.set("size", String(params?.size ?? 50));
     return get<{ commands: CommandRecord[]; total: number }>(`/commands?${sp.toString()}`);
   },
+  deleteCommands: (ids: number[], all = false) =>
+    http<{ deleted: number }>("/commands", { method: "DELETE", body: JSON.stringify({ ids, all }) }),
 
   // ---- LLM 录制 ----
   llmRecords: (params?: { model?: string; session?: string; page?: number; size?: number }) => {
@@ -685,6 +726,9 @@ export const api = {
     return get<{ records: LLMRecordItem[]; total: number }>(`/llm/records?${sp.toString()}`);
   },
   llmRecordDetail: (id: number) => get<LLMRecordDetail>(`/llm/records/${id}`),
+  deleteLLMRecords: (ids: number[], all = false) =>
+    http<{ deleted: number; removed?: number }>("/llm/records", { method: "DELETE", body: JSON.stringify({ ids, all }) }),
+  clearLLMRecords: () => post<{ removed: number; deleted?: number }>("/llm/records/clear", {}),
 
   // ---- 沙箱管理（主机 / 容器 / 出口范围）----
   sandboxHosts: () => get<{ hosts: SandboxHost[] }>("/sandbox/hosts").then((r) => arr(r.hosts)),
@@ -721,6 +765,11 @@ export const api = {
   ) => post<{ id: string }>(`/sandbox/hosts/${hostId}/containers`, req),
   sandboxContainerAction: (hostId: string, cid: string, action: "start" | "stop" | "restart" | "kill" | "remove") =>
     post<{ ok: boolean }>(`/sandbox/hosts/${hostId}/containers/${encodeURIComponent(cid)}/${action}`, {}),
+  removeSandboxContainers: (hostId: string, ids: string[], all = false) =>
+    http<{ deleted: string[]; failed?: string[] }>(`/sandbox/hosts/${hostId}/containers`, {
+      method: "DELETE",
+      body: JSON.stringify({ ids, all }),
+    }),
   sandboxEgress: () => get<{ rules: SandboxEgress[] }>("/sandbox/egress").then((r) => arr(r.rules)),
   saveSandboxEgress: (e: {
     id?: number;
@@ -731,6 +780,8 @@ export const api = {
     enabled?: boolean;
   }) => post<{ id: number }>("/sandbox/egress", e),
   deleteSandboxEgress: (id: string) => del<{ deleted: number }>(`/sandbox/egress/${id}`),
+  deleteSandboxEgresses: (ids: string[], all = false) =>
+    http<{ deleted: number }>("/sandbox/egress", { method: "DELETE", body: JSON.stringify({ ids: ids.map(Number), all }) }),
 
   // ---- 工作流图引擎 ----
   workflowValidate: (g: WorkflowGraphDef) => post<{ ok: boolean; errors?: string[] }>("/workflows/validate", g),
@@ -768,6 +819,8 @@ export const api = {
   webshells: () => get<{ connections: WebshellConn[] }>("/webshell").then((r) => arr(r.connections)),
   saveWebshell: (w: Partial<WebshellConn>) => post<{ id: number }>("/webshell", w),
   deleteWebshell: (id: string) => del<{ deleted: number }>(`/webshell/${id}`),
+  deleteWebshells: (ids: string[], all = false) =>
+    http<{ deleted: number }>("/webshell", { method: "DELETE", body: JSON.stringify({ ids: ids.map(Number), all }) }),
   webshellTest: (w: Partial<WebshellConn>) =>
     post<{ ok: boolean; status?: number; snippet?: string; error?: string }>("/webshell/test", w),
 
@@ -775,6 +828,10 @@ export const api = {
   c2: () => get<{ listeners: C2Listener[]; sessions: C2Session[] }>("/c2"),
   saveC2Listener: (l: Partial<C2Listener>) => post<{ id: number }>("/c2/listeners", l),
   deleteC2Listener: (id: string) => del<{ deleted: number }>(`/c2/listeners/${id}`),
+  deleteC2Listeners: (ids: string[], all = false) =>
+    http<{ deleted: number }>("/c2/listeners", { method: "DELETE", body: JSON.stringify({ ids: ids.map(Number), all }) }),
+  deleteC2Sessions: (ids: string[], all = false) =>
+    http<{ deleted: number }>("/c2/sessions", { method: "DELETE", body: JSON.stringify({ ids: ids.map(Number), all }) }),
   c2Ingest: (p: { listener_id?: number; session_id: string; host?: string; meta?: string; status?: string }) =>
     post<{ ok: boolean }>("/c2/ingest", p),
   c2SetStatus: (session_id: string, status: string) => post<{ ok: boolean }>("/c2/status", { session_id, status }),

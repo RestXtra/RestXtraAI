@@ -253,6 +253,16 @@ DROP TRIGGER IF EXISTS trg_tasks_upd ON tasks;
 CREATE TRIGGER trg_tasks_upd BEFORE UPDATE ON tasks
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+-- 任务 ↔ 企业（多对多）。tasks.company_id 单列保留，作为「主企业」（第一个选中的
+-- 企业），用于列表首列快速显示与向后兼容；完整多企业关系存本关联表。
+CREATE TABLE IF NOT EXISTS task_companies (
+    task_id    BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    company_id BIGINT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    PRIMARY KEY (task_id, company_id)
+);
+CREATE INDEX IF NOT EXISTS idx_task_companies_company ON task_companies(company_id);
+CREATE INDEX IF NOT EXISTS idx_task_companies_task    ON task_companies(task_id);
+
 -- =====================================================================
 -- E. Agents / 提示词模板 / 变量目录
 -- =====================================================================

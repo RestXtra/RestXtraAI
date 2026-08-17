@@ -45,6 +45,10 @@ type Task struct {
 	Guard                *guard.Guard           `json:"-"`
 	notify               chan struct{}
 
+	// 企业归属：主企业 + 多企业关联（由 taskFromPG 从 pgdb.Task 填充）。
+	CompanyID int64           `json:"company_id,omitempty"`
+	Companies []pgdb.CompanyRef `json:"companies,omitempty"`
+
 	// pendingTriggers accumulates the concrete changes (worker done / finding) that
 	// fired planning rounds since the last one consumed them. The debounce coalesces
 	// a burst into one round, so several may pile up before drainTriggers() clears them.
@@ -492,15 +496,17 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		LLMProfileID:   pt.LLMProfileID,
 		TimeoutSeconds: pt.TimeoutSeconds, FirstRunAt: unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),
 		PlanHeartbeatSeconds: pt.PlanHeartbeatSeconds,
-		Store:                store, Guard: guard.NewWithInterceptor(ic), notify: make(chan struct{}, 1),
+		CompanyID:            pt.CompanyID, Companies: pt.Companies,
+		Store: store, Guard: guard.NewWithInterceptor(ic), notify: make(chan struct{}, 1),
 	}
 }
 
 // CreateTask creates a task + its exploration and makes it active.
 // timeoutSeconds is the task-level wall-clock budget (0 = 不限时).
 // planHeartbeatSeconds is the planner periodic wake-up interval (0 = disabled).
-func (m *Manager) CreateTask(description, goal string, llmProfileID *int64, timeoutSeconds, planHeartbeatSeconds int) (*Task, error) {
-	pt, err := m.pg.CreateTask(description, goal, llmProfileID, timeoutSeconds, planHeartbeatSeconds)
+// companyIDs are the companies the task belongs to (first = primary; empty = unassigned).
+func (m *Manager) CreateTask(description, goal string, llmProfileID *int64, timeoutSeconds, planHeartbeatSeconds int, companyIDs []int64) (*Task, error) {
+	pt, err := m.pg.CreateTask(description, goal, llmProfileID, timeoutSeconds, planHeartbeatSeconds, companyIDs)
 	if err != nil {
 		return nil, err
 	}

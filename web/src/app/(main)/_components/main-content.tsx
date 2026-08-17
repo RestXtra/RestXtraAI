@@ -10,7 +10,6 @@ import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
 
 import { AccountSwitcher } from "./sidebar/account-switcher";
-import { LayoutControls } from "./sidebar/layout-controls";
 import { SearchDialog } from "./sidebar/search-dialog";
 import { ThemeSwitcher } from "./sidebar/theme-switcher";
 
@@ -52,7 +51,6 @@ export function MainContent({ children }: { children: ReactNode }) {
             <SearchDialog />
           </div>
           <div className="flex items-center gap-2">
-            <LayoutControls />
             <ThemeSwitcher />
             <AccountSwitcher users={[currentUser]} />
           </div>

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -220,6 +221,67 @@ func (s *Server) platformDeleteUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"deleted": id})
 }
 
+// platformDeleteUsers removes a batch (or all) of members, applying the same
+// per-user guards as platformDeleteUser (no self / builtin / last admin). Skips
+// are reported in the response.
+func (s *Server) platformDeleteUsers(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	var req struct {
+		IDs []int64 `json:"ids"`
+		All bool    `json:"all"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	me, _ := principalOf(r)
+	var targetIDs []int64
+	if req.All {
+		all, err := pg.ListUsers()
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		for _, u := range all {
+			targetIDs = append(targetIDs, u.ID)
+		}
+	} else {
+		targetIDs = req.IDs
+	}
+	var deleted []int64
+	var skipped []string
+	for _, id := range targetIDs {
+		if me.UID == id {
+			skipped = append(skipped, fmt.Sprintf("#%d(当前账户)", id))
+			continue
+		}
+		u, err := pg.GetUserByID(id)
+		if err != nil || u == nil {
+			continue
+		}
+		if u.IsBuiltin {
+			skipped = append(skipped, u.Username+"(内置)")
+			continue
+		}
+		if roles, _ := pg.ListUserRoles(id); hasRole(roles, db.RoleAdmin) {
+			if s.countRoleHolders(db.RoleAdmin) <= 1 {
+				skipped = append(skipped, u.Username+"(最后管理员)")
+				continue
+			}
+		}
+		if err := pg.DeleteUser(id); err != nil {
+			skipped = append(skipped, u.Username+"(删除失败)")
+			continue
+		}
+		deleted = append(deleted, id)
+		s.recordAudit(r, "platform", "delete_user", "success", "删除成员 "+u.Username)
+	}
+	writeJSON(w, 200, map[string]any{"deleted": deleted, "skipped": skipped})
+}
+
 // POST /api/platform/users/{id}/password — reset a member's password.
 func (s *Server) platformResetPassword(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)
@@ -414,6 +476,54 @@ func (s *Server) platformDeleteRole(w http.ResponseWriter, r *http.Request) {
 	}
 	s.recordAudit(r, "platform", "delete_role", "success", "删除角色 "+rl.Name)
 	writeJSON(w, 200, map[string]any{"deleted": id})
+}
+
+// platformDeleteRoles removes a batch (or all) of roles, skipping system roles.
+func (s *Server) platformDeleteRoles(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	var req struct {
+		IDs []int64 `json:"ids"`
+		All bool    `json:"all"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	var targetIDs []int64
+	if req.All {
+		all, err := pg.ListRoles()
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		for _, rl := range all {
+			targetIDs = append(targetIDs, rl.ID)
+		}
+	} else {
+		targetIDs = req.IDs
+	}
+	var deleted []int64
+	var skipped []string
+	for _, id := range targetIDs {
+		rl, err := pg.GetRole(id)
+		if err != nil || rl == nil {
+			continue
+		}
+		if rl.IsSystem {
+			skipped = append(skipped, rl.Name+"(系统角色)")
+			continue
+		}
+		if err := pg.DeleteRole(id); err != nil {
+			skipped = append(skipped, rl.Name+"(删除失败)")
+			continue
+		}
+		deleted = append(deleted, id)
+		s.recordAudit(r, "platform", "delete_role", "success", "删除角色 "+rl.Name)
+	}
+	writeJSON(w, 200, map[string]any{"deleted": deleted, "skipped": skipped})
 }
 
 // GET /api/platform/roles/{id}/permissions — a role's permission keys.

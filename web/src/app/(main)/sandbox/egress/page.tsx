@@ -17,8 +17,19 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
@@ -119,6 +130,46 @@ export default function SandboxEgressPage() {
   const [rules, setRules] = React.useState<SandboxEgress[]>([]);
   const [loading, setLoading] = React.useState(false);
 
+  // batch selection & delete
+  const [checked, setChecked] = React.useState<Set<string>>(new Set());
+  const [deleteAll, setDeleteAll] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+
+  const toggleCheck = (id: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleCheckAll = (ids: string[]) => {
+    setChecked((prev) => {
+      const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  const confirmBatchDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await api.deleteSandboxEgresses(Array.from(checked), deleteAll);
+      toast.success(`已删除 ${res.deleted} 条出口规则`);
+      setChecked(new Set());
+      setDeleteOpen(false);
+      load();
+    } catch (e) {
+      toast.error(`删除失败：${(e as Error).message}`);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const load = React.useCallback(() => {
     setLoading(true);
     api.sandboxEgress().then(setRules).catch(() => setRules([])).finally(() => setLoading(false));
@@ -153,6 +204,21 @@ export default function SandboxEgressPage() {
           <ShieldCheckIcon className="size-5 text-muted-foreground" />
           <h1 className="text-xl font-semibold tracking-tight">出口范围</h1>
           <Badge variant="secondary">{rules.length}</Badge>
+          {checked.size > 0 && (
+            <>
+              <Button variant="destructive" size="sm" onClick={() => { setDeleteAll(false); setDeleteOpen(true); }}>
+                <Trash2Icon className="size-3.5" /> 删除已选 ({checked.size})
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+              >
+                <Trash2Icon className="size-3.5" /> 删除全部
+              </Button>
+            </>
+          )}
         </div>
         <EgressFormDialog onSaved={load} />
       </div>
@@ -172,6 +238,13 @@ export default function SandboxEgressPage() {
             <table className="w-full text-sm">
               <thead className="bg-muted/50 text-muted-foreground text-xs">
                 <tr className="text-left">
+                  <th className="w-8 px-3 py-2">
+                    <Checkbox
+                      checked={rules.length > 0 && rules.every((r) => checked.has(String(r.id)))}
+                      onCheckedChange={() => toggleCheckAll(rules.map((r) => String(r.id)))}
+                      aria-label="全选"
+                    />
+                  </th>
                   <th className="px-3 py-2 font-medium">类型</th>
                   <th className="px-3 py-2 font-medium">值</th>
                   <th className="px-3 py-2 font-medium">动作</th>
@@ -183,6 +256,13 @@ export default function SandboxEgressPage() {
               <tbody>
                 {rules.map((r) => (
                   <tr key={r.id} className="border-t">
+                    <td className="w-8 px-3 py-2">
+                      <Checkbox
+                        checked={checked.has(String(r.id))}
+                        onCheckedChange={() => toggleCheck(String(r.id))}
+                        aria-label={`选择 ${r.value}`}
+                      />
+                    </td>
                     <td className="px-3 py-2">
                       <Badge variant="outline">{r.kind === "cidr" ? "CIDR" : "域名"}</Badge>
                     </td>
@@ -212,6 +292,31 @@ export default function SandboxEgressPage() {
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteAll ? (
+                <>将清空全部出口范围规则，此操作不可撤销。</>
+              ) : (
+                <>将永久删除 <span className="font-semibold tabular-nums">{checked.size}</span> 条出口范围规则，此操作不可撤销。</>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); confirmBatchDelete(); }}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "删除中…" : "确认删除"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

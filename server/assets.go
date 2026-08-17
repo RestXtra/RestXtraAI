@@ -284,7 +284,14 @@ func (s *Server) assetCounts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 503, "database unavailable")
 		return
 	}
-	counts, err := as.CountsByType()
+	companyID, _ := strconv.ParseInt(r.URL.Query().Get("company_id"), 10, 64)
+	var counts map[string]int
+	var err error
+	if companyID > 0 {
+		counts, err = as.CountsByTypeForCompany(companyID)
+	} else {
+		counts, err = as.CountsByType()
+	}
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return

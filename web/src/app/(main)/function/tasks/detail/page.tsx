@@ -6,9 +6,11 @@ import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   ArrowLeftIcon,
+  Building2Icon,
   PauseIcon,
   PlayIcon,
   BrainIcon,
+  PlusIcon,
 } from "lucide-react";
 
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -16,8 +18,19 @@ import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/status-badge";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import type { Task } from "@/lib/types";
+import type { Task, Company } from "@/lib/types";
 
 import { SessionsTab } from "./_tabs/sessions-tab";
 import { OverviewTab } from "./_tabs/overview-tab";
@@ -45,6 +58,16 @@ function TaskDetailInner() {
   const [loaded, setLoaded] = React.useState(false);
   const [tab, setTab] = React.useState("sessions");
   const [interceptPendingCount, setInterceptPendingCount] = React.useState(0);
+
+  // 企业关联编辑
+  const [companies, setCompanies] = React.useState<Company[]>([]);
+  const [pickCompanies, setPickCompanies] = React.useState<number[]>([]);
+  const [companyOpen, setCompanyOpen] = React.useState(false);
+  const [savingCompanies, setSavingCompanies] = React.useState(false);
+
+  React.useEffect(() => {
+    api.companies().then(setCompanies).catch(() => setCompanies([]));
+  }, []);
 
   React.useEffect(() => {
     let alive = true;
@@ -88,6 +111,26 @@ function TaskDetailInner() {
       toast.success(next ? "已暂停探索" : "已恢复探索");
     } catch (e) {
       toast.error("操作失败：" + (e as Error).message);
+    }
+  }
+
+  function openCompanyEditor() {
+    if (!task) return;
+    setPickCompanies((task.companies ?? []).map((c) => c.id));
+    setCompanyOpen(true);
+  }
+
+  async function saveCompanies() {
+    setSavingCompanies(true);
+    try {
+      await api.setTaskCompanies(id, pickCompanies);
+      toast.success("企业关联已更新");
+      setCompanyOpen(false);
+      load();
+    } catch (e) {
+      toast.error("保存失败：" + (e as Error).message);
+    } finally {
+      setSavingCompanies(false);
     }
   }
 
@@ -147,6 +190,24 @@ function TaskDetailInner() {
           </div>
         </div>
         <p className="truncate text-xs text-muted-foreground">{task.goal}</p>
+        {/* 企业关联 */}
+        <div className="flex items-center gap-1.5">
+          <Building2Icon className="size-3.5 text-muted-foreground" />
+          {(task.companies ?? []).length === 0 ? (
+            <span className="text-xs text-muted-foreground">未关联企业</span>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {(task.companies ?? []).map((c) => (
+                <span key={c.id} className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
+                  {c.name}
+                </span>
+              ))}
+            </div>
+          )}
+          <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" onClick={openCompanyEditor}>
+            <PlusIcon className="size-3" /> 关联企业
+          </Button>
+        </div>
         {/* Tabs */}
         <TabsList variant="default">
           {TABS.map((t) => (
@@ -186,6 +247,55 @@ function TaskDetailInner() {
           <ReportTab taskId={id} />
         </TabsContent>
       </div>
+
+      {/* 企业关联编辑 */}
+      <Dialog open={companyOpen} onOpenChange={setCompanyOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>关联企业 · {task.description}</DialogTitle>
+            <DialogDescription>
+              可多选；第一个选中的企业作为主企业。改绑会立即生效。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-wrap gap-1.5 py-2">
+            {companies.map((c) => {
+              const on = pickCompanies.includes(c.id);
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() =>
+                    setPickCompanies((prev) =>
+                      on ? prev.filter((x) => x !== c.id) : [...prev, c.id],
+                    )
+                  }
+                  className={cn(
+                    "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+                    on
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-input text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  {c.name}
+                </button>
+              );
+            })}
+            {companies.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                暂无企业。可先在「资产」页新增企业。
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">取消</Button>
+            </DialogClose>
+            <Button onClick={saveCompanies} disabled={savingCompanies}>
+              {savingCompanies ? "保存中…" : "保存"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Tabs>
   );
 }

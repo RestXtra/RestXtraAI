@@ -34,7 +34,7 @@ import {
 import { TablePagination } from "@/components/table-pagination";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import type { Finding, Severity } from "@/lib/types";
+import type { Finding, Severity, Company } from "@/lib/types";
 
 const SEVERITY_ORDER: Record<Severity, number> = { high: 3, medium: 2, low: 1 };
 
@@ -50,9 +50,11 @@ function fmtTime(ts: string) {
 export default function FindingsPage() {
   const [severity, setSeverity] = React.useState<"all" | Severity>("all");
   const [vulnclass, setVulnclass] = React.useState<string>("all");
+  const [companyFilter, setCompanyFilter] = React.useState<number | "all">("all");
   const [sort, setSort] = React.useState<"severity" | "time">("severity");
   const [expanded, setExpanded] = React.useState<string | null>(null);
   const [findings, setFindings] = React.useState<Finding[]>([]);
+  const [companies, setCompanies] = React.useState<Company[]>([]);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(20);
 
@@ -60,7 +62,7 @@ export default function FindingsPage() {
     let alive = true;
     const load = () => {
       api
-        .findings()
+        .findings(undefined, companyFilter === "all" ? undefined : companyFilter)
         .then((fs) => {
           if (alive) setFindings(fs);
         })
@@ -72,7 +74,16 @@ export default function FindingsPage() {
       alive = false;
       clearInterval(t);
     };
+  }, [companyFilter]);
+
+  React.useEffect(() => {
+    api.companies().then(setCompanies).catch(() => setCompanies([]));
   }, []);
+
+  const companyName = React.useCallback(
+    (id: number) => companies.find((c) => c.id === id)?.name ?? "",
+    [companies],
+  );
 
   const vulnclasses = React.useMemo(
     () => Array.from(new Set(findings.map((f) => f.vulnclass))).sort(),
@@ -102,7 +113,7 @@ export default function FindingsPage() {
   }, [findings, severity, vulnclass, sort]);
 
   // reset to page 1 whenever filters change
-  React.useEffect(() => { setPage(1); }, [severity, vulnclass, sort]);
+  React.useEffect(() => { setPage(1); }, [severity, vulnclass, sort, companyFilter]);
 
   const paginated = React.useMemo(
     () => rows.slice((page - 1) * pageSize, page * pageSize),
@@ -179,6 +190,23 @@ export default function FindingsPage() {
           </Select>
 
           <Select
+            value={companyFilter === "all" ? "all" : String(companyFilter)}
+            onValueChange={(v) => setCompanyFilter(v === "all" ? "all" : Number(v))}
+          >
+            <SelectTrigger size="sm" className="w-40">
+              <SelectValue placeholder="企业" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部企业</SelectItem>
+              {companies.map((c) => (
+                <SelectItem key={c.id} value={String(c.id)}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
             value={sort}
             onValueChange={(v) => setSort(v as "severity" | "time")}
           >
@@ -205,6 +233,7 @@ export default function FindingsPage() {
                   <TableHead className="w-20">严重度</TableHead>
                   <TableHead className="w-28">漏洞类型</TableHead>
                   <TableHead>摘要</TableHead>
+                  <TableHead className="w-32 max-w-[7rem]">企业</TableHead>
                   <TableHead className="w-36 max-w-[9rem]">所属任务</TableHead>
                   <TableHead className="w-32">时间</TableHead>
                 </TableRow>
@@ -237,6 +266,22 @@ export default function FindingsPage() {
                         <TableCell className="max-w-md">
                           <span className="line-clamp-1">{f.summary}</span>
                         </TableCell>
+                        <TableCell className="w-32 max-w-[7rem]">
+                          {(f.company_ids ?? []).length === 0 ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {f.company_ids!.map((cid) => (
+                                <span
+                                  key={cid}
+                                  className="rounded bg-muted px-1.5 py-0.5 text-[10px]"
+                                >
+                                  {companyName(cid) || (cid === 0 ? "未归属" : `#${cid}`)}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </TableCell>
                         <TableCell className="w-36 max-w-[9rem]">
                           {f.task_id ? (
                             <Link
@@ -258,7 +303,7 @@ export default function FindingsPage() {
                       </TableRow>
                       {open && (
                         <TableRow className="hover:bg-transparent">
-                          <TableCell colSpan={6} className="bg-muted/30">
+                          <TableCell colSpan={7} className="bg-muted/30">
                             <div className="flex flex-col gap-2 px-2 py-1">
                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                 <ShieldAlertIcon className="size-3.5" />
@@ -282,7 +327,7 @@ export default function FindingsPage() {
                 {rows.length === 0 && (
                   <TableRow>
                     <TableCell
-                      colSpan={6}
+                      colSpan={7}
                       className="py-12 text-center text-sm text-muted-foreground"
                     >
                       没有匹配的发现。

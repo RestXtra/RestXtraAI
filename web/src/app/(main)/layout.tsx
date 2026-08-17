@@ -7,26 +7,11 @@ import { AppSidebar } from "@/app/(main)/_components/sidebar/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { auth } from "@/lib/auth";
 import { getClientCookie } from "@/lib/cookie.client";
-import {
-  SIDEBAR_COLLAPSIBLE_VALUES,
-  SIDEBAR_VARIANT_VALUES,
-  type SidebarCollapsible,
-  type SidebarVariant,
-} from "@/lib/preferences/layout";
-import { PREFERENCE_DEFAULTS } from "@/lib/preferences/preferences-config";
+import { applyContentLayout, applyNavbarStyle } from "@/lib/preferences/layout-utils";
 import { cn } from "@/lib/utils";
+import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
 import { MainContent } from "./_components/main-content";
-
-// Reads a layout-critical preference from the browser cookie (falls back to the
-// default during static-export prerender where document is unavailable). Kept
-// fully client-side so the app can be statically exported — no Server Actions /
-// next/headers.
-function readPref<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
-  if (typeof document === "undefined") return fallback;
-  const value = getClientCookie(key);
-  return value && (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
-}
 
 export default function Layout({ children }: Readonly<{ children: ReactNode }>) {
   // Client-side auth gate — replaces the Next proxy/middleware that static export
@@ -42,16 +27,22 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
   }, []);
 
   const defaultOpen = typeof document === "undefined" ? true : getClientCookie("sidebar_state") !== "false";
-  const variant = readPref<SidebarVariant>(
-    "sidebar_variant",
-    SIDEBAR_VARIANT_VALUES,
-    PREFERENCE_DEFAULTS.sidebar_variant,
-  );
-  const collapsible = readPref<SidebarCollapsible>(
-    "sidebar_collapsible",
-    SIDEBAR_COLLAPSIBLE_VALUES,
-    PREFERENCE_DEFAULTS.sidebar_collapsible,
-  );
+  // Live from the preferences store so the sidebar reacts immediately to changes
+  // made in 系统配置 → 界面与布局 (not a one-shot cookie read).
+  const variant = usePreferencesStore((s) => s.sidebarVariant);
+  const collapsible = usePreferencesStore((s) => s.sidebarCollapsible);
+  const contentLayout = usePreferencesStore((s) => s.contentLayout);
+  const navbarStyle = usePreferencesStore((s) => s.navbarStyle);
+
+  // Sync the html data-* attributes (which the CSS-driven rules for the content
+  // wrapper and sticky header read) whenever the store changes, so switching
+  // 居中/通栏 and 固定/随页面滚动 applies immediately without a reload.
+  React.useEffect(() => {
+    applyContentLayout(contentLayout);
+  }, [contentLayout]);
+  React.useEffect(() => {
+    applyNavbarStyle(navbarStyle);
+  }, [navbarStyle]);
 
   if (!authed) return null;
 

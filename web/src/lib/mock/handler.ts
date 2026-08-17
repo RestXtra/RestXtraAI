@@ -34,7 +34,11 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/auth/change-password") return { ok: true };
 
   // ── tasks ──
-  if (path === "/tasks" && m === "GET") return { tasks: D.tasks, active: D.ACTIVE_TASK };
+  if (path === "/tasks" && m === "GET") {
+    const cid = Number(q.get("company_id") ?? 0);
+    const list = cid > 0 ? D.tasks.filter((t) => (t.companies ?? []).some((c) => c.id === cid)) : D.tasks;
+    return { tasks: list, active: D.ACTIVE_TASK };
+  }
   if (path === "/tasks" && m === "POST")
     return { ...D.tasks[0], id: "t-new", description: String(b.description ?? "新任务"), goal: String(b.goal ?? ""), status: "created" };
   if (seg[0] === "tasks" && seg.length === 2 && m === "DELETE") return { deleted: 1 };
@@ -44,10 +48,16 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
 
   // ── stats ──
   if (path === "/stats") return D.stats(task);
+  if (path === "/dashboard/companies")
+    return {
+      companies: [
+        { id: 1, name: "Acme Corp", assets: 42, tasks: 3, findings: 5, high: 2 },
+        { id: 0, name: "未归属", assets: 7, tasks: 1, findings: 1, high: 0 },
+      ],
+    };
 
   // ── assets ──
-  if (path === "/assets/counts") return D.assetCounts;
-  if (path === "/assets" && m === "GET") {
+  if (path === "/assets/counts") return D.assetCounts;  if (path === "/assets" && m === "GET") {
     const type = q.get("type") ?? "";
     const list = type ? D.assets.filter((a) => a.type === type) : D.assets;
     const limit = Number(q.get("limit") ?? 50);
@@ -64,7 +74,12 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
 
   // ── exploration ──
   if (path === "/exploration/frontier") return D.frontier;
-  if (path === "/exploration/findings") return task ? D.findings.filter((f) => f.task_id === task) : D.findings;
+  if (path === "/exploration/findings") {
+    const cid = Number(q.get("company_id") ?? 0);
+    let list = task ? D.findings.filter((f) => f.task_id === task) : D.findings;
+    if (cid > 0) list = list.filter((f) => (f.company_ids ?? []).includes(cid));
+    return list;
+  }
   if (path === "/exploration/intents") return D.intents;
   if (path === "/exploration/tokens") return { workers: D.tokenWorkers, total: D.tokenTotal };
   if (path === "/exploration/graph") return D.explorationGraph;
@@ -82,7 +97,16 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   // ── traffic / audit / settings ──
   if (path === "/audit") return D.audit;
   if (path === "/traffic") return D.traffic;
+  if (path === "/traffic" && m === "DELETE") return { deleted: (b.ids as unknown[])?.length ?? 0 };
+  if (path === "/traffic" && m === "POST") return { removed: 1 };
   if (path === "/traffic/exchange") return D.trafficDetail;
+  if (path === "/commands" && m === "DELETE")
+    return { deleted: b.all ? 1 : (b.ids as unknown[])?.length ?? 0 };
+  if (path === "/logs" && m === "DELETE") return { deleted: (b.ids as unknown[])?.length ?? 0 };
+  if (path === "/logs/clear" && m === "POST") return { removed: 1 };
+  if (seg[0] === "llm" && seg[1] === "records" && m === "DELETE" && seg.length === 2)
+    return { deleted: b.all ? 1 : (b.ids as unknown[])?.length ?? 0 };
+  if (seg[0] === "llm" && seg[1] === "records" && seg[2] === "clear" && m === "POST") return { removed: 1 };
   if (path === "/settings" && m === "GET") return D.settings;
   if (path === "/settings" && m === "PUT") return { ...D.settings, ...b };
   if (path === "/settings/web-search/test") return { ok: true, count: 5, backend: D.settings.web_search_backend };

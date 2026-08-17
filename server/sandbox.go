@@ -485,6 +485,44 @@ func (s *Server) sandboxContainerAction(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, 200, map[string]any{"ok": true, "action": action, "container": cid})
 }
 
+// sandboxRemoveContainersBatch removes multiple (or all) containers on a host.
+func (s *Server) sandboxRemoveContainersBatch(w http.ResponseWriter, r *http.Request) {
+	_, api := s.sandboxHostOr404(w, r)
+	if api == nil {
+		return
+	}
+	var req struct {
+		IDs []string `json:"ids"`
+		All bool     `json:"all"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	ids := req.IDs
+	if req.All {
+		var all []dockerContainer
+		if _, err := api.do(r.Context(), http.MethodGet, "/containers/json?all=1", nil, &all); err != nil {
+			writeErr(w, 502, "Docker: "+err.Error())
+			return
+		}
+		ids = make([]string, 0, len(all))
+		for _, c := range all {
+			ids = append(ids, c.ID)
+		}
+	}
+	var deleted []string
+	var failed []string
+	for _, cid := range ids {
+		if _, err := api.do(r.Context(), http.MethodDelete, "/containers/"+cid+"?force=1&v=1", nil, nil); err != nil {
+			failed = append(failed, cid)
+			continue
+		}
+		deleted = append(deleted, cid)
+	}
+	writeJSON(w, 200, map[string]any{"deleted": deleted, "failed": failed})
+}
+
 // ---------- 出口范围 ----------
 
 func (s *Server) sandboxListEgress(w http.ResponseWriter, r *http.Request) {
@@ -528,4 +566,28 @@ func (s *Server) sandboxDeleteEgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"deleted": id})
+}
+
+// sandboxDeleteEgressBatch removes multiple (or all) egress rules.
+func (s *Server) sandboxDeleteEgressBatch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+		All bool    `json:"all"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	var n int64
+	var err error
+	if req.All {
+		n, err = s.m.pg.ClearSandboxEgresses()
+	} else {
+		n, err = s.m.pg.DeleteSandboxEgresses(req.IDs)
+	}
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": n})
 }

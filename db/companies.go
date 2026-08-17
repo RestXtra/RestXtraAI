@@ -7,6 +7,26 @@ import (
 	"strings"
 )
 
+// CountCompanyTasks returns the number of alive tasks associated with a company.
+func (d *DB) CountCompanyTasks(companyID int64) (int64, error) {
+	var n int64
+	err := d.QueryRow(`
+SELECT COUNT(*) FROM task_companies tc
+JOIN tasks t ON t.id = tc.task_id
+WHERE tc.company_id=$1 AND t.deleted_at IS NULL`, companyID).Scan(&n)
+	return n, err
+}
+
+// CountTasksWithoutCompany returns the number of alive tasks with no company association.
+func (d *DB) CountTasksWithoutCompany() (int64, error) {
+	var n int64
+	err := d.QueryRow(`
+SELECT COUNT(*) FROM tasks
+WHERE deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM task_companies tc WHERE tc.task_id = tasks.id)`).Scan(&n)
+	return n, err
+}
+
 // =====================================================================
 // 公司主体层
 // =====================================================================

@@ -8,7 +8,9 @@ import {
   ChevronRightIcon,
   XIcon,
   Loader2Icon,
+  Trash2Icon,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -29,6 +31,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { TrafficExchange, TrafficResp, TrafficDetail } from "@/lib/types";
@@ -78,6 +91,47 @@ export default function TrafficPage() {
   const [detail, setDetail] = React.useState<TrafficDetail | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
 
+  // batch selection & delete
+  const [checked, setChecked] = React.useState<Set<string>>(new Set());
+  const [deleteIds, setDeleteIds] = React.useState<string[]>([]);
+  const [deleteAll, setDeleteAll] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+
+  const toggleCheck = (id: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleCheckAll = (ids: string[]) => {
+    setChecked((prev) => {
+      const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = deleteAll ? await api.clearTraffic() : await api.deleteTraffic(deleteIds);
+      toast.success(`已删除 ${res.deleted ?? res.removed ?? 0} 条流量`);
+      setChecked(new Set());
+      setDeleteOpen(false);
+      loadTraffic();
+    } catch (e) {
+      toast.error("删除失败：" + String((e as Error)?.message ?? e));
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // Debounce both filters so we don't refetch on every keystroke.
   React.useEffect(() => {
     const t = setTimeout(() => setHostQ(host.trim()), 300);
@@ -95,6 +149,13 @@ export default function TrafficPage() {
 
   // Load the current page. Auto-refresh only on page 0 (newest) so paging back
   // through history isn't yanked out from under the user.
+  const loadTraffic = React.useCallback(() => {
+    api
+      .traffic(page, size, hostQ, method, queryQ)
+      .then((r) => setTraffic(r))
+      .catch(() => {});
+  }, [page, size, hostQ, method, queryQ]);
+
   React.useEffect(() => {
     let alive = true;
     const load = () =>
@@ -172,6 +233,25 @@ export default function TrafficPage() {
           <span className="text-xs text-muted-foreground">
             共 <span className="tabular-nums">{traffic?.count ?? 0}</span> 条
           </span>
+          {checked.size > 0 && (
+            <>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => { setDeleteAll(false); setDeleteIds(Array.from(checked)); setDeleteOpen(true); }}
+              >
+                <Trash2Icon className="size-3.5" /> 删除已选 ({checked.size})
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+              >
+                <Trash2Icon className="size-3.5" /> 删除全部
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -255,6 +335,13 @@ export default function TrafficPage() {
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
+                  <TableHead className="w-8 pr-0">
+                    <Checkbox
+                      checked={exchanges.length > 0 && exchanges.every((e) => checked.has(e.id))}
+                      onCheckedChange={() => toggleCheckAll(exchanges.map((e) => e.id))}
+                      aria-label="全选"
+                    />
+                  </TableHead>
                   <TableHead className="w-36">时间</TableHead>
                   <TableHead className="w-44">host</TableHead>
                   <TableHead className="w-20">方法</TableHead>
@@ -274,6 +361,13 @@ export default function TrafficPage() {
                     )}
                     onClick={() => setSelected(e)}
                   >
+                    <TableCell className="w-8 pr-0" onClick={(ev) => ev.stopPropagation()}>
+                      <Checkbox
+                        checked={checked.has(e.id)}
+                        onCheckedChange={() => toggleCheck(e.id)}
+                        aria-label="选择"
+                      />
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground tabular-nums">
                       {fmtTime(e.ts)}
                     </TableCell>
@@ -309,7 +403,7 @@ export default function TrafficPage() {
                 {exchanges.length === 0 && (
                   <TableRow>
                     <TableCell
-                      colSpan={7}
+                      colSpan={8}
                       className="py-12 text-center text-sm text-muted-foreground"
                     >
                       {traffic === null ? "加载中…" : "没有匹配的流量。"}
@@ -378,6 +472,31 @@ export default function TrafficPage() {
           </Card>
         )}
       </div>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteAll ? (
+                <>将清空 <span className="font-semibold tabular-nums">{traffic?.count ?? 0}</span> 条全部流量记录（含对应报文），此操作不可撤销。</>
+              ) : (
+                <>将永久删除 <span className="font-semibold tabular-nums">{deleteIds.length}</span> 条流量记录（含对应报文），此操作不可撤销。</>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); confirmDelete(); }}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "删除中…" : "确认删除"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

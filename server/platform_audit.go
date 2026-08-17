@@ -67,3 +67,17 @@ func (s *Server) platformAuditGC(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"removed": n})
 }
+
+// POST /api/audit/clear — empty the entire audit log.
+func (s *Server) platformAuditClear(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	n, err := pg.ClearAudit()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"removed": n})
+}

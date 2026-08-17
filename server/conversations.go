@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -158,7 +160,32 @@ func (s *Server) pgDeleteConversation(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	// 同步删除该会话的 transcript 原始日志文件（工作日志）。
+	_ = os.Remove(filepath.Join(s.m.dir, "transcripts", "conv-"+strconv.FormatInt(c.ID, 10)+".jsonl"))
 	writeJSON(w, 200, map[string]any{"deleted": c.ID})
+}
+
+// pgDeleteAllConversations 删除所有会话（DB 记录 + transcript 文件），返回删除数量。
+func (s *Server) pgDeleteAllConversations(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	n, err := pg.DeleteAllConversations()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	// 清空 transcript 目录下的 conv-*.jsonl 工作日志。
+	dir := filepath.Join(s.m.dir, "transcripts")
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), "conv-") && strings.HasSuffix(e.Name(), ".jsonl") {
+				_ = os.Remove(filepath.Join(dir, e.Name()))
+			}
+		}
+	}
+	writeJSON(w, 200, map[string]any{"deleted": n})
 }
 
 func (s *Server) convBusyKey(id int64) string { return "conv-" + strconv.FormatInt(id, 10) }

@@ -17,8 +17,19 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
@@ -188,6 +199,49 @@ export default function SandboxContainersPage() {
   const [loading, setLoading] = React.useState(false);
   const [acting, setActing] = React.useState<string | null>(null);
 
+  // batch selection & delete (remove containers)
+  const [checked, setChecked] = React.useState<Set<string>>(new Set());
+  const [deleteAll, setDeleteAll] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+
+  const toggleCheck = (id: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleCheckAll = (ids: string[]) => {
+    setChecked((prev) => {
+      const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  const confirmBatchRemove = async () => {
+    setDeleting(true);
+    try {
+      const res = await api.removeSandboxContainers(hostId, Array.from(checked), deleteAll);
+      const msg = res.failed?.length
+        ? `已删除 ${res.deleted.length} 个容器；失败 ${res.failed.length} 个`
+        : `已删除 ${res.deleted.length} 个容器`;
+      toast.success(msg);
+      setChecked(new Set());
+      setDeleteOpen(false);
+      load();
+    } catch (e) {
+      toast.error(`删除失败：${(e as Error).message}`);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   React.useEffect(() => {
     api.sandboxHosts().then(setHosts).catch(() => setHosts([]));
   }, []);
@@ -247,6 +301,21 @@ export default function SandboxContainersPage() {
           仅看受管容器
         </label>
         {hostId && <CreateContainerDialog hostId={hostId} images={images} onCreated={load} />}
+        {checked.size > 0 && (
+          <>
+            <Button variant="destructive" size="sm" onClick={() => { setDeleteAll(false); setDeleteOpen(true); }}>
+              <Trash2Icon className="size-3.5" /> 删除已选 ({checked.size})
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+            >
+              <Trash2Icon className="size-3.5" /> 删除全部
+            </Button>
+          </>
+        )}
       </div>
 
       <Card className="overflow-hidden py-0">
@@ -254,6 +323,13 @@ export default function SandboxContainersPage() {
           <table className="w-full text-sm">
             <thead className="bg-muted/50 sticky top-0">
               <tr className="text-left text-muted-foreground text-xs">
+                <th className="w-8 px-3 py-2 font-medium">
+                  <Checkbox
+                    checked={containers.length > 0 && containers.every((c) => checked.has(c.Id))}
+                    onCheckedChange={() => toggleCheckAll(containers.map((c) => c.Id))}
+                    aria-label="全选"
+                  />
+                </th>
                 <th className="px-3 py-2 font-medium">名称</th>
                 <th className="px-3 py-2 font-medium">镜像</th>
                 <th className="px-3 py-2 font-medium">状态</th>
@@ -265,13 +341,13 @@ export default function SandboxContainersPage() {
             <tbody>
               {loading && containers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center">
+                  <td colSpan={7} className="py-12 text-center">
                     <Loader2Icon className="mx-auto size-5 animate-spin text-muted-foreground" />
                   </td>
                 </tr>
               ) : containers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-muted-foreground py-12 text-center text-sm">
+                  <td colSpan={7} className="text-muted-foreground py-12 text-center text-sm">
                     该主机暂无容器{managedOnly ? "（受管）" : ""}，点击「创建容器」。
                   </td>
                 </tr>
@@ -282,6 +358,13 @@ export default function SandboxContainersPage() {
                   const running = c.State === "running";
                   return (
                     <tr key={c.Id} className="border-t">
+                      <td className="w-8 px-3 py-2">
+                        <Checkbox
+                          checked={checked.has(c.Id)}
+                          onCheckedChange={() => toggleCheck(c.Id)}
+                          aria-label={`选择 ${name}`}
+                        />
+                      </td>
                       <td className="max-w-[240px] px-3 py-2">
                         <code className="block truncate font-mono text-xs">{name}</code>
                         <span className="text-muted-foreground text-[11px]">{c.Id.slice(0, 12)}</span>
@@ -325,6 +408,31 @@ export default function SandboxContainersPage() {
           </table>
         </div>
       </Card>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除容器</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteAll ? (
+                <>将从沙箱主机强制删除全部容器（含其数据卷，force 删除），此操作不可撤销。</>
+              ) : (
+                <>将从沙箱主机强制删除 <span className="font-semibold tabular-nums">{checked.size}</span> 个容器（含其数据卷，force 删除），此操作不可撤销。</>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); confirmBatchRemove(); }}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "删除中…" : "确认删除"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

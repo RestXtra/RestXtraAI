@@ -3,10 +3,24 @@
 import * as React from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { sseUrl } from "@/lib/api";
+import { api } from "@/lib/api";
 import { MOCK } from "@/lib/mock/enabled";
 import type { LogLine } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { Trash2Icon } from "lucide-react";
 
 // Mock demo：无后端 SSE，塞几行示例日志。
 const MOCK_LOGS: LogLine[] = [
@@ -45,6 +59,51 @@ export default function LogsPage() {
   const stick = React.useRef(true);
   const pausedRef = React.useRef(false);
   pausedRef.current = paused;
+
+  // batch selection & delete (by db_id)
+  const [checked, setChecked] = React.useState<Set<number>>(new Set());
+  const [deleting, setDeleting] = React.useState(false);
+  const [deleteAllOpen, setDeleteAllOpen] = React.useState(false);
+  const [deletingAll, setDeletingAll] = React.useState(false);
+
+  const toggleCheck = (dbId: number) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(dbId)) next.delete(dbId); else next.add(dbId);
+      return next;
+    });
+  };
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    try {
+      const ids = Array.from(checked);
+      const res = await api.deleteLogs(ids);
+      toast.success(`已删除 ${res.deleted} 条日志`);
+      setChecked(new Set());
+      setLines((prev) => prev.filter((l) => !(l.db_id && checked.has(l.db_id))));
+    } catch (e) {
+      toast.error("删除失败：" + String((e as Error)?.message ?? e));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const confirmDeleteAll = async () => {
+    setDeletingAll(true);
+    try {
+      const res = await api.clearLogs();
+      toast.success(`已清空 ${res.removed} 条日志`);
+      setChecked(new Set());
+      setLines([]);
+      setDeleteAllOpen(false);
+    } catch (e) {
+      toast.error("清空失败：" + String((e as Error)?.message ?? e));
+      setDeleteAllOpen(false);
+    } finally {
+      setDeletingAll(false);
+    }
+  };
 
   // Minimum db_id seen — used as the cursor for loading older history.
   const minDbId = React.useMemo(() => {
@@ -173,8 +232,23 @@ export default function LogsPage() {
             {paused ? "已暂停" : "暂停"}
           </Button>
           <Button size="sm" variant="outline" className="h-8" onClick={() => setLines([])}>
-            清空
+            清空显示
           </Button>
+          {checked.size > 0 && (
+            <>
+              <Button size="sm" variant="destructive" className="h-8" onClick={confirmDelete} disabled={deleting}>
+                <Trash2Icon className="size-3.5" /> 删除已选 ({checked.size})
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-destructive hover:text-destructive"
+                onClick={() => setDeleteAllOpen(true)}
+              >
+                <Trash2Icon className="size-3.5" /> 删除全部
+              </Button>
+            </>
+          )}
           <span className="ml-auto text-xs text-muted-foreground">
             {counts.total} 行 ·{" "}
             <span className="text-amber-600 dark:text-amber-400">{counts.warn} 警告</span> ·{" "}
@@ -212,6 +286,16 @@ export default function LogsPage() {
                   : l.text;
               return (
                 <div key={l.seq} className="flex items-start gap-2 px-1 py-0.5 hover:bg-muted/40">
+                  {l.db_id ? (
+                    <Checkbox
+                      className="mt-1 size-3.5 shrink-0"
+                      checked={checked.has(l.db_id)}
+                      onCheckedChange={() => toggleCheck(l.db_id!)}
+                      aria-label="选择日志行"
+                    />
+                  ) : (
+                    <span className="w-3.5 shrink-0" />
+                  )}
                   <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", levelDot[l.level])} />
                   <span className="shrink-0 tabular-nums text-muted-foreground">{fmtTime(l.ts)}</span>
                   {l.tag && (
@@ -225,6 +309,27 @@ export default function LogsPage() {
           <div ref={bottom} />
         </div>
       </div>
+
+      <AlertDialog open={deleteAllOpen} onOpenChange={setDeleteAllOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认清空全部日志</AlertDialogTitle>
+            <AlertDialogDescription>
+              将清空后端全部日志（约 <span className="tabular-nums">{counts.total}</span> 行，含数据库中的历史日志），此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingAll}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); confirmDeleteAll(); }}
+              disabled={deletingAll}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingAll ? "清空中…" : "确认清空"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

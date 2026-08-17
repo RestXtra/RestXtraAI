@@ -44,6 +44,8 @@ type TaskDTO struct {
 	GoalsTotal    int           `json:"goals_total"`
 	GoalsMet      int           `json:"goals_met"`
 	LLMProfileID  *int64        `json:"llm_profile_id,omitempty"` // LLM profile used for this task; nil = default
+	Companies     []db.CompanyRef `json:"companies,omitempty"`    // 企业归属（多企业）
+	CompanyID     int64         `json:"company_id,omitempty"`     // 主企业
 }
 
 // TokenTotalDTO is a whole-task (all agents) token aggregate.
@@ -76,6 +78,8 @@ func taskDTO(t *Task, status string) TaskDTO {
 		CompletedUnix: t.CompletedAt,
 		Paused:        t.Paused,
 		LLMProfileID:  t.LLMProfileID,
+		Companies:     t.Companies,
+		CompanyID:     t.CompanyID,
 	}
 }
 
@@ -181,6 +185,7 @@ type FindingDTO struct {
 	TaskID          string `json:"task_id,omitempty"`
 	TaskDescription string `json:"task_description,omitempty"`
 	TS              string `json:"ts"`
+	CompanyIDs      []int64 `json:"company_ids,omitempty"` // 派生：任务企业 + 资产企业
 }
 
 // findingPayload mirrors the JSON written by the worker's report_finding tool
@@ -222,12 +227,13 @@ func findingDTOsForTask(t *Task, in []*db.Node) []FindingDTO {
 // task_description are empty when the originating task has been deleted (NULL).
 func findingFromDB(f *db.DBFinding) FindingDTO {
 	d := FindingDTO{
-		ID:        i64s(f.ID),
-		VulnClass: f.VulnClass,
-		Severity:  f.Severity,
-		Summary:   f.Summary,
-		Evidence:  f.Evidence,
-		TS:        rfc3339(f.CreatedAt),
+		ID:         i64s(f.ID),
+		VulnClass:  f.VulnClass,
+		Severity:   f.Severity,
+		Summary:    f.Summary,
+		Evidence:   f.Evidence,
+		TS:         rfc3339(f.CreatedAt),
+		CompanyIDs: f.CompanyIDs,
 	}
 	if f.TaskID != nil {
 		d.TaskID = i64s(*f.TaskID)
@@ -252,6 +258,7 @@ type ActivityDTO struct {
 	IsError   bool   `json:"is_error"`
 	Summary   string `json:"summary"`
 	Detail    string `json:"detail,omitempty"`
+	TaskID    string `json:"task_id,omitempty"` // 所属任务/探索 id（企业级活动流用）
 	// token usage (set only on kind='result'); used for per-session token totals.
 	InputTokens      *int `json:"input_tokens,omitempty"`
 	OutputTokens     *int `json:"output_tokens,omitempty"`

@@ -136,7 +136,51 @@ func (t *Traffic) CACertPath() string {
 func (t *Traffic) Start() error { return t.proxy.Start() }
 
 func (t *Traffic) Close() error { return t.db.Close() }
+
+// Clear empties all recorded traffic: the SQLite index rows and the blob files.
+// Returns how many exchanges were removed.
+func (t *Traffic) Clear() (int64, error) {
+	res, err := t.db.Exec(`DELETE FROM exchanges`)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	// Reset the auto-increment sequence so ids restart from 1.
+	_, _ = t.db.Exec(`DELETE FROM sqlite_sequence WHERE name='exchanges'`)
+	// Remove stored blob files.
+	if entries, err := os.ReadDir(filepath.Join(t.dir, "_blobs")); err == nil {
+		for _, e := range entries {
+			_ = os.Remove(filepath.Join(t.dir, "_blobs", e.Name()))
+		}
+	}
+	t.seq.Store(0)
+	return n, nil
+}
 func (t *Traffic) DB() *sql.DB  { return t.db }
+
+// Delete removes a set of exchanges by id: the SQLite index rows and their file
+// tree directories. Returns how many exchanges were removed.
+func (t *Traffic) Delete(ids []string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	removed := int64(0)
+	for _, id := range ids {
+		var rel string
+		err := t.db.QueryRow(`SELECT path FROM exchanges WHERE id=?`, id).Scan(&rel)
+		if err != nil {
+			continue // not found — skip
+		}
+		if _, err := t.db.Exec(`DELETE FROM exchanges WHERE id=?`, id); err != nil {
+			return removed, err
+		}
+		if rel != "" {
+			_ = os.RemoveAll(filepath.Join(t.dir, rel))
+		}
+		removed++
+	}
+	return removed, nil
+}
 
 // sink is the go-mitmproxy addon that records completed exchanges.
 type sink struct {

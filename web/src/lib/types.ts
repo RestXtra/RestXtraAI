@@ -24,6 +24,23 @@ export interface Task {
   engine_mode?: EngineMode;
   tokens?: TokenTotal; // whole-task token consumption
   llm_profile_id?: number; // LLM profile used; absent = default profile
+  companies?: CompanyRef[]; // 企业归属（多企业）
+  company_id?: number; // 主企业
+}
+
+export interface CompanyRef {
+  id: number;
+  name: string;
+}
+
+export interface CompanyStat {
+  id: number; // 0 = 未归属
+  name: string;
+  assets: number;
+  tasks: number;
+  findings: number;
+  high: number;
+  hosts?: string[]; // 资产域名+IP，供流量/资产维度过滤
 }
 
 // ---- Asset graph (global, shared across tasks) ----
@@ -185,6 +202,7 @@ export interface Finding {
   task_id?: string;
   task_description?: string;
   ts: string;
+  company_ids?: number[]; // 派生：任务企业 + 资产企业
 }
 
 // ---- Activity / sessions ----

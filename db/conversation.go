@@ -132,6 +132,21 @@ func (d *DB) DeleteConversation(id int64) error {
 	return err
 }
 
+// DeleteAllConversations removes every conversation and its activities.
+func (d *DB) DeleteAllConversations() (int64, error) {
+	var n int64
+	if err := d.QueryRow(`SELECT count(*) FROM conversations`).Scan(&n); err != nil {
+		return 0, err
+	}
+	if _, err := d.Exec(`TRUNCATE conversation_activities`); err != nil {
+		return 0, err
+	}
+	if _, err := d.Exec(`DELETE FROM conversations`); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // AppendConvActivity records one step of a conversation (human message or an agent
 // execution step) and returns its id. Mirrors ExplorationStore.AppendActivity but
 // keyed by conversation_id. Reuses the Activity struct (NodeID is ignored here).

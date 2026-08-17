@@ -83,6 +83,79 @@ func (s *Server) workspaceRead(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"path": filepath.Clean("/" + rel), "content": string(b)})
 }
 
+// workspaceDelete 删除工作空间内的文件或目录（相对路径，防穿越）。
+func (s *Server) workspaceDelete(w http.ResponseWriter, r *http.Request) {
+	rel := r.URL.Query().Get("path")
+	p, err := s.safeWorkspacePath(rel)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if p == s.workspaceRoot() {
+		writeErr(w, 400, "不能删除工作空间根目录")
+		return
+	}
+	fi, err := os.Stat(p)
+	if err != nil {
+		writeErr(w, 404, "not found")
+		return
+	}
+	if fi.IsDir() {
+		if err := os.RemoveAll(p); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	} else {
+		if err := os.Remove(p); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	writeJSON(w, 200, map[string]any{"deleted": filepath.Clean("/" + rel)})
+}
+
+// workspaceClear 批量清理工作空间：可选的保留清单（白名单，按名称精确匹配），
+// 其余全部删除。白名单默认保留：日志、会话记录、配置等关键运行产物。
+func (s *Server) workspaceClear(w http.ResponseWriter, r *http.Request) {
+	keep := map[string]bool{}
+	for _, k := range []string{"backend.out.log", "backend.err.log", "backend-linux.out.log", "backend-linux.err.log", "transcripts", "sessions", "config.json", "restxtra.json"} {
+		keep[k] = true
+	}
+	var req struct {
+		Keep []string `json:"keep"` // 可选：额外保留的条目名
+	}
+	_ = decode(r, &req)
+	for _, k := range req.Keep {
+		keep[k] = true
+	}
+	root := s.workspaceRoot()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	var removed []string
+	for _, e := range entries {
+		if keep[e.Name()] {
+			continue
+		}
+		full := filepath.Join(root, e.Name())
+		if e.IsDir() {
+			_ = os.RemoveAll(full)
+		} else {
+			_ = os.Remove(full)
+		}
+		removed = append(removed, e.Name())
+	}
+	writeJSON(w, 200, map[string]any{"removed": removed, "kept": func() []string {
+		var ks []string
+		for k := range keep {
+			ks = append(ks, k)
+		}
+		return ks
+	}()})
+}
+
 // ---------- 知识库 ----------
 
 func (s *Server) knowledgeList(w http.ResponseWriter, r *http.Request) {
@@ -171,6 +244,30 @@ func (s *Server) webshellDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"deleted": id})
+}
+
+// webshellDeleteBatch removes multiple (or all) webshell connections.
+func (s *Server) webshellDeleteBatch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+		All bool    `json:"all"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	var n int64
+	var err error
+	if req.All {
+		n, err = s.m.pg.ClearWebshells()
+	} else {
+		n, err = s.m.pg.DeleteWebshells(req.IDs)
+	}
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": n})
 }
 
 // webshellTest 通过 HTTP 向 webshell 发一条 ping 命令验证连通性。
@@ -270,6 +367,54 @@ func (s *Server) c2DeleteListener(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"deleted": id})
+}
+
+// c2DeleteListenersBatch removes multiple (or all) C2 listeners.
+func (s *Server) c2DeleteListenersBatch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+		All bool    `json:"all"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	var n int64
+	var err error
+	if req.All {
+		n, err = s.m.pg.ClearC2Listeners()
+	} else {
+		n, err = s.m.pg.DeleteC2Listeners(req.IDs)
+	}
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": n})
+}
+
+// c2DeleteSessionsBatch removes multiple (or all) C2 beacon sessions.
+func (s *Server) c2DeleteSessionsBatch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+		All bool    `json:"all"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	var n int64
+	var err error
+	if req.All {
+		n, err = s.m.pg.ClearC2Sessions()
+	} else {
+		n, err = s.m.pg.DeleteC2Sessions(req.IDs)
+	}
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": n})
 }
 
 // c2Ingest 是 beacon 心跳入口：upsert 会话。

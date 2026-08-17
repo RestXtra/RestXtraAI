@@ -128,6 +128,27 @@ func (d *DB) DeleteWebshell(id int64) error {
 	return err
 }
 
+// DeleteWebshells removes a set of webshell connections by id. Returns rows removed.
+func (d *DB) DeleteWebshells(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res, err := d.Exec(`DELETE FROM webshell_conns WHERE id IN (`+idList(ids)+`)`, idsToArgs(ids)...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// ClearWebshells removes all webshell connections. Returns rows removed.
+func (d *DB) ClearWebshells() (int64, error) {
+	res, err := d.Exec(`DELETE FROM webshell_conns`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // ---------- C2 ----------
 
 type C2Listener struct {
@@ -184,6 +205,48 @@ func (d *DB) SaveC2Listener(l *C2Listener) (int64, error) {
 func (d *DB) DeleteC2Listener(id int64) error {
 	_, err := d.Exec(`DELETE FROM c2_listeners WHERE id=$1`, id)
 	return err
+}
+
+// DeleteC2Listeners removes a set of C2 listeners by id. Returns rows removed.
+func (d *DB) DeleteC2Listeners(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res, err := d.Exec(`DELETE FROM c2_listeners WHERE id IN (`+idList(ids)+`)`, idsToArgs(ids)...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// ClearC2Listeners removes all C2 listeners. Returns rows removed.
+func (d *DB) ClearC2Listeners() (int64, error) {
+	res, err := d.Exec(`DELETE FROM c2_listeners`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// DeleteC2Sessions removes a set of C2 sessions by id. Returns rows removed.
+func (d *DB) DeleteC2Sessions(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res, err := d.Exec(`DELETE FROM c2_sessions WHERE id IN (`+idList(ids)+`)`, idsToArgs(ids)...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// ClearC2Sessions removes all C2 beacon sessions. Returns rows removed.
+func (d *DB) ClearC2Sessions() (int64, error) {
+	res, err := d.Exec(`DELETE FROM c2_sessions`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (d *DB) ListC2Sessions(limit int) ([]*C2Session, error) {

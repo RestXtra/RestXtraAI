@@ -76,3 +76,26 @@ func (d *DB) ListLogsBefore(beforeID int64, limit int) ([]*DBLog, error) {
 	}
 	return out, nil
 }
+
+// ClearServerLogs empties the server_logs table and returns rows removed.
+func (d *DB) ClearServerLogs() (int64, error) {
+	res, err := d.ExecContext(context.Background(), `DELETE FROM server_logs`)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// DeleteLogs removes a set of server_logs rows by id. Returns rows removed.
+func (d *DB) DeleteLogs(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res, err := d.ExecContext(context.Background(),
+		`DELETE FROM server_logs WHERE id IN (`+idList(ids)+`)`, idsToArgs(ids)...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

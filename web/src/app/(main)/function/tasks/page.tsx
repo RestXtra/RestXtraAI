@@ -51,7 +51,8 @@ import {
 import { TablePagination } from "@/components/table-pagination";
 import { api } from "@/lib/api";
 import { clearWorkflowDraft, draftToWorkflow, loadWorkflowDraft } from "@/lib/workflow-draft";
-import type { Task, TaskStatus, LLMProfile, TaskWorkflow } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import type { Task, TaskStatus, LLMProfile, TaskWorkflow, Company } from "@/lib/types";
 
 // ACTIVE_PROFILE is the sentinel Select value for "use the global active profile".
 const ACTIVE_PROFILE = "__active__";
@@ -125,6 +126,9 @@ export default function TasksPage() {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState<TaskStatus | "all">("all");
+  const [companyFilter, setCompanyFilter] = React.useState<number | "all">("all");
+  const [companies, setCompanies] = React.useState<Company[]>([]);
+  const [taskCompanies, setTaskCompanies] = React.useState<number[]>([]); // 新建任务的企业多选
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(20);
   const [nowSec, setNowSec] = React.useState(() => Math.floor(Date.now() / 1000));
@@ -133,6 +137,7 @@ export default function TasksPage() {
     const q = query.trim().toLowerCase();
     return tasks.filter((t) => {
       if (statusFilter !== "all" && t.status !== statusFilter) return false;
+      if (companyFilter !== "all" && !(t.companies ?? []).some((c) => c.id === companyFilter)) return false;
       if (!q) return true;
       return (
         t.description.toLowerCase().includes(q) ||
@@ -140,10 +145,10 @@ export default function TasksPage() {
         t.id.toLowerCase().includes(q)
       );
     });
-  }, [tasks, query, statusFilter]);
+  }, [tasks, query, statusFilter, companyFilter]);
 
   // reset to page 1 whenever filters change
-  React.useEffect(() => { setPage(1); }, [query, statusFilter]);
+  React.useEffect(() => { setPage(1); }, [query, statusFilter, companyFilter]);
 
   const paginated = React.useMemo(
     () => filtered.slice((page - 1) * pageSize, page * pageSize),
@@ -167,6 +172,11 @@ export default function TasksPage() {
   // load LLM profiles once for the create-task profile picker.
   React.useEffect(() => {
     api.llmProfiles().then(setProfiles).catch(() => setProfiles([]));
+  }, []);
+
+  // load companies for the create-task multi-select + list filter.
+  React.useEffect(() => {
+    api.companies().then(setCompanies).catch(() => setCompanies([]));
   }, []);
 
   // 从画板草稿(localStorage)载入工作流（步骤带优先级，优先于内联编辑）。
@@ -218,7 +228,7 @@ export default function TasksPage() {
     try {
       const pid = llmProfile === ACTIVE_PROFILE ? undefined : Number(llmProfile);
       const timeoutSec = Math.max(0, Math.floor(Number(timeoutMin) || 0)) * 60;
-      await api.createTask(description.trim(), goal.trim(), pid, timeoutSec, workflow);
+      await api.createTask(description.trim(), goal.trim(), pid, timeoutSec, workflow, taskCompanies);
       toast.success(workflow ? "任务已创建（含工作流）" : "任务已创建");
       setDescription("");
       setGoal("");
@@ -229,6 +239,7 @@ export default function TasksPage() {
       setWfHints([]);
       setWfDraft(null);
       setWfDraftLoaded(false);
+      setTaskCompanies([]);
       setOpen(false);
       load();
     } catch (e) {
@@ -278,6 +289,22 @@ export default function TasksPage() {
               {STATUS_OPTIONS.map((s) => (
                 <SelectItem key={s.value} value={s.value}>
                   {s.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={companyFilter === "all" ? "all" : String(companyFilter)}
+            onValueChange={(v) => setCompanyFilter(v === "all" ? "all" : Number(v))}
+          >
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="企业" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部企业</SelectItem>
+              {companies.map((c) => (
+                <SelectItem key={c.id} value={String(c.id)}>
+                  {c.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -350,6 +377,42 @@ export default function TasksPage() {
                   />
                   <p className="text-muted-foreground text-xs">
                     到点后触发优雅收尾（各 agent 写回 + planner 终局判定），任务进入 timeout 终态。
+                  </p>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>企业（可选，可多选）</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {companies.map((c) => {
+                      const on = taskCompanies.includes(c.id);
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() =>
+                            setTaskCompanies((prev) =>
+                              on ? prev.filter((id) => id !== c.id) : [...prev, c.id],
+                            )
+                          }
+                          className={cn(
+                            "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+                            on
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-input text-muted-foreground hover:bg-muted",
+                          )}
+                        >
+                          {c.name}
+                        </button>
+                      );
+                    })}
+                    {companies.length === 0 && (
+                      <p className="text-muted-foreground text-xs">
+                        暂无企业。可先在「资产」页新增企业后再关联。
+                      </p>
+                    )}
+                  </div>
+                  <p className="text-muted-foreground text-xs">
+                    第一个选中的企业作为主企业；创建后仍可在任务详情关联更多企业。
                   </p>
                 </div>
 
@@ -495,6 +558,7 @@ export default function TasksPage() {
               <TableRow>
                 <TableHead className="font-mono">ID</TableHead>
                 <TableHead>描述</TableHead>
+                <TableHead>企业</TableHead>
                 <TableHead>目标</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="text-center">目标进度</TableHead>
@@ -519,6 +583,22 @@ export default function TasksPage() {
                         <StarIcon className="size-4 shrink-0 fill-amber-400 text-amber-400" />
                       )}
                     </div>
+                  </TableCell>
+                  <TableCell>
+                    {(task.companies ?? []).length === 0 ? (
+                      <span className="text-muted-foreground text-xs">—</span>
+                    ) : (
+                      <div className="flex max-w-[10rem] flex-wrap gap-1">
+                        {(task.companies ?? []).map((c) => (
+                          <span
+                            key={c.id}
+                            className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-foreground/80"
+                          >
+                            {c.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell className="text-muted-foreground max-w-xs truncate">{task.goal}</TableCell>
                   <TableCell>

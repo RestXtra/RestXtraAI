@@ -1034,6 +1034,71 @@ func (s *AssetStore) CountsByType() (map[string]int, error) {
 	return out, rows.Err()
 }
 
+// CountsByTypeForCompany returns asset counts per type scoped to one company
+// (company_id=0 → 未归属资产)。
+func (s *AssetStore) CountsByTypeForCompany(companyID int64) (map[string]int, error) {
+	rows, err := s.db.Query(`SELECT type, COUNT(*) FROM assets WHERE COALESCE(company_id,0)=$1 GROUP BY type`, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var typ string
+		var cnt int
+		if err := rows.Scan(&typ, &cnt); err != nil {
+			return nil, err
+		}
+		out[typ] = cnt
+	}
+	return out, rows.Err()
+}
+
+// CompanyAssetHosts returns company_id → 资产 host 清单（域名 + IP + URL host）。
+// 供前端按企业过滤流量/资产维度。host 统一去 host:port 形式（IP 保留原样）。
+func (d *DB) CompanyAssetHosts() map[int64][]string {
+	rows, err := d.Query(`
+SELECT id, company_id, domain, ip, url FROM assets WHERE company_id IS NOT NULL`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := map[int64][]string{}
+	seen := map[int64]map[string]bool{}
+	for rows.Next() {
+		var id int64
+		var cid *int64
+		var domain, ip, urlStr *string
+		if err := rows.Scan(&id, &cid, &domain, &ip, &urlStr); err != nil || cid == nil {
+			continue
+		}
+		c := *cid
+		if seen[c] == nil {
+			seen[c] = map[string]bool{}
+		}
+		add := func(h string) {
+			h = strings.TrimSpace(h)
+			if h == "" || seen[c][h] {
+				return
+			}
+			seen[c][h] = true
+			out[c] = append(out[c], h)
+		}
+		if domain != nil {
+			add(*domain)
+		}
+		if ip != nil {
+			add(*ip)
+		}
+		if urlStr != nil {
+			if u, err := url.Parse(*urlStr); err == nil && u.Hostname() != "" {
+				add(u.Hostname())
+			}
+		}
+	}
+	return out
+}
+
 // scanAssets scans the wide SELECT that covers all type columns.
 func scanAssets(rows *sql.Rows) ([]*Asset, error) {
 	var out []*Asset

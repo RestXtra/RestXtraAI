@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { CpuIcon, RadioTowerIcon, SearchIcon } from "lucide-react";
+import { CpuIcon, RadioTowerIcon, SearchIcon, Settings2Icon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { PreferencesPanel } from "@/components/preferences-panel";
 import { api } from "@/lib/api";
 import type { Settings } from "@/lib/types";
 
@@ -422,6 +423,19 @@ export default function SystemSettingsPage() {
               保存
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="max-w-2xl">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Settings2Icon className="size-4" />
+            界面与布局
+          </CardTitle>
+          <CardDescription>仪表盘的外观与布局偏好，保存到当前浏览器（多端互不影响）。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <PreferencesPanel />
         </CardContent>
       </Card>
     </div>

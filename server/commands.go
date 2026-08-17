@@ -57,3 +57,75 @@ func (s *Server) pgGetLLMRecord(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, rec)
 }
+
+// pgDeleteLLMRecord removes one LLM record.
+func (s *Server) pgDeleteLLMRecord(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, 400, "invalid id")
+		return
+	}
+	if err := s.m.PG().DeleteLLMRecord(id); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": id})
+}
+
+// pgDeleteLLMRecords removes a set (or all) of LLM records.
+func (s *Server) pgDeleteLLMRecords(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+		All bool    `json:"all"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, "invalid JSON: "+err.Error())
+		return
+	}
+	var n int64
+	var err error
+	if req.All {
+		n, err = s.m.PG().ClearLLMRecords()
+	} else {
+		n, err = s.m.PG().DeleteLLMRecords(req.IDs)
+	}
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": n})
+}
+
+// pgDeleteCommands removes a set (or all) of tool-execution records.
+func (s *Server) pgDeleteCommands(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+		All bool    `json:"all"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, "invalid JSON: "+err.Error())
+		return
+	}
+	var n int64
+	var err error
+	if req.All {
+		n, err = s.m.PG().ClearCommands()
+	} else {
+		n, err = s.m.PG().DeleteCommands(req.IDs)
+	}
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": n})
+}
+
+// pgClearLLMRecords empties all LLM records.
+func (s *Server) pgClearLLMRecords(w http.ResponseWriter, r *http.Request) {
+	n, err := s.m.PG().ClearLLMRecords()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"removed": n})
+}

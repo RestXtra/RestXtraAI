@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"encoding/json"
 	"time"
 )
@@ -8,6 +9,12 @@ import (
 // MinPlanHeartbeatSeconds 是 planner 心跳间隔下限 = 默认 = 10min。
 // db.CreateTask 归一低于 600 一律抬到 600，防止心跳过频空转 planner。
 const MinPlanHeartbeatSeconds = 600
+
+// CompanyRef is a lightweight company reference attached to a task (id + name).
+type CompanyRef struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
 
 // Task is a row in the task registry (1:1 with an exploration).
 type Task struct {
@@ -29,6 +36,10 @@ type Task struct {
 	// 0 = disabled). While workers run, the planner wakes on this timer to re-inspect
 	// running intents (steer/kill) and decide whether new directions opened up.
 	PlanHeartbeatSeconds int `json:"plan_heartbeat_seconds"`
+	// 企业归属：主企业(tasks.company_id) + 多企业关联(task_companies)。companies
+	// 由 ListTasks/GetTask 填充（nil 时前端按未归属处理）。
+	CompanyID int64        `json:"company_id,omitempty"`
+	Companies []CompanyRef `json:"companies,omitempty"`
 }
 
 // IsTerminal reports whether a task status is a terminal (finished) state.
@@ -41,7 +52,8 @@ func IsTerminal(status string) bool {
 // timeoutSeconds is the task-level wall-clock budget (0 = 不限时); deadline_at is
 // stamped later at first real run (see engine), not here.
 // planHeartbeatSeconds is the planner periodic wake-up interval (0 = disabled).
-func (d *DB) CreateTask(description, goal string, llmProfileID *int64, timeoutSeconds, planHeartbeatSeconds int) (*Task, error) {
+// companyIDs are the companies the task belongs to (first = primary). Empty = unassigned.
+func (d *DB) CreateTask(description, goal string, llmProfileID *int64, timeoutSeconds, planHeartbeatSeconds int, companyIDs []int64) (*Task, error) {
 	tx, err := d.Begin()
 	if err != nil {
 		return nil, err
@@ -72,23 +84,133 @@ VALUES ($1, 'fact', $2, 0, 'origin', 'system')`, expID, string(originPayload)); 
 	if planHeartbeatSeconds < 0 {
 		planHeartbeatSeconds = 0
 	}
+	companyIDs = dedupeIDs(companyIDs)
+	var primary *int64
+	if len(companyIDs) > 0 {
+		primary = &companyIDs[0]
+	}
 	t := &Task{Description: description, Goal: goal, ExplorationID: expID, LLMProfileID: llmProfileID, TimeoutSeconds: timeoutSeconds, PlanHeartbeatSeconds: planHeartbeatSeconds}
 	if err := tx.QueryRow(`
-INSERT INTO tasks(description, goal, exploration_id, llm_profile_id, timeout_seconds, plan_heartbeat_seconds) VALUES ($1,$2,$3,$4,$5,$6)
-RETURNING id, status, paused, created_at`, description, goal, expID, llmProfileID, timeoutSeconds, planHeartbeatSeconds).Scan(&t.ID, &t.Status, &t.Paused, &t.CreatedAt); err != nil {
+INSERT INTO tasks(description, goal, exploration_id, llm_profile_id, timeout_seconds, plan_heartbeat_seconds, company_id) VALUES ($1,$2,$3,$4,$5,$6,$7)
+RETURNING id, status, paused, created_at`, description, goal, expID, llmProfileID, timeoutSeconds, planHeartbeatSeconds, primary).Scan(&t.ID, &t.Status, &t.Paused, &t.CreatedAt); err != nil {
 		return nil, err
 	}
-	return t, tx.Commit()
+	if err := writeTaskCompanies(tx, t.ID, companyIDs); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	t.CompanyID = derefID(primary)
+	t.Companies = d.TaskCompanies(t.ID)
+	return t, nil
 }
 
-const taskCols = `id, description, goal, exploration_id, status, paused, llm_profile_id, COALESCE(parent_ref,''), created_at, completed_at, COALESCE(timeout_seconds,0), first_run_at, deadline_at, COALESCE(plan_heartbeat_seconds,0)`
+const taskCols = `id, description, goal, exploration_id, status, paused, llm_profile_id, COALESCE(parent_ref,''), created_at, completed_at, COALESCE(timeout_seconds,0), first_run_at, deadline_at, COALESCE(plan_heartbeat_seconds,0), COALESCE(company_id,0)`
 
 func scanTask(sc interface{ Scan(...any) error }) (*Task, error) {
 	var t Task
-	if err := sc.Scan(&t.ID, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.LLMProfileID, &t.ParentRef, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.FirstRunAt, &t.DeadlineAt, &t.PlanHeartbeatSeconds); err != nil {
+	if err := sc.Scan(&t.ID, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.LLMProfileID, &t.ParentRef, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.FirstRunAt, &t.DeadlineAt, &t.PlanHeartbeatSeconds, &t.CompanyID); err != nil {
 		return nil, err
 	}
 	return &t, nil
+}
+
+// dedupeIDs removes duplicate ids, preserving order.
+func dedupeIDs(ids []int64) []int64 {
+	seen := map[int64]bool{}
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+func derefID(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+// execer is satisfied by both *sql.DB and *sql.Tx.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// writeTaskCompanies replaces a task's company association set inside a transaction.
+func writeTaskCompanies(q execer, taskID int64, companyIDs []int64) error {
+	if _, err := q.Exec(`DELETE FROM task_companies WHERE task_id=$1`, taskID); err != nil {
+		return err
+	}
+	for _, cid := range companyIDs {
+		if _, err := q.Exec(`INSERT INTO task_companies(task_id, company_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, taskID, cid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetTaskCompanies replaces a task's company association set (primary = first).
+func (d *DB) SetTaskCompanies(taskID int64, companyIDs []int64) error {
+	companyIDs = dedupeIDs(companyIDs)
+	var primary *int64
+	if len(companyIDs) > 0 {
+		primary = &companyIDs[0]
+	}
+	if _, err := d.Exec(`UPDATE tasks SET company_id=$2 WHERE id=$1`, taskID, primary); err != nil {
+		return err
+	}
+	if err := writeTaskCompanies(d, taskID, companyIDs); err != nil {
+		return err
+	}
+	return nil
+}
+
+// TaskCompanies returns the companies associated with a task (id + name).
+func (d *DB) TaskCompanies(taskID int64) []CompanyRef {
+	rows, err := d.Query(`
+SELECT c.id, c.name FROM companies c
+JOIN task_companies tc ON tc.company_id = c.id
+WHERE tc.task_id=$1 ORDER BY c.id`, taskID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []CompanyRef
+	for rows.Next() {
+		var r CompanyRef
+		if err := rows.Scan(&r.ID, &r.Name); err != nil {
+			return out
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// TasksByCompany returns alive task ids associated with a company.
+func (d *DB) TasksByCompany(companyID int64) ([]int64, error) {
+	rows, err := d.Query(`
+SELECT DISTINCT t.id FROM tasks t
+JOIN task_companies tc ON tc.task_id = t.id
+WHERE tc.company_id=$1 AND t.deleted_at IS NULL`, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, nil
 }
 
 // SetParentRef records a task's parent task id (编排 agent spawn_task 关联).
@@ -112,6 +234,9 @@ func (d *DB) ListTasks() ([]*Task, error) {
 		}
 		out = append(out, t)
 	}
+	for _, t := range out {
+		t.Companies = d.TaskCompanies(t.ID)
+	}
 	return out, rows.Err()
 }
 
@@ -124,6 +249,7 @@ func (d *DB) GetTask(id int64) (*Task, error) {
 		}
 		return nil, err
 	}
+	t.Companies = d.TaskCompanies(id)
 	return t, nil
 }
 

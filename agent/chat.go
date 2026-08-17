@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -92,6 +93,13 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	base := withHostBash(actool.DefaultTools())
 	tools, def, cleanup := AugmentTools(ctx, agentKey, base)
 	defer cleanup()
+	{
+		names := make([]string, 0, len(tools))
+		for _, t := range tools {
+			names = append(names, t.Name())
+		}
+		log.Printf("[chat-debug %s] tools=%v deferred=%v", agentKey, names, def.Deferred)
+	}
 
 	system, boundary := deferredSystem(chatSystem(agentKey, sessionWorkDir), def)
 	opts := agentcore.Options{

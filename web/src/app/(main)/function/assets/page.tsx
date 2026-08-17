@@ -227,6 +227,7 @@ export default function AssetsPage() {
   const [counts, setCounts] = React.useState<Record<string, number>>({});
   const [tab, setTab] = React.useState("company");
   const [query, setQuery] = React.useState("");
+  const [companyFilter, setCompanyFilter] = React.useState<number | "all">("all");
   const [loaded, setLoaded] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [page, setPage] = React.useState(0);
@@ -326,7 +327,7 @@ export default function AssetsPage() {
     setSelected(new Set());
   }, [tab]);
 
-  React.useEffect(() => setPage(0), [tab, size, query]);
+  React.useEffect(() => setPage(0), [tab, size, query, companyFilter]);
 
   const dslMode = query.trim() !== "";
 
@@ -336,11 +337,12 @@ export default function AssetsPage() {
     const dsl = query.trim();
     setLoading(true);
     const offset = page * size;
+    const cid = companyFilter === "all" ? undefined : companyFilter;
     const run = async () => {
       try {
         const r = dsl
-          ? await api.searchAssets(dsl, tab, size, offset)
-          : await api.assets(tab, size, offset);
+          ? await api.searchAssets(dsl, tab, size, offset, cid)
+          : await api.assets(tab, size, offset, cid);
         setRows(r.assets);
         setTotal(r.total);
         setDslError("");
@@ -355,7 +357,7 @@ export default function AssetsPage() {
     };
     const tid = setTimeout(run, dsl ? 400 : 0);
     return () => clearTimeout(tid);
-  }, [tab, page, size, query, refreshKey]);
+  }, [tab, page, size, query, refreshKey, companyFilter]);
 
   const companyById = React.useMemo(() => {
     const m = new Map<number, string>();
@@ -404,6 +406,24 @@ export default function AssetsPage() {
           <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /> 刷新
           </Button>
+          {tab !== "company" && (
+            <Select
+              value={companyFilter === "all" ? "all" : String(companyFilter)}
+              onValueChange={(v) => setCompanyFilter(v === "all" ? "all" : Number(v))}
+            >
+              <SelectTrigger size="sm" className="w-40">
+                <SelectValue placeholder="企业" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部企业</SelectItem>
+                {companies.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <CompanyDialog onSaved={refresh} />
         </div>
       </div>

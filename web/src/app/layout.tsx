@@ -44,6 +44,8 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
             contentLayout={content_layout}
             navbarStyle={navbar_style}
             font={font}
+            sidebarVariant={sidebar_variant}
+            sidebarCollapsible={sidebar_collapsible}
           >
             {children}
             <Toaster />

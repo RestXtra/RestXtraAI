@@ -75,6 +75,43 @@ func (s *Server) pgDeleteTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"deleted": id})
 }
 
+// pgSetTaskCompanies replaces a task's company association set
+// (PUT /api/tasks/{id}/companies, body {company_ids: [...]}; first = primary).
+func (s *Server) pgSetTaskCompanies(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	id, ok := pathInt(r, "id")
+	if !ok || id <= 0 {
+		writeErr(w, 400, "invalid task id")
+		return
+	}
+	if t, _ := pg.GetTask(id); t == nil {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	var req struct {
+		CompanyIDs []int64 `json:"company_ids"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, "invalid JSON: "+err.Error())
+		return
+	}
+	if err := pg.SetTaskCompanies(id, req.CompanyIDs); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	// refresh the in-memory task handle so the list reflects the change immediately
+	if t, ok := s.m.Task(strconv.FormatInt(id, 10)); ok {
+		if pt, err := pg.GetTask(id); err == nil && pt != nil {
+			t.CompanyID = pt.CompanyID
+			t.Companies = pt.Companies
+		}
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
 // ---------- agents ----------
 
 func (s *Server) pgListAgents(w http.ResponseWriter, r *http.Request) {

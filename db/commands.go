@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -223,9 +224,127 @@ func (d *DB) GetLLMRecord(id int64) (*LLMRecord, error) {
 	return &r, nil
 }
 
+// DeleteLLMRecord removes one LLM record.
+func (d *DB) DeleteLLMRecord(id int64) error {
+	_, err := d.Exec(`DELETE FROM llm_records WHERE id=$1`, id)
+	return err
+}
+
+// DeleteLLMRecords removes a set of LLM records by id. Returns rows removed.
+func (d *DB) DeleteLLMRecords(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res, err := d.Exec(`DELETE FROM llm_records WHERE id IN (`+idList(ids)+`)`, idsToArgs(ids)...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// DeleteCommands removes a set of tool-execution records (activity tool_use rows
+// plus their paired tool_result rows). Returns rows removed.
+func (d *DB) DeleteCommands(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	// collect tool_use_ids for the requested tool_use rows so the paired
+	// tool_result rows can be removed together.
+	rows, err := d.Query(`SELECT tool_use_id FROM activity WHERE id IN (`+idList(ids)+`) AND kind='tool_use' AND tool_use_id IS NOT NULL`, idsToArgs(ids)...)
+	if err != nil {
+		return 0, err
+	}
+	var toolUseIDs []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		toolUseIDs = append(toolUseIDs, s)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	removed := int64(0)
+	if len(toolUseIDs) > 0 {
+		if res, err := d.Exec(`DELETE FROM activity WHERE tool_use_id IN (`+idListStr(toolUseIDs)+`) AND kind='tool_result'`, strsToArgs(toolUseIDs)...); err == nil {
+			if n, _ := res.RowsAffected(); n > 0 {
+				removed += n
+			}
+		}
+	}
+	res, err := d.Exec(`DELETE FROM activity WHERE id IN (`+idList(ids)+`) AND kind='tool_use'`, idsToArgs(ids)...)
+	if err != nil {
+		return removed, err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		removed += n
+	}
+	return removed, nil
+}
+
+// ClearCommands removes all tool-execution records (tool_use + paired tool_result).
+// Returns rows removed.
+func (d *DB) ClearCommands() (int64, error) {
+	res, err := d.Exec(`DELETE FROM activity WHERE kind IN ('tool_use','tool_result')`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// ClearLLMRecords empties the entire LLM record table and returns rows removed.
+func (d *DB) ClearLLMRecords() (int64, error) {
+	res, err := d.Exec(`DELETE FROM llm_records`)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 func nullIfEmpty(s string) any {
 	if s == "" {
 		return nil
 	}
 	return s
+}
+
+// idList builds "($1,$2,…)" style placeholder text for an IN clause.
+func idList(ids []int64) string {
+	parts := make([]string, len(ids))
+	for i := range ids {
+		parts[i] = fmt.Sprintf("$%d", i+1)
+	}
+	return strings.Join(parts, ",")
+}
+
+// idsToArgs converts int64 ids into a []any for query args.
+func idsToArgs(ids []int64) []any {
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	return args
+}
+
+// idListStr builds "($1,$2,…)" placeholder text for a string IN clause.
+func idListStr(ids []string) string {
+	parts := make([]string, len(ids))
+	for i := range ids {
+		parts[i] = fmt.Sprintf("$%d", i+1)
+	}
+	return strings.Join(parts, ",")
+}
+
+// strsToArgs converts string ids into a []any for query args.
+func strsToArgs(ids []string) []any {
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	return args
 }

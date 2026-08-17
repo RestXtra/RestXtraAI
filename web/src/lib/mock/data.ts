@@ -29,6 +29,8 @@ export const tasks: Task[] = [
     paused: false, active: true, in_flight: 3, stalled: false,
     goals_total: 5, goals_met: 2, engine_mode: "exploring",
     llm_profile_id: 1,
+    company_id: 1,
+    companies: [{ id: 1, name: "Acme Corp" }],
     tokens: { input_tokens: 1284500, output_tokens: 96320, cache_read_tokens: 890400, cache_write_tokens: 132000 },
   },
   {
@@ -43,6 +45,8 @@ export const tasks: Task[] = [
     paused: false, active: false, in_flight: 2, stalled: false,
     goals_total: 4, goals_met: 1, engine_mode: "exploring",
     llm_profile_id: 1,
+    company_id: 1,
+    companies: [{ id: 1, name: "Acme Corp" }],
     tokens: { input_tokens: 642300, output_tokens: 51200, cache_read_tokens: 401000, cache_write_tokens: 60000 },
   },
   {
@@ -152,16 +156,16 @@ export const assetCounts: Record<string, number> = assets.reduce<Record<string, 
 
 // ── Findings ─────────────────────────────────────────────────────────────────
 export const findings: Finding[] = [
-  { id: "f-1", vulnclass: "SQL Injection", severity: "high", summary: "www.acme.com/search q 参数存在报错型 SQL 注入", evidence: "GET /search?q=1' AND 1=CONVERT(int,@@version)-- → 返回 MSSQL 版本报错，可读库结构。", intent_id: "i-2", task_id: "t-acme-web", task_description: "Acme 官网与后台外部渗透", ts: T("2026-07-26T01:20:00Z") },
-  { id: "f-2", vulnclass: "IDOR", severity: "high", summary: "api.acme.com/v1/orders?id= 可越权读取他人订单", evidence: "将 id=1001 改为 id=1002 返回他人订单（含收货地址、手机号），无归属校验。", intent_id: "i-5", task_id: "t-acme-api", task_description: "api.acme.com 越权与注入测试", ts: T("2026-07-26T02:44:00Z") },
-  { id: "f-3", vulnclass: "Weak JWT", severity: "high", summary: "API JWT 使用弱密钥、可离线爆破伪造", evidence: "HS256，密钥 'secret'，john 5 秒破解 → 可伪造任意 sub 越权。", task_id: "t-acme-api", task_description: "api.acme.com 越权与注入测试", ts: T("2026-07-26T03:02:00Z") },
-  { id: "f-4", vulnclass: "Reflected XSS", severity: "medium", summary: "搜索页对 q 参数未转义，反射型 XSS", evidence: "q=<script>alert(document.domain)</script> 原样回显于结果标题。", task_id: "t-acme-web", task_description: "Acme 官网与后台外部渗透", ts: T("2026-07-25T22:10:00Z") },
-  { id: "f-5", vulnclass: "Exposed .git", severity: "medium", summary: "www.acme.com 暴露 .git 目录，可还原源码", evidence: "GET /.git/HEAD → 200；git-dumper 还原出后端源码与数据库连接串注释。", task_id: "t-acme-web", task_description: "Acme 官网与后台外部渗透", ts: T("2026-07-25T20:30:00Z") },
-  { id: "f-6", vulnclass: "Default Credentials", severity: "high", summary: "admin.acme.com 后台默认口令 admin/admin123", evidence: "登录成功，进入管理后台，可管理用户与订单。", intent_id: "i-3", task_id: "t-acme-web", task_description: "Acme 官网与后台外部渗透", ts: T("2026-07-26T03:50:00Z") },
-  { id: "f-7", vulnclass: "Open Redirect", severity: "low", summary: "登录后 next 参数任意跳转", evidence: "/login?next=https://evil.example 登录后 302 跳到外站。", task_id: "t-acme-web", task_description: "Acme 官网与后台外部渗透", ts: T("2026-07-25T19:12:00Z") },
-  { id: "f-8", vulnclass: "Missing Rate Limit", severity: "medium", summary: "登录接口无速率限制，可暴力破解", evidence: "1000 次/分钟无锁定，无验证码。", task_id: "t-acme-web", task_description: "Acme 官网与后台外部渗透", ts: T("2026-07-25T18:40:00Z") },
-  { id: "f-9", vulnclass: "Verbose Error", severity: "low", summary: "API 500 返回堆栈，泄露路径与框架版本", evidence: "触发 500 返回 Node.js 堆栈，泄露绝对路径与依赖版本。", task_id: "t-acme-api", task_description: "api.acme.com 越权与注入测试", ts: T("2026-07-25T23:05:00Z") },
-  { id: "f-10", vulnclass: "Outdated Component", severity: "medium", summary: "shop 使用存在已知 RCE 的老版本组件", evidence: "指纹识别到组件 v2.3.1，对应 CVE-2024-xxxx 反序列化 RCE。", task_id: "t-shop-pay", task_description: "shop.acme.com 支付与订单链路", ts: T("2026-07-23T15:00:00Z") },
+  { id: "f-1", vulnclass: "SQL Injection", severity: "high", summary: "www.acme.com/search q 参数存在报错型 SQL 注入", evidence: "GET /search?q=1' AND 1=CONVERT(int,@@version)-- → 返回 MSSQL 版本报错，可读库结构。", intent_id: "i-2", task_id: "t-acme-web", task_description: "Acme 官网与后台外部渗透", company_ids: [1], ts: T("2026-07-26T01:20:00Z") },
+  { id: "f-2", vulnclass: "IDOR", severity: "high", summary: "api.acme.com/v1/orders?id= 可越权读取他人订单", evidence: "将 id=1001 改为 id=1002 返回他人订单（含收货地址、手机号），无归属校验。", intent_id: "i-5", task_id: "t-acme-api", task_description: "api.acme.com 越权与注入测试", company_ids: [1], ts: T("2026-07-26T02:44:00Z") },
+  { id: "f-3", vulnclass: "Weak JWT", severity: "high", summary: "API JWT 使用弱密钥、可离线爆破伪造", evidence: "HS256，密钥 'secret'，john 5 秒破解 → 可伪造任意 sub 越权。", task_id: "t-acme-api", task_description: "api.acme.com 越权与注入测试", company_ids: [1], ts: T("2026-07-26T03:02:00Z") },
+  { id: "f-4", vulnclass: "Reflected XSS", severity: "medium", summary: "搜索页对 q 参数未转义，反射型 XSS", evidence: "q=<script>alert(document.domain)</script> 原样回显于结果标题。", task_id: "t-acme-web", task_description: "Acme 官网与后台外部渗透", company_ids: [1], ts: T("2026-07-25T22:10:00Z") },
+  { id: "f-5", vulnclass: "Exposed .git", severity: "medium", summary: "www.acme.com 暴露 .git 目录，可还原源码", evidence: "GET /.git/HEAD → 200；git-dumper 还原出后端源码与数据库连接串注释。", task_id: "t-acme-web", task_description: "Acme 官网与后台外部渗透", company_ids: [1], ts: T("2026-07-25T20:30:00Z") },
+  { id: "f-6", vulnclass: "Default Credentials", severity: "high", summary: "admin.acme.com 后台默认口令 admin/admin123", evidence: "登录成功，进入管理后台，可管理用户与订单。", intent_id: "i-3", task_id: "t-acme-web", task_description: "Acme 官网与后台外部渗透", company_ids: [1], ts: T("2026-07-26T03:50:00Z") },
+  { id: "f-7", vulnclass: "Open Redirect", severity: "low", summary: "登录后 next 参数任意跳转", evidence: "/login?next=https://evil.example 登录后 302 跳到外站。", task_id: "t-acme-web", task_description: "Acme 官网与后台外部渗透", company_ids: [1], ts: T("2026-07-25T19:12:00Z") },
+  { id: "f-8", vulnclass: "Missing Rate Limit", severity: "medium", summary: "登录接口无速率限制，可暴力破解", evidence: "1000 次/分钟无锁定，无验证码。", task_id: "t-acme-web", task_description: "Acme 官网与后台外部渗透", company_ids: [1], ts: T("2026-07-25T18:40:00Z") },
+  { id: "f-9", vulnclass: "Verbose Error", severity: "low", summary: "API 500 返回堆栈，泄露路径与框架版本", evidence: "触发 500 返回 Node.js 堆栈，泄露绝对路径与依赖版本。", task_id: "t-acme-api", task_description: "api.acme.com 越权与注入测试", company_ids: [1], ts: T("2026-07-25T23:05:00Z") },
+  { id: "f-10", vulnclass: "Outdated Component", severity: "medium", summary: "shop 使用存在已知 RCE 的老版本组件", evidence: "指纹识别到组件 v2.3.1，对应 CVE-2024-xxxx 反序列化 RCE。", task_id: "t-shop-pay", task_description: "shop.acme.com 支付与订单链路", company_ids: [1], ts: T("2026-07-23T15:00:00Z") },
 ];
 
 // ── Exploration graph (active task) ──────────────────────────────────────────

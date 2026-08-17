@@ -31,11 +31,19 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
 import type {
   Activity,
   Agent,
+  CompanyStat,
   Finding,
   InterceptPending,
   LLMProfile,
@@ -164,6 +172,8 @@ export default function DashboardPage() {
   const [skills, setSkills] = React.useState<SkillItem[]>([]);
   const [tools, setTools] = React.useState<Tool[]>([]);
   const [llmProfiles, setLLMProfiles] = React.useState<LLMProfile[]>([]);
+  const [companyStats, setCompanyStats] = React.useState<CompanyStat[]>([]);
+  const [companyFilter, setCompanyFilter] = React.useState<number | "all">("all");
 
   // fast poll: tasks, findings, stats, pending, activity (every 5s)
   React.useEffect(() => {
@@ -171,12 +181,14 @@ export default function DashboardPage() {
     const load = async () => {
       try {
         const [tr, fr, sr, sets, pr, act, tok, ctok] = await Promise.all([
-          api.tasks(),
-          api.findings(),
+          api.tasks(companyFilter === "all" ? undefined : companyFilter),
+          api.findings(undefined, companyFilter === "all" ? undefined : companyFilter),
           api.stats(),
           api.settings(),
           api.interceptPending(),
-          api.activity(undefined, { limit: 30 }),
+          companyFilter === "all"
+            ? api.activity(undefined, { limit: 30 })
+            : api.activityByCompany(companyFilter, 30),
           api.tokenStats(),
           api.conversationTokens(),
         ]);
@@ -196,7 +208,7 @@ export default function DashboardPage() {
     load();
     const t = setInterval(load, 5000);
     return () => { alive = false; clearInterval(t); };
-  }, []);
+  }, [companyFilter]);
 
   // slow poll: traffic, assets, system-static (every 15s)
   React.useEffect(() => {
@@ -206,7 +218,7 @@ export default function DashboardPage() {
         const [traf, counts, agentList, mcpList, skillList, toolList, profileList] =
           await Promise.all([
             api.traffic(0, 50),
-            api.assetCounts(),
+            api.assetCounts(companyFilter === "all" ? undefined : companyFilter),
             api.agents(),
             api.mcpServers(),
             api.skills(),
@@ -227,6 +239,16 @@ export default function DashboardPage() {
     };
     load();
     const t = setInterval(load, 15000);
+    return () => { alive = false; clearInterval(t); };
+  }, [companyFilter]);
+
+  // company overview cards (30s refresh)
+  React.useEffect(() => {
+    let alive = true;
+    const load = () =>
+      api.dashboardCompanies().then((cs) => { if (alive) setCompanyStats(cs); }).catch(() => {});
+    load();
+    const t = setInterval(load, 30000);
     return () => { alive = false; clearInterval(t); };
   }, []);
 
@@ -290,22 +312,26 @@ export default function DashboardPage() {
 
   const assetMax = assetByType[0]?.[1] ?? 1;
 
-  // traffic status code breakdown
+  // traffic status code breakdown (filtered by selected company's asset hosts)
   const trafficByCodes = React.useMemo(() => {
+    const hosts = companyFilter === "all" ? null : companyStats.find((c) => c.id === companyFilter)?.hosts;
+    const list = hosts ? traffic.filter((e) => hosts.some((h) => e.host.includes(h))) : traffic;
     const m: Record<number, number> = {};
-    for (const e of traffic) {
+    for (const e of list) {
       const bucket = Math.floor(e.status / 100) * 100;
       m[bucket] = (m[bucket] ?? 0) + 1;
     }
     return Object.entries(m)
       .sort(([a], [b]) => Number(a) - Number(b))
       .map(([code, n]) => ({ code: Number(code), n }));
-  }, [traffic]);
+  }, [traffic, companyFilter, companyStats]);
 
   const trafficMax = Math.max(...trafficByCodes.map((x) => x.n), 1);
-  const recentTraffic = [...traffic]
-    .sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts))
-    .slice(0, 5);
+  const recentTraffic = React.useMemo(() => {
+    const hosts = companyFilter === "all" ? null : companyStats.find((c) => c.id === companyFilter)?.hosts;
+    const list = hosts ? traffic.filter((e) => hosts.some((h) => e.host.includes(h))) : traffic;
+    return [...list].sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts)).slice(0, 5);
+  }, [traffic, companyFilter, companyStats]);
 
   // system
   const activeProfile = llmProfiles.find((p) => p.is_default);
@@ -441,12 +467,63 @@ export default function DashboardPage() {
           <h1 className="text-lg font-semibold tracking-tight">总览</h1>
           <p className="text-xs text-muted-foreground">系统全局状态 · 实时刷新</p>
         </div>
-        <Link href="/function/tasks">
-          <button className="flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-90">
-            <PlusIcon className="size-3.5" />
-            新建任务
+        <div className="flex items-center gap-2">
+          <Select
+            value={companyFilter === "all" ? "all" : String(companyFilter)}
+            onValueChange={(v) => setCompanyFilter(v === "all" ? "all" : Number(v))}
+          >
+            <SelectTrigger size="sm" className="w-44">
+              <SelectValue placeholder="全部企业" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部企业</SelectItem>
+              {companyStats.map((c) => (
+                <SelectItem key={c.id} value={String(c.id)}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Link href="/function/tasks">
+            <button className="flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-90">
+              <PlusIcon className="size-3.5" />
+              新建任务
+            </button>
+          </Link>
+        </div>
+      </div>
+
+      {/* ── 企业选择器（选中后下方所有数据按企业过滤） ── */}
+      <div className="flex items-center gap-2">
+        <Select
+          value={companyFilter === "all" ? "all" : String(companyFilter)}
+          onValueChange={(v) => setCompanyFilter(v === "all" ? "all" : Number(v))}
+        >
+          <SelectTrigger size="sm" className="w-56">
+            <SelectValue placeholder="全部企业" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部企业</SelectItem>
+            {companyStats.map((c) => (
+              <SelectItem key={c.id} value={String(c.id)}>
+                {c.name}（资产 {c.assets} · 任务 {c.tasks} · 发现 {c.findings}）
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {companyFilter !== "all" && (
+          <button
+            onClick={() => setCompanyFilter("all")}
+            className="rounded-md px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground"
+          >
+            清除筛选
           </button>
-        </Link>
+        )}
+        <span className="text-[10px] text-muted-foreground">
+          {companyFilter === "all"
+            ? "显示全部企业的数据"
+            : companyStats.find((c) => c.id === companyFilter)?.name ?? "所选企业"}
+        </span>
       </div>
 
       {/* ── Row 1: 5 stat cards ── */}

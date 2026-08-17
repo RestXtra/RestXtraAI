@@ -16,6 +16,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -67,6 +77,51 @@ export default function PlatformRolesPage() {
   const [permRole, setPermRole] = React.useState<PlatformRole | null>(null);
   const [permKeys, setPermKeys] = React.useState<string[]>([]);
   const [form, setForm] = React.useState({ name: "", description: "", scope: "own" });
+
+  // batch selection & delete
+  const [checked, setChecked] = React.useState<Set<number>>(new Set());
+  const [deleteAll, setDeleteAll] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+
+  const toggleCheck = (id: number) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleCheckAll = (ids: number[]) => {
+    setChecked((prev) => {
+      const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  const deleteableIds = React.useMemo(() => roles.filter((r) => !r.is_system).map((r) => r.id), [roles]);
+
+  const confirmBatchDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await api.deletePlatformRoles(Array.from(checked), deleteAll);
+      const msg = res.skipped?.length
+        ? `已删除 ${res.deleted.length} 个角色；跳过：${res.skipped.join("、")}`
+        : `已删除 ${res.deleted.length} 个角色`;
+      toast.success(msg);
+      setChecked(new Set());
+      setDeleteOpen(false);
+      load();
+    } catch (e) {
+      toast.error((e as Error).message ?? "删除失败");
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const load = React.useCallback(() => {
     Promise.all([api.platformRoles(), api.platformPermissions()])
@@ -147,9 +202,25 @@ export default function PlatformRolesPage() {
             <p className="text-sm text-muted-foreground">RBAC 角色与权限点绑定；系统角色不可删除。</p>
           </div>
           {canWrite && (
-            <Button onClick={() => setCreateOpen(true)}>
-              <PlusIcon className="size-4" /> 新建角色
-            </Button>
+            <div className="flex items-center gap-2">
+              {checked.size > 0 && (
+                <>
+                  <Button variant="destructive" onClick={() => { setDeleteAll(false); setDeleteOpen(true); }}>
+                    <Trash2Icon className="size-4" /> 删除已选 ({checked.size})
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+                  >
+                    <Trash2Icon className="size-4" /> 删除全部
+                  </Button>
+                </>
+              )}
+              <Button onClick={() => setCreateOpen(true)}>
+                <PlusIcon className="size-4" /> 新建角色
+              </Button>
+            </div>
           )}
         </div>
 
@@ -157,6 +228,15 @@ export default function PlatformRolesPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8 pr-0">
+                  {canWrite && (
+                    <Checkbox
+                      checked={deleteableIds.length > 0 && deleteableIds.every((id) => checked.has(id))}
+                      onCheckedChange={() => toggleCheckAll(deleteableIds)}
+                      aria-label="全选"
+                    />
+                  )}
+                </TableHead>
                 <TableHead>角色</TableHead>
                 <TableHead>说明</TableHead>
                 <TableHead>资源范围</TableHead>
@@ -167,15 +247,24 @@ export default function PlatformRolesPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">加载中…</TableCell>
+                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">加载中…</TableCell>
                 </TableRow>
               ) : roles.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">暂无角色</TableCell>
+                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">暂无角色</TableCell>
                 </TableRow>
               ) : (
                 roles.map((r) => (
                   <TableRow key={r.id}>
+                    <TableCell className="w-8 pr-0">
+                      {canWrite && !r.is_system && (
+                        <Checkbox
+                          checked={checked.has(r.id)}
+                          onCheckedChange={() => toggleCheck(r.id)}
+                          aria-label={`选择 ${r.name}`}
+                        />
+                      )}
+                    </TableCell>
                     <TableCell className="font-medium">
                       {r.name}
                       {r.is_system && <Badge variant="secondary" className="ml-2">系统</Badge>}
@@ -286,6 +375,32 @@ export default function PlatformRolesPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* 批量删除角色 */}
+        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>确认删除角色</AlertDialogTitle>
+              <AlertDialogDescription>
+                {deleteAll ? (
+                  <>将删除全部可删除的角色（系统角色自动跳过），此操作不可撤销。</>
+                ) : (
+                  <>将删除 <span className="font-semibold tabular-nums">{checked.size}</span> 个角色（系统角色自动跳过），此操作不可撤销。</>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => { e.preventDefault(); confirmBatchDelete(); }}
+                disabled={deleting}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deleting ? "删除中…" : "确认删除"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </PermissionGate>
   );

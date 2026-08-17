@@ -102,6 +102,16 @@ func (d *DB) AuditRetentionDays(days int) (int64, error) {
 	return n, nil
 }
 
+// ClearAudit empties the entire audit log and returns how many rows were removed.
+func (d *DB) ClearAudit() (int64, error) {
+	res, err := d.Exec(`DELETE FROM audit_logs`)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // CountAudit returns the total number of audit rows (used by the dashboard).
 func (d *DB) CountAudit() (int, error) {
 	var n int

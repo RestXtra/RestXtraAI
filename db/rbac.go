@@ -143,6 +143,18 @@ func (d *DB) DeleteUser(id int64) error {
 	return err
 }
 
+// DeleteUsers removes a set of users (role bindings cascade). Returns rows removed.
+func (d *DB) DeleteUsers(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res, err := d.Exec(`DELETE FROM users WHERE id IN (`+idList(ids)+`)`, idsToArgs(ids)...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // SetUserPassword resets a user's bcrypt hash.
 func (d *DB) SetUserPassword(id int64, hash string) error {
 	_, err := d.Exec(`UPDATE users SET password_hash=$1 WHERE id=$2`, hash, id)
@@ -228,6 +240,18 @@ func (d *DB) UpdateRole(id int64, description string, scope *string) error {
 func (d *DB) DeleteRole(id int64) error {
 	_, err := d.Exec(`DELETE FROM roles WHERE id=$1`, id)
 	return err
+}
+
+// DeleteRoles removes a set of roles (permission/user bindings cascade). Returns rows removed.
+func (d *DB) DeleteRoles(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res, err := d.Exec(`DELETE FROM roles WHERE id IN (`+idList(ids)+`)`, idsToArgs(ids)...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // --------------------------- role ↔ user --------------------------------
