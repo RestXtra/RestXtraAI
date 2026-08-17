@@ -1,8 +1,9 @@
 RestXtra AI NOTICE
 ==================
 
-RestXtra AI is an AI penetration testing platform (Go backend + Next.js
-frontend), released under the Apache License, Version 2.0 (see LICENSE).
+RestXtra AI is an AI-driven infrastructure analysis and automation
+collaboration platform (Go backend + Next.js frontend), released under the
+Apache License, Version 2.0 (see LICENSE).
 
 - Project: RestXtra AI
 - License: Apache License, Version 2.0

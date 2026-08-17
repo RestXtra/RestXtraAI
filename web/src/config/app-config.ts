@@ -7,7 +7,7 @@ export const APP_CONFIG = {
   version: packageJson.version,
   copyright: `© ${currentYear}, RestXtra AI.`,
   meta: {
-    title: "RestXtra AI — 自主渗透测试控制台",
-    description: "LLM 驱动的自主渗透测试平台控制台",
+    title: "RestXtra AI — 自动化分析协作平台",
+    description: "LLM 驱动的基础设施分析与自动化协作平台",
   },
 };
