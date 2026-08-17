@@ -1,8 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { FileTextIcon, CopyIcon, CheckIcon } from "lucide-react";
+
+import { CheckIcon, CopyIcon, DownloadIcon, FileTextIcon } from "lucide-react";
 import { toast } from "sonner";
+
+import { Markdown } from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
@@ -39,6 +42,17 @@ export function ReportTab({ taskId }: { taskId: string }) {
     setTimeout(() => setCopied(false), 1500);
   }
 
+  function download() {
+    if (!report) return;
+    const blob = new Blob([report], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `report-${taskId || "task"}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between">
@@ -47,24 +61,29 @@ export function ReportTab({ taskId }: { taskId: string }) {
         </CardTitle>
         <div className="flex gap-2">
           {report && (
-            <Button size="sm" variant="outline" onClick={copy}>
-              {copied ? <CheckIcon /> : <CopyIcon />} 复制
-            </Button>
+            <>
+              <Button size="sm" variant="outline" onClick={copy}>
+                {copied ? <CheckIcon /> : <CopyIcon />} 复制
+              </Button>
+              <Button size="sm" variant="outline" onClick={download}>
+                <DownloadIcon /> 下载 .md
+              </Button>
+            </>
           )}
         </div>
       </CardHeader>
       <CardContent>
         {loading ? (
-          <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-16 text-sm text-muted-foreground">
+          <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-16 text-muted-foreground text-sm">
             <FileTextIcon className="size-8 opacity-40" />
             加载中…
           </div>
         ) : report ? (
-          <pre className="max-h-[60vh] overflow-auto rounded-md border bg-muted/40 p-4 font-mono text-xs whitespace-pre-wrap">
-            {report}
-          </pre>
+          <div className="rounded-md border bg-muted/40 p-4">
+            <Markdown text={report} />
+          </div>
         ) : (
-          <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-16 text-sm text-muted-foreground">
+          <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-16 text-muted-foreground text-sm">
             <FileTextIcon className="size-8 opacity-40" />
             暂无报告
           </div>
