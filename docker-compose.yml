@@ -17,7 +17,7 @@ services:
     restart: unless-stopped
 
   restxtra:
-    image: restxtra/restxtra-ai:${RESTXTRA_TAG:-latest}
+    image: ghcr.io/RestXtra/RestXtraAI:${RESTXTRA_TAG:-latest}
     depends_on:
       postgres:
         condition: service_healthy

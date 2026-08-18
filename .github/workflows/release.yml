@@ -4,7 +4,8 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write # 创建 Release 需要
+  contents: write  # 创建 Release 需要
+  packages: write  # 推送 GHCR 镜像需要
 
 jobs:
   # ① 前端静态导出（一次），产物给交叉编译各平台复用
@@ -92,11 +93,14 @@ jobs:
           files: dist/*.zip
           generate_release_notes: true
 
-  # ④ 多架构镜像 → 推 Docker Hub（复用 binaries 编好的 Linux 二进制，
+  # ④ 多架构镜像 → 推 GitHub Packages（GHCR，复用 binaries 编好的 Linux 二进制，
   #    镜像里只装工具 + 放二进制；arm64 仅需模拟 apt 层，构建快很多）
   docker:
     needs: binaries
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4 # 取 Dockerfile 与 skills/
       - uses: actions/download-artifact@v4
@@ -111,12 +115,13 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: restxtra/restxtra-ai
+          images: ghcr.io/RestXtra/RestXtraAI
           tags: |
             type=ref,event=tag
             type=raw,value=latest
