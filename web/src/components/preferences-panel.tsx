@@ -1,9 +1,9 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Button } from "@/components/ui/button";
 import { type FontKey, fontOptions } from "@/lib/fonts/registry";
 import type { ContentLayout, NavbarStyle, SidebarCollapsible, SidebarVariant } from "@/lib/preferences/layout";
 import {
@@ -68,6 +68,10 @@ export function PreferencesPanel() {
     setSidebarVariant(value);
     applySidebarVariant(value);
     void persistPreference("sidebar_variant", value);
+    // 若本页在 /settings 的 iframe 中，通知父页面同步侧栏。
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: "restxtra:pref", key: "sidebar_variant", value }, "*");
+    }
   };
 
   const onSidebarCollapseModeChange = (value: SidebarCollapsible | "") => {
@@ -75,6 +79,9 @@ export function PreferencesPanel() {
     setSidebarCollapsible(value);
     applySidebarCollapsible(value);
     void persistPreference("sidebar_collapsible", value);
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: "restxtra:pref", key: "sidebar_collapsible", value }, "*");
+    }
   };
 
   const onFontChange = (value: FontKey | "") => {
@@ -97,12 +104,12 @@ export function PreferencesPanel() {
   return (
     <div className="flex flex-col gap-5">
       <div className="space-y-1.5">
-        <h4 className="text-sm font-medium leading-none">界面与布局</h4>
-        <p className="text-xs text-muted-foreground">自定义仪表盘的布局与外观偏好。</p>
+        <h4 className="font-medium text-sm leading-none">界面与布局</h4>
+        <p className="text-muted-foreground text-xs">自定义仪表盘的布局与外观偏好。</p>
       </div>
       <div className="space-y-3 **:data-[slot=toggle-group]:w-full **:data-[slot=toggle-group-item]:flex-1 **:data-[slot=toggle-group-item]:text-xs">
         <div className="space-y-1">
-          <Label className="text-xs font-medium">主题预设</Label>
+          <Label className="font-medium text-xs">主题预设</Label>
           <Select value={themePreset} onValueChange={onThemePresetChange}>
             <SelectTrigger size="sm" className="w-full text-xs">
               <SelectValue placeholder="选择预设" />
@@ -127,7 +134,7 @@ export function PreferencesPanel() {
         </div>
 
         <div className="space-y-1">
-          <Label className="text-xs font-medium">字体</Label>
+          <Label className="font-medium text-xs">字体</Label>
           <Select value={font} onValueChange={onFontChange}>
             <SelectTrigger size="sm" className="w-full text-xs">
               <SelectValue placeholder="选择字体" />
@@ -145,7 +152,7 @@ export function PreferencesPanel() {
         </div>
 
         <div className="space-y-1">
-          <Label className="text-xs font-medium">主题模式</Label>
+          <Label className="font-medium text-xs">主题模式</Label>
           <ToggleGroup
             size="sm"
             spacing={0}
@@ -167,7 +174,7 @@ export function PreferencesPanel() {
         </div>
 
         <div className="space-y-1">
-          <Label className="text-xs font-medium">页面布局</Label>
+          <Label className="font-medium text-xs">页面布局</Label>
           <ToggleGroup
             size="sm"
             spacing={0}
@@ -186,7 +193,7 @@ export function PreferencesPanel() {
         </div>
 
         <div className="space-y-1">
-          <Label className="text-xs font-medium">顶栏行为</Label>
+          <Label className="font-medium text-xs">顶栏行为</Label>
           <ToggleGroup
             size="sm"
             spacing={0}
@@ -205,7 +212,7 @@ export function PreferencesPanel() {
         </div>
 
         <div className="space-y-1">
-          <Label className="text-xs font-medium">侧栏样式</Label>
+          <Label className="font-medium text-xs">侧栏样式</Label>
           <ToggleGroup
             size="sm"
             spacing={0}
@@ -227,7 +234,7 @@ export function PreferencesPanel() {
         </div>
 
         <div className="space-y-1">
-          <Label className="text-xs font-medium">侧栏折叠方式</Label>
+          <Label className="font-medium text-xs">侧栏折叠方式</Label>
           <ToggleGroup
             size="sm"
             spacing={0}

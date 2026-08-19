@@ -4,16 +4,10 @@ import type { ReactNode } from "react";
 
 import { usePathname } from "next/navigation";
 
-import { Separator } from "@/components/ui/separator";
-import { SidebarTrigger } from "@/components/ui/sidebar";
+import { usePageTitle } from "@/hooks/use-page-title";
 import { cn } from "@/lib/utils";
-import { useCurrentUser } from "@/hooks/use-current-user";
 
-import { AccountSwitcher } from "./sidebar/account-switcher";
-import { SearchDialog } from "./sidebar/search-dialog";
-import { ThemeSwitcher } from "./sidebar/theme-switcher";
-
-// 任务详情页保持原样：它自带头部/Tabs 与内边距，这里不再叠加全局头部和 padding。
+// 任务详情页、设置页保持原样：它们自带头部/Tabs 与内边距，不再叠加全局头部和 padding。
 function isFullBleed(pathname: string) {
   const p = (() => {
     try {
@@ -22,12 +16,18 @@ function isFullBleed(pathname: string) {
       return pathname;
     }
   })();
-  return p.startsWith("/function/tasks/");
+  return p.startsWith("/function/tasks/") || p.startsWith("/settings");
 }
 
-export function MainContent({ children }: { children: ReactNode }) {
-  const currentUser = useCurrentUser();
+export function MainContent({ children, embed }: { children: ReactNode; embed?: boolean }) {
   const pathname = usePathname();
+  const title = usePageTitle();
+
+  // embed 模式（iframe 内嵌到 /settings）：无全局头部；提供统一内边距，
+  // 让依赖外层 padding 的管理页（LLM/工具等）不贴顶贴边。
+  if (embed) {
+    return <div className="h-full w-full overflow-y-auto p-4 md:p-6">{children}</div>;
+  }
 
   if (isFullBleed(pathname)) {
     return <>{children}</>;
@@ -38,22 +38,12 @@ export function MainContent({ children }: { children: ReactNode }) {
       <header
         className={cn(
           "flex h-12 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12",
+          "bg-[linear-gradient(90deg,#dff5ee_0%,#ffffff_82%)]",
           "[html[data-navbar-style=sticky]_&]:sticky [html[data-navbar-style=sticky]_&]:top-0 [html[data-navbar-style=sticky]_&]:z-50 [html[data-navbar-style=sticky]_&]:overflow-hidden [html[data-navbar-style=sticky]_&]:rounded-t-[inherit] [html[data-navbar-style=sticky]_&]:bg-background/50 [html[data-navbar-style=sticky]_&]:backdrop-blur-md",
         )}
       >
-        <div className="flex w-full items-center justify-between px-4 lg:px-6">
-          <div className="flex items-center gap-1 lg:gap-2">
-            <SidebarTrigger className="-ml-1" />
-            <Separator
-              orientation="vertical"
-              className="mx-2 data-[orientation=vertical]:h-4 data-[orientation=vertical]:self-center"
-            />
-            <SearchDialog />
-          </div>
-          <div className="flex items-center gap-2">
-            <ThemeSwitcher />
-            <AccountSwitcher users={[currentUser]} />
-          </div>
+        <div className="flex w-full items-center px-4 lg:px-6">
+          <h1 className="truncate font-medium text-sm">{title}</h1>
         </div>
       </header>
       <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 has-data-[content-padding=false]:p-0 md:p-6 md:has-data-[content-padding=false]:p-0">

@@ -21,7 +21,7 @@ export default function LoginPage() {
   useEffect(() => {
     // 已登录直接进主界面（静态导出下无 middleware 代劳这层跳转）。
     if (auth.getToken()) {
-      router.replace("/function/tasks");
+      router.replace("/dashboard");
       return;
     }
     api.authStatus()
@@ -39,7 +39,7 @@ export default function LoginPage() {
     try {
       const { token } = await api.login(username.trim() || "RestXtra", password);
       auth.setToken(token);
-      router.replace("/function/tasks");
+      router.replace("/dashboard");
     } catch {
       setError("用户名或密码错误");
     } finally {

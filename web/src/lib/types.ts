@@ -902,3 +902,35 @@ export interface ProxyBridgeStatus {
   client_auth: boolean;
   client_username: string;
 }
+
+// ---- 空间测绘（FOFA / Hunter / Quake） ----
+export type SpaceProvider = "fofa" | "hunter" | "quake";
+
+export interface SpaceSearchConfigItem {
+  provider: SpaceProvider;
+  key_set: boolean;
+  key_hint: string;
+}
+
+export interface SpaceSearchResult {
+  ip: string;
+  port: number;
+  protocol: string;
+  domain: string;
+  url: string;
+  title: string;
+  server: string;
+  country: string;
+  city: string;
+  raw?: Record<string, unknown>;
+}
+
+export interface SpaceSearchResponse {
+  provider: SpaceProvider;
+  query: string;
+  total: number;
+  size: number;
+  page: number;
+  results: SpaceSearchResult[];
+  error?: string;
+}

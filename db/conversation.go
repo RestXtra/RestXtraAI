@@ -84,6 +84,12 @@ func (d *DB) UpdateConversationProfile(id int64, llmProfileID *int64) error {
 	return err
 }
 
+// UpdateConversationAgent 将会话绑定的 agent 切换到新 key（用于会话中途换智能体）。
+func (d *DB) UpdateConversationAgent(id int64, agentKey string) error {
+	_, err := d.Exec(`UPDATE conversations SET agent_key=$2 WHERE id=$1`, id, agentKey)
+	return err
+}
+
 // ListConversations returns all threads, most-recently-updated first.
 func (d *DB) ListConversations() ([]*Conversation, error) {
 	rows, err := d.Query(`SELECT ` + convCols + ` FROM conversations ORDER BY updated_at DESC`)

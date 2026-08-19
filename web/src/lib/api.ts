@@ -53,6 +53,10 @@ import type {
   SandboxHost,
   Settings,
   SkillItem,
+  SpaceProvider,
+  SpaceSearchConfigItem,
+  SpaceSearchResponse,
+  SpaceSearchResult,
   SSProject,
   SSTask,
   Stats,
@@ -95,7 +99,17 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new Error("未授权");
   }
-  if (!r.ok) throw new Error(`${init?.method ?? "GET"} ${path}: ${r.status}`);
+  if (!r.ok) {
+    // 尝试提取后端错误 body（writeErr 返回 {"error": "..."}），避免只看到状态码。
+    let detail = "";
+    try {
+      const j = (await r.json()) as { error?: string } | null;
+      if (j?.error) detail = `: ${j.error}`;
+    } catch {
+      /* ignore non-json error body */
+    }
+    throw new Error(`${init?.method ?? "GET"} ${path}: ${r.status}${detail}`);
+  }
   if (r.status === 204) return undefined as T;
   return r.json();
 }
@@ -425,6 +439,8 @@ export const api = {
   renameConversation: (id: number, title: string) => patch<{ ok: boolean }>(`/conversations/${id}`, { title }),
   updateConversationProfile: (id: number, llm_profile_id: number | null) =>
     patch<{ ok: boolean }>(`/conversations/${id}/profile`, { llm_profile_id }),
+  updateConversationAgent: (id: number, agent_key: string) =>
+    patch<{ ok: boolean }>(`/conversations/${id}/profile`, { agent_key }),
   deleteConversation: (id: number) => del<{ deleted: number }>(`/conversations/${id}`),
   conversationMessages: (id: number, since = 0) =>
     get<{ items: Activity[]; cursor: number; running: boolean }>(`/conversations/${id}/messages?since=${since}`).then(
@@ -874,6 +890,17 @@ export const api = {
   c2Ingest: (p: { listener_id?: number; session_id: string; host?: string; meta?: string; status?: string }) =>
     post<{ ok: boolean }>("/c2/ingest", p),
   c2SetStatus: (session_id: string, status: string) => post<{ ok: boolean }>("/c2/status", { session_id, status }),
+
+  // ---- 能力：空间测绘（FOFA / Hunter / Quake） ----
+  spaceSearchConfigs: () => get<{ providers: SpaceSearchConfigItem[] }>("/spacesearch/config"),
+  spaceSearchSetConfig: (provider: SpaceProvider, key: string) =>
+    post<{ ok: boolean; providers: SpaceSearchConfigItem[] }>("/spacesearch/config", { provider, key }),
+  spaceSearch: (p: { provider: SpaceProvider; query: string; size?: number; page?: number }) =>
+    post<SpaceSearchResponse>("/spacesearch/search", p),
+  spaceSearchTest: (provider: SpaceProvider) =>
+    post<{ ok: boolean; error?: string }>("/spacesearch/test", { provider }),
+  spaceSearchImport: (p: { results: SpaceSearchResult[]; provider: SpaceProvider; query: string }) =>
+    post<{ imported: number; stats: Record<string, number>; errors: string[] }>("/spacesearch/import", p),
 
   // ---- 能力：代理池 ----
   proxies: () => get<{ proxies: ProxyItem[]; stats: ProxyPoolStats }>("/proxies"),

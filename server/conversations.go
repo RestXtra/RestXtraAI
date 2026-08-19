@@ -88,6 +88,7 @@ func (s *Server) pgUpdateConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		LLMProfileID *int64 `json:"llm_profile_id"` // null clears the override
+		AgentKey     string `json:"agent_key"`      // 可选：切换会话绑定的智能体
 	}
 	if err := decode(r, &req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -99,9 +100,21 @@ func (s *Server) pgUpdateConversation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := pg.UpdateConversationProfile(c.ID, req.LLMProfileID); err != nil {
-		writeErr(w, 500, err.Error())
-		return
+	if req.AgentKey != "" {
+		if a, err := pg.GetAgentByKey(req.AgentKey); err != nil || a == nil {
+			writeErr(w, 400, "指定的智能体不存在")
+			return
+		}
+		if err := pg.UpdateConversationAgent(c.ID, req.AgentKey); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.LLMProfileID != nil {
+		if err := pg.UpdateConversationProfile(c.ID, req.LLMProfileID); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }

@@ -77,14 +77,14 @@ These serve as the fallback; there is no separate default.css file. */
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar: #e8f7ed;
+  --sidebar-foreground: oklch(0.2 0.02 145);
+  --sidebar-primary: oklch(0.35 0.06 145);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar-accent: #d9eee1;
+  --sidebar-accent-foreground: oklch(0.2 0.02 145);
+  --sidebar-border: #cde4d4;
+  --sidebar-ring: #a7cfb3;
 
   /* fonts */
   --font-sans: var(--font-geist);
@@ -139,6 +139,11 @@ These serve as the fallback; there is no separate default.css file. */
   html {
     @apply font-sans;
   }
+}
+
+/* Codex-style shell: the sidebar and its outer gap share one quiet mint wash. */
+[data-slot="sidebar-wrapper"] {
+  background: linear-gradient(180deg, #e1f5ef 0%, #edf9f1 100%);
 }
 
 @layer utilities {

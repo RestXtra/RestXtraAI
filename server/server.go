@@ -822,6 +822,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/proxy-sources/{id}", s.rbac("cap.proxy.write", s.proxySourceDelete))
 	mux.HandleFunc("POST /api/proxy-sources/{id}/refresh", s.rbac("cap.proxy.write", s.proxySourceRefresh))
 
+	// 空间测绘：FOFA / Hunter / Quake 搜索与资产导入
+	mux.HandleFunc("GET /api/spacesearch/config", s.rbac("cap.spacesearch.read", s.spaceSearchConfigGet))
+	mux.HandleFunc("POST /api/spacesearch/config", s.rbac("cap.spacesearch.write", s.spaceSearchConfigSet))
+	mux.HandleFunc("POST /api/spacesearch/search", s.rbac("cap.spacesearch.read", s.spaceSearch))
+	mux.HandleFunc("POST /api/spacesearch/test", s.rbac("cap.spacesearch.read", s.spaceSearchTest))
+	mux.HandleFunc("POST /api/spacesearch/import", s.rbac("cap.spacesearch.write", s.spaceSearchImport))
+
 	// TSecBenchmark 跑分
 	mux.HandleFunc("GET /api/benchmark/config", s.benchGetConfig)
 	mux.HandleFunc("POST /api/benchmark/config", s.benchSetConfig)

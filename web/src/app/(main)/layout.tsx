@@ -13,6 +13,12 @@ import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
 import { MainContent } from "./_components/main-content";
 
+// embed 模式：iframe 内嵌（/xxx?embed=1）时不渲染侧栏与全局头，只显示内容区。
+function isEmbed() {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("embed") === "1";
+}
+
 export default function Layout({ children }: Readonly<{ children: ReactNode }>) {
   // Client-side auth gate — replaces the Next proxy/middleware that static export
   // disables. No token → bounce to /login; render nothing until confirmed so no
@@ -26,6 +32,11 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
     }
   }, []);
 
+  const [embed, setEmbed] = React.useState(false);
+  React.useEffect(() => {
+    setEmbed(isEmbed());
+  }, []);
+
   const defaultOpen = typeof document === "undefined" ? true : getClientCookie("sidebar_state") !== "false";
   // Live from the preferences store so the sidebar reacts immediately to changes
   // made in 系统配置 → 界面与布局 (not a one-shot cookie read).
@@ -33,6 +44,20 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
   const collapsible = usePreferencesStore((s) => s.sidebarCollapsible);
   const contentLayout = usePreferencesStore((s) => s.contentLayout);
   const navbarStyle = usePreferencesStore((s) => s.navbarStyle);
+  const setSidebarVariant = usePreferencesStore((s) => s.setSidebarVariant);
+  const setSidebarCollapsible = usePreferencesStore((s) => s.setSidebarCollapsible);
+
+  // 从 /settings 的 iframe 接收偏好变更（postMessage），实时同步父页面侧栏。
+  React.useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      const d = e.data as { type?: string; key?: string; value?: string };
+      if (d?.type !== "restxtra:pref") return;
+      if (d.key === "sidebar_variant" && d.value) setSidebarVariant(d.value as typeof variant);
+      if (d.key === "sidebar_collapsible" && d.value) setSidebarCollapsible(d.value as typeof collapsible);
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [setSidebarVariant, setSidebarCollapsible]);
 
   // Sync the html data-* attributes (which the CSS-driven rules for the content
   // wrapper and sticky header read) whenever the store changes, so switching
@@ -45,6 +70,15 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
   }, [navbarStyle]);
 
   if (!authed) return null;
+
+  // embed 模式：iframe 内嵌，跳过侧栏 + 顶部 header，直接渲染内容。
+  if (embed) {
+    return (
+      <div className="h-screen w-full overflow-y-auto">
+        <MainContent embed>{children}</MainContent>
+      </div>
+    );
+  }
 
   return (
     <SidebarProvider
@@ -62,6 +96,7 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
           "[html[data-content-layout=centered]_&>*]:w-full",
           "[html[data-content-layout=centered]_&>*]:max-w-screen-2xl",
           "peer-data-[variant=inset]:border",
+          "md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:shadow-none",
           "[--dashboard-header-height:--spacing(12)]",
           "min-w-0 overflow-x-hidden",
         )}

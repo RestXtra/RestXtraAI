@@ -230,7 +230,13 @@ function InterceptPendingBadge() {
 function NavLinkItem({ item, isActive, showIconFallback }: NavLinkItemProps) {
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton asChild aria-disabled={item.disabled} tooltip={item.title} isActive={isActive}>
+      <SidebarMenuButton
+        asChild
+        aria-disabled={item.disabled}
+        tooltip={item.title}
+        isActive={isActive}
+        className="text-[13px]"
+      >
         <Link
           prefetch={false}
           href={item.url}
@@ -267,7 +273,7 @@ function NavDropdownItem({ item, isActive, isSubItemActive }: NavDropdownItemPro
     <SidebarMenuItem>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <SidebarMenuButton tooltip={item.title} isActive={isActive} disabled={item.disabled}>
+          <SidebarMenuButton tooltip={item.title} isActive={isActive} disabled={item.disabled} className="text-[13px]">
             {Icon ? <Icon /> : <CollapsedIconFallback title={item.title} />}
             <span>{item.title}</span>
           </SidebarMenuButton>
@@ -308,7 +314,7 @@ function NavCollapsibleItem({ item, isActive, defaultOpen, isSubItemActive }: Na
     <Collapsible asChild defaultOpen={defaultOpen} className="group/collapsible">
       <SidebarMenuItem>
         <CollapsibleTrigger asChild>
-          <SidebarMenuButton tooltip={item.title} isActive={isActive} disabled={item.disabled}>
+          <SidebarMenuButton tooltip={item.title} isActive={isActive} disabled={item.disabled} className="text-[13px]">
             {Icon && <Icon />}
             <span>{item.title}</span>
             <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />

@@ -32,6 +32,8 @@ var platformPermissions = []permissionDef{
 	{"cap.report.read", "生成 / 查看报告"},
 	{"cap.proxy.read", "查看代理池"},
 	{"cap.proxy.write", "管理代理池（导入 / 测活 / 删除）"},
+	{"cap.spacesearch.read", "使用空间测绘搜索（FOFA / Hunter / Quake）"},
+	{"cap.spacesearch.write", "配置空间测绘凭证并导入资产"},
 	// 沙箱
 	{"sandbox.read", "查看沙箱主机 / 容器 / 出口范围"},
 	{"sandbox.write", "管理沙箱与出口范围"},
@@ -66,6 +68,7 @@ var systemRoleDefs = map[string][]string{
 		"cap.c2.read", "cap.c2.write",
 		"cap.report.read",
 		"cap.proxy.read", "cap.proxy.write",
+		"cap.spacesearch.read", "cap.spacesearch.write",
 		"sandbox.read", "sandbox.write",
 		"worklog.read",
 		"agent.read", "agent.write",

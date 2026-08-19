@@ -18,7 +18,7 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import type { NavMainItem } from "@/navigation/sidebar/sidebar-items";
-import { sidebarItems } from "@/navigation/sidebar/sidebar-items";
+import { settingsSections, sidebarItems } from "@/navigation/sidebar/sidebar-items";
 
 type SearchItem = {
   id: string;
@@ -36,32 +36,42 @@ function getSubItemGroup(groupLabel: string | undefined, itemTitle: string) {
   return sidebarGroupLabels.has(itemTitle) ? (groupLabel ?? "Other") : itemTitle;
 }
 
-const searchItems: SearchItem[] = sidebarItems.flatMap((group) =>
-  group.items.flatMap((item) => {
-    if (item.subItems) {
-      return item.subItems.map((sub) => ({
-        id: sub.id,
-        group: getSubItemGroup(group.label, item.title),
-        label: sub.title,
-        url: sub.url,
-        icon: item.icon,
-        disabled: sub.disabled,
-        newTab: sub.newTab,
-      }));
-    }
-    return [
-      {
-        id: item.id,
-        group: group.label ?? "Other",
-        label: item.title,
-        url: item.url,
-        icon: item.icon,
-        disabled: item.disabled,
-        newTab: item.newTab,
-      },
-    ];
-  }),
-);
+// 侧栏项 + 设置分节（收进 /settings 的页面仍可通过搜索直达）。
+const searchItems: SearchItem[] = [
+  ...sidebarItems.flatMap((group) =>
+    group.items.flatMap((item) => {
+      if (item.subItems) {
+        return item.subItems.map((sub) => ({
+          id: sub.id,
+          group: getSubItemGroup(group.label, item.title),
+          label: sub.title,
+          url: sub.url,
+          icon: item.icon,
+          disabled: sub.disabled,
+          newTab: sub.newTab,
+        }));
+      }
+      return [
+        {
+          id: item.id,
+          group: group.label ?? "Other",
+          label: item.title,
+          url: item.url,
+          icon: item.icon,
+          disabled: item.disabled,
+          newTab: item.newTab,
+        },
+      ];
+    }),
+  ),
+  ...settingsSections.map((s) => ({
+    id: s.id,
+    group: "设置",
+    label: s.label,
+    url: `/settings/${s.id}`,
+    icon: s.icon,
+  })),
+];
 
 function getAvailableItems(items: SearchItem[]) {
   return items.filter((item) => !item.disabled && !item.url.includes("coming-soon"));
@@ -134,20 +144,19 @@ export function SearchDialog() {
     <>
       <Button
         onClick={() => handleOpenChange(true)}
-        variant="link"
-        className="px-0! font-normal text-muted-foreground hover:no-underline"
+        variant="ghost"
+        size="icon"
+        className="size-8 text-muted-foreground"
+        title="搜索（⌘/Ctrl+J）"
+        aria-label="搜索"
       >
-        <Search data-icon="inline-start" />
-        Search
-        <kbd className="inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-medium text-[10px]">
-          <span className="text-xs">⌘</span>J
-        </kbd>
+        <Search className="size-4" />
       </Button>
       <CommandDialog open={open} onOpenChange={handleOpenChange}>
         <Command>
-          <CommandInput placeholder="Search dashboards, users, and more…" value={query} onValueChange={setQuery} />
+          <CommandInput placeholder="搜索页面、用户…" value={query} onValueChange={setQuery} />
           <CommandList>
-            <CommandEmpty>No results found.</CommandEmpty>
+            <CommandEmpty>未找到结果</CommandEmpty>
             {query ? renderGroups(searchItems) : renderGroups(recommendations)}
           </CommandList>
         </Command>

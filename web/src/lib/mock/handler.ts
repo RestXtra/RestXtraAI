@@ -276,6 +276,33 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/proxy-bridge/stop") return { ok: true, running: false };
   if (path === "/proxy-bridge/import-rules") return { rules: ((b.rules as string[]) ?? []).slice(0, 0) };
 
+  // ── 空间测绘（FOFA / Hunter / Quake）──
+  if (path === "/spacesearch/config" && m === "GET")
+    return {
+      providers: [
+        { provider: "fofa", key_set: true, key_hint: "…f3a9" },
+        { provider: "hunter", key_set: true, key_hint: "…c2b1" },
+        { provider: "quake", key_set: false, key_hint: "" },
+      ],
+    };
+  if (path === "/spacesearch/config" && m === "POST") return { ok: true, providers: D.spaceConfigs };
+  if (path === "/spacesearch/test") return { ok: true };
+  if (path === "/spacesearch/search")
+    return {
+      provider: String(b.provider ?? "fofa"),
+      query: String(b.query ?? ""),
+      total: D.spaceResults.length,
+      size: D.spaceResults.length,
+      page: 1,
+      results: D.spaceResults,
+    };
+  if (path === "/spacesearch/import")
+    return {
+      imported: (b.results as unknown[])?.length ?? 0,
+      stats: { ip: 2, subdomain: 1, service: 1, skipped: 0 },
+      errors: [],
+    };
+
   // ── 写操作兜底：成功但不落库 ──
   if (["POST", "PUT", "PATCH", "DELETE"].includes(m)) return { ok: true };
 

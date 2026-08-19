@@ -1,51 +1,34 @@
 "use client";
 
 import * as React from "react";
-import { toast } from "sonner";
-import { Bot, ChevronDownIcon, PlusIcon, SendIcon, Square, Trash2Icon, ZapIcon } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { Transcript } from "@/components/transcript";
+import { useSearchParams } from "next/navigation";
+
+import { ArrowUpIcon, Bot, ChevronDownIcon, Square, ZapIcon } from "lucide-react";
+import { toast } from "sonner";
+
 import { TodoPopover } from "@/components/todo-popover";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Transcript } from "@/components/transcript";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import type { Activity, Agent, Conversation, LLMProfile } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useChatNavStore } from "@/stores/chat-nav-store";
 
 // fmtTokens renders a compact token count (1234 → 1.2k, 2_000_000 → 2M).
 function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1) + "M";
-  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
   return String(n);
 }
 
 // fmtDuration renders an elapsed milliseconds span compactly (90s → 1m30s).
-function fmtDuration(ms: number): string {
+function _fmtDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
@@ -58,7 +41,7 @@ function fmtDuration(ms: number): string {
 // console — shown while a turn is streaming.
 function LiveBadge() {
   return (
-    <span className="inline-flex items-center gap-1 rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+    <span className="inline-flex items-center gap-1 rounded bg-blue-500/15 px-1.5 py-0.5 font-medium text-[10px] text-blue-600 dark:text-blue-400">
       <span className="size-1 animate-pulse rounded-full bg-blue-500" />
       实时
     </span>
@@ -95,29 +78,43 @@ function Composer({
     }
   }
   return (
-    <div className="border-t p-3">
-      <div className="flex items-end gap-2">
-        {leftSlot}
-        <Textarea
-          className="max-h-40 min-h-10 flex-1 resize-none"
-          rows={1}
-          placeholder={placeholder}
-          value={value}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={onKeyDown}
-        />
-        {running ? (
-          // while a run is in flight the send button becomes a stop button —
-          // aborts just this session (the trigger queue keeps going).
-          <Button size="icon" variant="destructive" onClick={onStop} disabled={stopDisabled} title="停止本次运行">
-            <Square className="size-3.5 fill-current" />
-          </Button>
-        ) : (
-          <Button size="icon" onClick={onSend} disabled={disabled || !value.trim()}>
-            <SendIcon className="size-4" />
-          </Button>
-        )}
+    <div className="px-3 pt-0">
+      <div className="relative mx-auto max-w-[840px]">
+        <div className="mx-auto flex max-w-[840px] items-end rounded-[29px] border border-border bg-background pr-1.5 shadow-sm backdrop-blur-lg focus-within:ring-1 focus-within:ring-ring/40 dark:bg-card/40">
+          {leftSlot}
+          <Textarea
+            className="max-h-[200px] min-h-10 flex-1 resize-none border-0 bg-transparent p-3 text-base shadow-none outline-none placeholder:truncate placeholder:text-muted-foreground md:p-4 md:pl-6"
+            rows={1}
+            placeholder={placeholder}
+            value={value}
+            disabled={disabled}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={onKeyDown}
+          />
+          {running ? (
+            // while a run is in flight the send button becomes a stop button —
+            // aborts just this session (the trigger queue keeps going).
+            <Button
+              size="icon"
+              variant="destructive"
+              onClick={onStop}
+              disabled={stopDisabled}
+              title="停止本次运行"
+              className="mb-1 size-10 shrink-0 rounded-full md:mb-1.5 md:size-11"
+            >
+              <Square className="size-5 fill-current md:size-6" />
+            </Button>
+          ) : (
+            <Button
+              size="icon"
+              onClick={onSend}
+              disabled={disabled || !value.trim()}
+              className="mb-1 size-10 shrink-0 rounded-full bg-slate-600 text-white hover:bg-primary/90 md:mb-1.5 md:size-11"
+            >
+              <ArrowUpIcon className="size-5 md:size-6" />
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -130,12 +127,14 @@ function LLMProfileRow({
   selected,
   onChange,
   disabled,
+  leftSlot,
   rightSlot,
 }: {
   profiles: LLMProfile[];
   selected: number | null;
   onChange: (id: number | null) => void;
   disabled?: boolean;
+  leftSlot?: React.ReactNode;
   rightSlot?: React.ReactNode;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -144,26 +143,30 @@ function LLMProfileRow({
   const label = current ? current.name : `默认${activeDefault ? `（${activeDefault.name}）` : ""}`;
 
   return (
-    <div className="flex items-center gap-1 px-1 pb-1 pt-0.5">
-      <ZapIcon className="text-muted-foreground/50 size-3 shrink-0" />
+    <div className="mx-auto flex max-w-[840px] items-center justify-center gap-1 px-4 py-1.5">
+      {leftSlot}
+      <ZapIcon className="size-3 shrink-0 text-muted-foreground/50" />
       <span className="text-muted-foreground/70 text-xs">{label}</span>
       <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
         <PopoverTrigger asChild>
           <button
             type="button"
             disabled={disabled}
-            className="text-primary flex items-center gap-0.5 text-xs hover:underline disabled:pointer-events-none disabled:opacity-40"
+            className="flex items-center gap-0.5 text-primary text-xs hover:underline disabled:pointer-events-none disabled:opacity-40"
           >
             更换
             <ChevronDownIcon className="size-3" />
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-64 p-1">
-          <p className="text-muted-foreground px-2 py-1 text-[11px] font-medium">选择 LLM 配置</p>
+          <p className="px-2 py-1 font-medium text-[11px] text-muted-foreground">选择 LLM 配置</p>
           {/* default option */}
           <button
             type="button"
-            onClick={() => { onChange(null); setOpen(false); }}
+            onClick={() => {
+              onChange(null);
+              setOpen(false);
+            }}
             className={cn(
               "flex w-full flex-col rounded px-2 py-1.5 text-left hover:bg-accent",
               selected == null && "bg-accent",
@@ -171,21 +174,28 @@ function LLMProfileRow({
           >
             <span className="text-sm">默认{activeDefault ? `（${activeDefault.name}）` : ""}</span>
             {activeDefault && (
-              <span className="text-muted-foreground text-[11px]">{activeDefault.format} · {activeDefault.model}</span>
+              <span className="text-[11px] text-muted-foreground">
+                {activeDefault.format} · {activeDefault.model}
+              </span>
             )}
           </button>
           {profiles.map((p) => (
             <button
               key={p.id}
               type="button"
-              onClick={() => { onChange(Number(p.id)); setOpen(false); }}
+              onClick={() => {
+                onChange(Number(p.id));
+                setOpen(false);
+              }}
               className={cn(
                 "flex w-full flex-col rounded px-2 py-1.5 text-left hover:bg-accent",
                 selected === Number(p.id) && "bg-accent",
               )}
             >
               <span className="text-sm">{p.name}</span>
-              <span className="text-muted-foreground text-[11px]">{p.format} · {p.model}</span>
+              <span className="text-[11px] text-muted-foreground">
+                {p.format} · {p.model}
+              </span>
             </button>
           ))}
         </PopoverContent>
@@ -229,7 +239,7 @@ function DraftChat({
       await api.sendConversationMessage(c.id, msg);
       onStarted(c);
     } catch (e) {
-      toast.error("发送失败：" + (e as Error).message);
+      toast.error(`发送失败：${(e as Error).message}`);
       setSending(false);
     }
   }
@@ -246,7 +256,9 @@ function DraftChat({
               <Bot className="size-3.5" />
               {a.name}
               {!a.builtin && (
-                <Badge variant="outline" className="px-1 py-0 text-[9px]">自定义</Badge>
+                <Badge variant="outline" className="px-1 py-0 text-[9px]">
+                  自定义
+                </Badge>
               )}
             </span>
           </SelectItem>
@@ -259,13 +271,11 @@ function DraftChat({
     <>
       {/* empty / landing state fills the panel */}
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
-        <div className="bg-primary/10 flex size-12 items-center justify-center rounded-full">
-          <Bot className="text-primary size-6" />
+        <div className="flex size-12 items-center justify-center rounded-full bg-primary/10">
+          <Bot className="size-6 text-primary" />
         </div>
-        <div className="text-sm font-medium">开始和「{agent?.name ?? "Agent"}」对话</div>
-        {agent?.description && (
-          <p className="text-muted-foreground max-w-md text-xs">{agent.description}</p>
-        )}
+        <div className="font-medium text-sm">开始和「{agent?.name ?? "Agent"}」对话</div>
+        {agent?.description && <p className="max-w-md text-muted-foreground text-xs">{agent.description}</p>}
       </div>
 
       <Composer
@@ -273,14 +283,14 @@ function DraftChat({
         onChange={setInput}
         onSend={send}
         disabled={sending || !agentKey}
-        placeholder="输入消息，Enter 发送，Shift+Enter 换行"
-        leftSlot={agentPicker}
+        placeholder="Build in RestXtraAI/main"
       />
       <LLMProfileRow
         profiles={profiles}
         selected={llmProfileId}
         onChange={setLlmProfileId}
         disabled={sending}
+        leftSlot={agentPicker}
       />
     </>
   );
@@ -316,15 +326,23 @@ function ChatView({
       await api.updateConversationProfile(conv.id, id);
       onConvUpdated();
     } catch (e) {
-      toast.error("切换 LLM 失败：" + (e as Error).message);
+      toast.error(`切换 LLM 失败：${(e as Error).message}`);
+    }
+  }
+
+  async function changeAgent(key: string) {
+    if (key === conv.agent_key) return;
+    try {
+      await api.updateConversationAgent(conv.id, key);
+      toast.success("已切换智能体");
+      onConvUpdated();
+    } catch (e) {
+      toast.error(`切换智能体失败：${(e as Error).message}`);
     }
   }
 
   // conversation-scoped detail fetcher for the reused Transcript renderer.
-  const fetchDetail = React.useCallback(
-    (seq: number) => api.conversationMsgDetail(conv.id, seq),
-    [conv.id],
-  );
+  const fetchDetail = React.useCallback((seq: number) => api.conversationMsgDetail(conv.id, seq), [conv.id]);
 
   // seq of the most-recent TodoWrite tool call (for the Todo popover); null if none.
   const latestTodoSeq = React.useMemo(() => {
@@ -384,9 +402,7 @@ function ChatView({
   const contentRef = React.useRef<HTMLDivElement | null>(null);
   const atBottomRef = React.useRef(true);
   const viewport = React.useCallback(
-    () =>
-      (contentRef.current?.closest('[data-slot="scroll-area-viewport"]') as HTMLElement | null) ??
-      null,
+    () => (contentRef.current?.closest('[data-slot="scroll-area-viewport"]') as HTMLElement | null) ?? null,
     [],
   );
   React.useEffect(() => {
@@ -405,19 +421,23 @@ function ChatView({
       vp.scrollTop = vp.scrollHeight;
       atBottomRef.current = true;
     }
-  }, [conv.id, viewport]);
+  }, [viewport]);
   // new activity → stick to bottom only if the user is already pinned there
   React.useLayoutEffect(() => {
     if (!atBottomRef.current) return;
     const vp = viewport();
     if (vp) vp.scrollTop = vp.scrollHeight;
-  }, [messages, running, viewport]);
+  }, [viewport]);
 
   // Per-conversation token total, live — same accounting as the main-agent
   // console: completed runs' `result` sum + the in-progress run's latest `usage`.
   const tokenTotal = React.useMemo(() => {
-    let i = 0, o = 0, cr = 0;
-    let li = 0, lo = 0, lcr = 0;
+    let i = 0,
+      o = 0,
+      cr = 0;
+    let li = 0,
+      lo = 0,
+      lcr = 0;
     let turns = 0; // agent 循环轮次 = 模型调用次数（每次一条 kind='usage'）
     for (const a of messages) {
       if (a.kind === "result") {
@@ -432,7 +452,9 @@ function ChatView({
         lcr = a.cache_read_tokens ?? 0;
       }
     }
-    const I = i + li, O = o + lo, CR = cr + lcr;
+    const I = i + li,
+      O = o + lo,
+      CR = cr + lcr;
     return { i: I, o: O, cr: CR, turns, any: I + O + CR > 0 };
   }, [messages]);
 
@@ -449,7 +471,7 @@ function ChatView({
       setMessages((prev) => [...prev, ...r.items]);
       cursorRef.current = r.cursor;
     } catch (e) {
-      toast.error("发送失败：" + (e as Error).message);
+      toast.error(`发送失败：${(e as Error).message}`);
       setInput(msg); // restore so the user doesn't lose their text
     } finally {
       setSending(false);
@@ -465,7 +487,7 @@ function ChatView({
     try {
       await api.stopConversation(conv.id);
     } catch (e) {
-      toast.error("停止失败：" + (e as Error).message);
+      toast.error(`停止失败：${(e as Error).message}`);
     } finally {
       setStopping(false);
     }
@@ -474,20 +496,33 @@ function ChatView({
   return (
     <>
       {/* header: which agent + live + token meta */}
-      <div className="flex items-center gap-2 border-b px-4 py-2.5">
-        <Bot className="text-muted-foreground size-4 shrink-0" />
-        <span className="shrink-0 text-sm font-medium">{agent?.name ?? conv.agent_key}</span>
-        <span className="text-muted-foreground shrink-0 font-mono text-xs">{conv.agent_key}</span>
-        {agent && !agent.builtin && (
-          <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
-            自定义
-          </Badge>
-        )}
+      <div className="flex items-center gap-2 border-b px-4 py-2">
+        <Select value={conv.agent_key} onValueChange={changeAgent} disabled={running}>
+          <SelectTrigger size="sm" className="w-auto min-w-36 shrink-0">
+            <SelectValue placeholder="选择智能体" />
+          </SelectTrigger>
+          <SelectContent>
+            {agents.map((a) => (
+              <SelectItem key={a.key} value={a.key}>
+                <span className="flex items-center gap-2">
+                  <Bot className="size-3.5" />
+                  {a.name}
+                  {!a.builtin && (
+                    <Badge variant="outline" className="px-1 py-0 text-[9px]">
+                      自定义
+                    </Badge>
+                  )}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="shrink-0 font-mono text-muted-foreground text-xs">{conv.agent_key}</span>
         {agent?.description && (
-          <span className="text-muted-foreground min-w-0 truncate text-xs">{agent.description}</span>
+          <span className="min-w-0 truncate text-muted-foreground text-xs">{agent.description}</span>
         )}
         {running && <LiveBadge />}
-        <div className="text-muted-foreground ml-auto flex shrink-0 items-center gap-3 text-xs">
+        <div className="ml-auto flex shrink-0 items-center gap-3 text-muted-foreground text-xs">
           {tokenTotal.turns > 0 && (
             <span title="agent 循环轮次（模型调用次数）" className="tabular-nums">
               {tokenTotal.turns} 轮
@@ -502,13 +537,10 @@ function ChatView({
       </div>
 
       {/* messages */}
-      <ScrollArea
-        type="auto"
-        className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!"
-      >
+      <ScrollArea type="auto" className="[&_[data-slot=scroll-area-viewport]>div]:block! min-h-0 min-w-0 flex-1">
         <div className="min-w-0 max-w-full px-4 py-3" ref={contentRef}>
           {messages.length === 0 && !running ? (
-            <div className="text-muted-foreground py-10 text-center text-sm">
+            <div className="py-10 text-center text-muted-foreground text-sm">
               开始和「{agent?.name ?? conv.agent_key}」对话
             </div>
           ) : (
@@ -522,7 +554,7 @@ function ChatView({
         onChange={setInput}
         onSend={send}
         disabled={running}
-        placeholder={running ? "Agent 正在回复…" : "输入消息，Enter 发送，Shift+Enter 换行"}
+        placeholder={running ? "Agent 正在回复…" : "Build in RestXtraAI/main"}
         running={running}
         onStop={stop}
         stopDisabled={stopping}
@@ -538,203 +570,89 @@ function ChatView({
   );
 }
 
-// ConversationItem is one row in the left rail — status-ish icon, title + agent
-// subtitle, inline rename, hover delete. Modeled on the console's SessionItem.
-function ConversationItem({
-  conv,
-  agent,
-  active,
-  renaming,
-  renameText,
-  onSelect,
-  onStartRename,
-  onRenameText,
-  onCommitRename,
-  onDelete,
-}: {
-  conv: Conversation;
-  agent?: Agent;
-  active: boolean;
-  renaming: boolean;
-  renameText: string;
-  onSelect: () => void;
-  onStartRename: () => void;
-  onRenameText: (v: string) => void;
-  onCommitRename: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <div
-      className={cn(
-        "group flex min-w-0 items-center gap-1 rounded-md pr-1 transition-colors",
-        active ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
-      )}
-    >
-      {renaming ? (
-        <input
-          autoFocus
-          value={renameText}
-          onChange={(e) => onRenameText(e.target.value)}
-          onBlur={onCommitRename}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onCommitRename();
-            if (e.key === "Escape") onCommitRename();
-          }}
-          className="border-input bg-background min-w-0 flex-1 rounded-md border px-2 py-1 text-sm"
-        />
-      ) : (
-        <button
-          type="button"
-          onClick={onSelect}
-          onDoubleClick={onStartRename}
-          title="双击重命名"
-          className="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left"
-        >
-          <div className="truncate text-sm">{conv.title || "新对话"}</div>
-          <div className="text-muted-foreground flex min-w-0 items-center gap-1 text-[11px]">
-            <Bot className="size-3 shrink-0" />
-            <span className="min-w-0 truncate">{agent?.name ?? conv.agent_key}</span>
-            <span className="shrink-0">·</span>
-            <span className="shrink-0">{new Date(conv.created_at).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-            <span className="shrink-0 opacity-60">#{conv.id}</span>
-          </div>
-        </button>
-      )}
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="text-muted-foreground hover:text-destructive shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
-          >
-            <Trash2Icon className="size-3.5" />
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除对话「{conv.title || "新对话"}」？</AlertDialogTitle>
-            <AlertDialogDescription>此操作不可撤销。</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={onDelete}>删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
-  );
-}
+// ConversationItem moved to sidebar/ conversation-list.tsx (kanna layout:
+// the conversation list lives in the sidebar, not in the chat page).
 
-export default function ChatPage() {
+function ChatPageInner() {
+  const searchParams = useSearchParams();
+  const urlId = searchParams.get("id");
+  const selectedId = urlId ? Number(urlId) || null : null;
+
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [convs, setConvs] = React.useState<Conversation[]>([]);
-  const [selectedId, setSelectedId] = React.useState<number | null>(null);
-  const [renamingId, setRenamingId] = React.useState<number | null>(null);
-  const [renameText, setRenameText] = React.useState("");
+  const _bump = useChatNavStore((s) => s.bump);
+  const select = useChatNavStore((s) => s.select);
+
+  // URL 是选中态的单一数据源：URL 变化时同步 store，让侧栏高亮跟随。
+  React.useEffect(() => {
+    select(selectedId);
+  }, [selectedId, select]);
 
   const reloadConvs = React.useCallback(() => {
-    api.conversations().then(setConvs).catch(() => setConvs([]));
+    api
+      .conversations()
+      .then(setConvs)
+      .catch(() => setConvs([]));
   }, []);
   React.useEffect(() => {
-    api.agents().then(setAgents).catch(() => {});
-    api.llmProfiles().then(setProfiles).catch(() => {});
+    api
+      .agents()
+      .then(setAgents)
+      .catch(() => {});
+    api
+      .llmProfiles()
+      .then(setProfiles)
+      .catch(() => {});
+    reloadConvs();
+  }, [reloadConvs]);
+  // 侧栏列表增删会话后同步刷新（bump 由 ConversationList 触发）。
+  React.useEffect(() => {
     reloadConvs();
   }, [reloadConvs]);
 
-  const selected = convs.find((c) => c.id === selectedId) ?? null;
+  const selected = selectedId != null ? (convs.find((c) => c.id === selectedId) ?? null) : null;
   // conversation agents: custom agents + conversational built-ins (role=assistant,
   // e.g. Auto / 渗透测试). The orchestration built-ins (goals/planner/mainagent/worker)
   // are task-specific and stay hidden from the chat page.
   const chatAgents = agents.filter((a) => !a.builtin || a.role === "assistant");
 
-  async function del(id: number) {
-    try {
-      await api.deleteConversation(id);
-      if (selectedId === id) setSelectedId(null);
-      reloadConvs();
-    } catch (e) {
-      toast.error("删除失败：" + (e as Error).message);
-    }
-  }
-
-  function startRename(c: Conversation) {
-    setRenamingId(c.id);
-    setRenameText(c.title || "");
-  }
-  async function commitRename() {
-    const id = renamingId;
-    const title = renameText.trim();
-    setRenamingId(null);
-    if (!id || !title) return;
-    try {
-      await api.renameConversation(id, title);
-      reloadConvs();
-    } catch (e) {
-      toast.error("重命名失败：" + (e as Error).message);
-    }
-  }
-
   return (
     <div
       data-content-padding="false"
-      className="flex h-[calc(100svh-3rem)] flex-col overflow-hidden p-4 md:h-[calc(100svh-4rem)] md:p-6"
+      className="flex h-[calc(100svh-3rem)] flex-col overflow-hidden md:h-[calc(100svh-4rem)]"
     >
-      <div className="grid min-h-0 flex-1 grid-cols-[18rem_1fr] grid-rows-[minmax(0,1fr)] gap-4">
-        {/* left: conversation list */}
-        <div className="bg-card flex flex-col overflow-hidden rounded-lg border">
-          <div className="border-b p-2">
-            <Button size="sm" className="w-full" onClick={() => setSelectedId(null)}>
-              <PlusIcon /> 新建对话
-            </Button>
-          </div>
-          <ScrollArea type="auto" className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!">
-            <div className="flex min-w-0 flex-col gap-0.5 p-2">
-              {convs.length === 0 && (
-                <p className="text-muted-foreground px-2 py-6 text-center text-xs">暂无对话</p>
-              )}
-              {convs.map((c) => (
-                <ConversationItem
-                  key={c.id}
-                  conv={c}
-                  agent={agents.find((a) => a.key === c.agent_key)}
-                  active={selectedId === c.id}
-                  renaming={renamingId === c.id}
-                  renameText={renameText}
-                  onSelect={() => setSelectedId(c.id)}
-                  onStartRename={() => startRename(c)}
-                  onRenameText={setRenameText}
-                  onCommitRename={commitRename}
-                  onDelete={() => del(c.id)}
-                />
-              ))}
-            </div>
-          </ScrollArea>
-        </div>
-
-        {/* right: chat view */}
-        <div className="bg-card flex min-w-0 flex-col overflow-hidden rounded-lg border">
-          {selected ? (
-            <ChatView
-              key={selected.id}
-              conv={selected}
-              agents={agents}
-              profiles={profiles}
-              onTitleMaybeChanged={reloadConvs}
-              onConvUpdated={reloadConvs}
-            />
-          ) : (
-            <DraftChat
-              agents={chatAgents}
-              profiles={profiles}
-              onStarted={(c) => {
-                reloadConvs();
-                setSelectedId(c.id);
-              }}
-            />
-          )}
-        </div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card">
+        {selected ? (
+          <ChatView
+            key={selected.id}
+            conv={selected}
+            agents={agents}
+            profiles={profiles}
+            onTitleMaybeChanged={reloadConvs}
+            onConvUpdated={reloadConvs}
+          />
+        ) : (
+          <DraftChat
+            agents={chatAgents}
+            profiles={profiles}
+            onStarted={(c) => {
+              reloadConvs();
+              useChatNavStore.getState().refresh();
+              select(c.id);
+            }}
+          />
+        )}
       </div>
     </div>
+  );
+}
+
+export default function ChatPage() {
+  // useSearchParams must sit under a Suspense boundary for static export.
+  return (
+    <React.Suspense fallback={null}>
+      <ChatPageInner />
+    </React.Suspense>
   );
 }
