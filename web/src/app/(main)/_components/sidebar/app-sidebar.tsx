@@ -98,11 +98,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
       {isCollapsed && collapsible === "icon" ? (
         // 折叠态（icon 模式）：导航项收窄为图标列（含新建对话/任务/沙箱/插件）
-        <SidebarContent className="flex flex-col items-center">
-          <div className="flex w-full flex-1 flex-col items-center px-1 py-1">
+        <SidebarContent className="flex flex-col">
+          <div className="flex w-full flex-1 flex-col">
             <NavMain items={nav} />
           </div>
-          <div className="w-full border-t px-1 py-1">
+          <div className="w-full border-t py-1">
             <CollapsedConversationLauncher />
           </div>
         </SidebarContent>

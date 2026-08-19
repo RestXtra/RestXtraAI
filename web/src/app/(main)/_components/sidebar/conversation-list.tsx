@@ -210,12 +210,13 @@ export function CollapsedConversationLauncher() {
   React.useEffect(() => { api.conversations().then(setConvs).catch(() => {}); }, []);
   const recent = [...convs].sort((a, b) => +new Date(b.updated_at) - +new Date(a.updated_at)).slice(0, 8);
   return (
-    <div className="mt-1 flex flex-col items-center px-1">
+    // px-2 与 NavMain 的 SidebarGroup(p-2) 对齐基准一致，保证折叠态图标同列
+    <div className="flex flex-col px-2 py-1">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <SidebarMenuButton tooltip="最近对话" isActive={open} className="size-8 justify-center p-0">
+          <SidebarMenuButton tooltip="最近对话" isActive={open} className="text-[13px]">
             <MessageCircleIcon />
-            <span className="sr-only">最近对话</span>
+            <span className="truncate">最近对话</span>
           </SidebarMenuButton>
         </PopoverTrigger>
         <PopoverContent side="right" align="start" className="w-72 p-2">
