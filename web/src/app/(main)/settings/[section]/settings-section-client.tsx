@@ -32,15 +32,15 @@ export function SettingsSectionClient({ section }: { section: string }) {
   return (
     <div
       data-content-padding="false"
-      className="flex min-h-0 flex-1 flex-col [background:linear-gradient(180deg,#E8F8E9_0%,#FFFFFF_100%)]"
+      className="flex min-h-0 flex-1 flex-col bg-background"
     >
-      <div className="flex items-center gap-2 border-b px-4 py-3 lg:px-6">
+      <div className="codex-shell-header flex items-center gap-2 border-b px-4 py-3 lg:px-6">
         <h1 className="font-semibold text-xl tracking-tight">设置</h1>
         {active && <span className="text-muted-foreground text-sm">{active.label}</span>}
       </div>
       <div className="flex min-h-0 flex-1">
         {/* 左侧分节栏（学 kanna SettingsPage registry） */}
-        <nav className="w-52 shrink-0 overflow-y-auto border-r bg-muted/30 p-2">
+        <nav className="w-52 shrink-0 overflow-y-auto border-r bg-sidebar p-2 text-sidebar-foreground">
           <div className="flex flex-col gap-0.5">
             {sections.map((s) => {
               const Icon = s.icon;
@@ -68,7 +68,7 @@ export function SettingsSectionClient({ section }: { section: string }) {
         {/* 右侧内容区：iframe 内嵌现有页面（?embed=1 隐藏内嵌页的侧栏/头部） */}
         <div className="relative min-h-0 min-w-0 flex-1">
           {loading && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-white">
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/95">
               <Loader2 className="size-6 animate-spin text-muted-foreground" />
             </div>
           )}

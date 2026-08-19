@@ -61,7 +61,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       {...props}
       variant={variant}
       collapsible={collapsible}
-      className="bg-[linear-gradient(180deg,#dff5ee_0%,#eaf8ef_100%)]"
+      className="bg-sidebar"
     >
       <SidebarHeader>
         {/* 头部行：Logo（即仪表盘/展开入口，靠左）+ 搜索 + 折叠按钮 */}
@@ -99,10 +99,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       {isCollapsed && collapsible === "icon" ? (
         // 折叠态（icon 模式）：导航项收窄为图标列（含新建对话/任务/沙箱/插件）
         <SidebarContent className="flex flex-col">
-          <div className="flex w-full flex-1 flex-col">
+          {/* 导航区可滚动，避免撑满后把下方最近对话挤出/裁剪 */}
+          <div className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto">
             <NavMain items={nav} />
           </div>
-          <div className="w-full border-t py-1">
+          <div className="w-full shrink-0 border-t py-1">
             <CollapsedConversationLauncher />
           </div>
         </SidebarContent>

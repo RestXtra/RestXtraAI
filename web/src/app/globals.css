@@ -143,7 +143,19 @@ These serve as the fallback; there is no separate default.css file. */
 
 /* Codex-style shell: the sidebar and its outer gap share one quiet mint wash. */
 [data-slot="sidebar-wrapper"] {
+  background: var(--background);
+}
+
+:root:not([data-theme-preset]) [data-slot="sidebar-wrapper"],
+:root:not([data-theme-preset]) [data-slot="sidebar-container"],
+:root[data-theme-preset="default"] [data-slot="sidebar-wrapper"],
+:root[data-theme-preset="default"] [data-slot="sidebar-container"] {
   background: linear-gradient(180deg, #e1f5ef 0%, #edf9f1 100%);
+}
+
+:root:not([data-theme-preset]) .codex-shell-header,
+:root[data-theme-preset="default"] .codex-shell-header {
+  background: linear-gradient(90deg, #dff5ee 0%, #ffffff 82%);
 }
 
 @layer utilities {
