@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -24,6 +25,8 @@ const (
 	benchVPNProbe     = "http://10.0.100.58"
 )
 
+var benchmarkHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 func (s *Server) benchConfig() (token, base string) {
 	token, _, _ = s.m.pg.GetSetting(settingBenchToken)
 	base, _, _ = s.m.pg.GetSetting(settingBenchBase)
@@ -38,7 +41,6 @@ func (s *Server) benchConfig() (token, base string) {
 
 // benchHTTP 向平台发一次带 token 的请求，返回状态码与原始 body（透传业务错误）。
 func benchHTTP(ctx context.Context, token, base, method, path string, body []byte) (int, []byte, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, method, base+path, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, err
@@ -47,7 +49,7 @@ func benchHTTP(ctx context.Context, token, base, method, path string, body []byt
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := client.Do(req)
+	resp, err := benchmarkHTTPClient.Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -200,7 +202,7 @@ func (s *Server) benchClose(w http.ResponseWriter, r *http.Request) {
 }
 
 func urlEncode(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(s, "+", "%2B"), "/", "%2F")
+	return url.QueryEscape(s)
 }
 
 // benchmarkCallForAgent 是 agent.BenchmarkCall 的实现：worker/红队总指挥的 bench_* 工具调用入口。
