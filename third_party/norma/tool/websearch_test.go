@@ -73,6 +73,34 @@ func TestDDGSSearchParse(t *testing.T) {
 	}
 }
 
+func TestDDGSFallsBackToInstantAnswer(t *testing.T) {
+	html := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer html.Close()
+	instant := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("q") != "fallback" {
+			t.Errorf("unexpected query: %q", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"Heading":"Fallback Result",
+			"AbstractText":"A usable fallback response.",
+			"AbstractURL":"https://example.com/fallback"
+		}`))
+	}))
+	defer instant.Close()
+
+	p := &ddgsProvider{client: html.Client(), endpoint: html.URL, instantEndpoint: instant.URL}
+	res, err := p.Search(context.Background(), "fallback", 3)
+	if err != nil {
+		t.Fatalf("Search fallback: %v", err)
+	}
+	if len(res) != 1 || res[0].URL != "https://example.com/fallback" {
+		t.Fatalf("unexpected fallback result: %+v", res)
+	}
+}
+
 func TestBraveSearchParse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("X-Subscription-Token"); got != "secret-key" {
@@ -113,8 +141,8 @@ func TestBraveHTTPError(t *testing.T) {
 func TestUnwrapDDGHref(t *testing.T) {
 	cases := map[string]string{
 		"//duckduckgo.com/l/?uddg=https%3A%2F%2Fx.com%2Fy&rut=z": "https://x.com/y",
-		"https://plain.example/path":                            "https://plain.example/path",
-		"":                                                      "",
+		"https://plain.example/path":                             "https://plain.example/path",
+		"":                                                       "",
 	}
 	for in, want := range cases {
 		if got := unwrapDDGHref(in); got != want {

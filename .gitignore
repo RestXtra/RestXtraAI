@@ -36,6 +36,13 @@ Thumbs.db
 
 # skills 库（本地 skill 集合，不随源码分发；部署时从发布包/挂载引入）
 /skills/
+# Built-in source-audit guidance is versioned so the code-audit agent works in
+# packaged and remote deployments; other locally installed skills stay ignored.
+!/skills/
+!/skills/audit-skills/
+!/skills/audit-skills/**
+!/skills/code-audit/
+!/skills/code-audit/**
 
 # 本地代理入口（proxybridge：自实现 mixed HTTP/SOCKS5 代理桥 + server 接线），
 # 仅本地使用，不随源码分发到远端仓库

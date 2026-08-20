@@ -333,6 +333,24 @@ function ChatView({
   const [stopping, setStopping] = React.useState(false);
   const cursorRef = React.useRef(0);
   const agent = agents.find((a) => a.key === conv.agent_key);
+  const agentPicker = (
+    <Select value={conv.agent_key} onValueChange={changeAgent} disabled={running}>
+      <SelectTrigger size="sm" className="w-auto min-w-36 shrink-0">
+        <SelectValue placeholder="选择智能体" />
+      </SelectTrigger>
+      <SelectContent>
+        {agents.map((a) => (
+          <SelectItem key={a.key} value={a.key}>
+            <span className="flex items-center gap-2">
+              <Bot className="size-3.5" />
+              {a.name}
+              {!a.builtin && <Badge variant="outline" className="px-1 py-0 text-[9px]">自定义</Badge>}
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
   const currentProfileId = conv.llm_profile_id ?? null;
 
   async function changeProfile(id: number | null) {
@@ -511,27 +529,6 @@ function ChatView({
     <>
       {/* header: which agent + live + token meta */}
       <div className="flex items-center gap-2 border-b px-4 py-2">
-        <Select value={conv.agent_key} onValueChange={changeAgent} disabled={running}>
-          <SelectTrigger size="sm" className="w-auto min-w-36 shrink-0">
-            <SelectValue placeholder="选择智能体" />
-          </SelectTrigger>
-          <SelectContent>
-            {agents.map((a) => (
-              <SelectItem key={a.key} value={a.key}>
-                <span className="flex items-center gap-2">
-                  <Bot className="size-3.5" />
-                  {a.name}
-                  {!a.builtin && (
-                    <Badge variant="outline" className="px-1 py-0 text-[9px]">
-                      自定义
-                    </Badge>
-                  )}
-                </span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <span className="shrink-0 font-mono text-muted-foreground text-xs">{conv.agent_key}</span>
         {agent?.description && (
           <span className="min-w-0 truncate text-muted-foreground text-xs">{agent.description}</span>
         )}
@@ -578,6 +575,7 @@ function ChatView({
         selected={currentProfileId}
         onChange={changeProfile}
         disabled={running || sending}
+        leftSlot={agentPicker}
         rightSlot={<TodoPopover seq={latestTodoSeq} fetchDetail={fetchDetail} />}
         bottomSlot={
           <Select value={conv.company_id ? String(conv.company_id) : "none"} onValueChange={async (v) => { if (v !== "none") { try { await api.updateConversationCompany(conv.id, Number(v)); onConvUpdated(); } catch (e) { toast.error(`关联企业失败：${(e as Error).message}`); } } }} disabled={running || sending}>

@@ -36,6 +36,20 @@ var domainBaseTools = []string{
 
 var sixDomainAgents = []domainAgentSpec{
 	{
+		Key: "code_audit", Name: "代码审计", Description: "授权源码安全审计专家：数据流追踪、覆盖检查与非破坏性验证",
+		Prompt: "你是「代码审计」智能体，只对用户明确授权的源码、构建产物或反编译产物进行安全审计。\n" +
+			"工作边界：先确认审计目录与模式（快速/标准/深度）；未经确认不得审计不在用户授权范围内的代码。只做源码阅读、静态分析和非破坏性验证；不得写入目标、删除文件、修改配置、导出敏感数据、建立持久化或执行攻击载荷。\n" +
+			"审计方法：\n" +
+			"1. 先加载 audit-skills 与 code-audit，识别语言、框架、入口、鉴权边界、敏感 source/sink。\n" +
+			"2. 按数据流追踪验证可达性、可控性、传播链、防护、影响和可复现性。只引用实际读取的文件与行号，严禁编造发现。\n" +
+			"3. 未同时满足可达、可控、可传播、可利用和影响成立的结论，标记为“待人工验证”，不能报为确认漏洞。\n" +
+			"4. 确认问题时使用 report_finding，附受影响入口、source-to-sink 链、非破坏性证明、修复建议与证据文件/行号；用 record_fact 记录覆盖范围与未确认线索。\n" +
+			"5. 输出覆盖项、发现等级、待验证项和修复优先级的中文报告。",
+		MaxTurns: 16, RunSecs: 300,
+		Skills: []string{"audit-skills", "code-audit", "redteam-code-audit-detail-pack"},
+		Tools:  []string{"list_assets", "list_findings", "record_fact", "report_finding"},
+	},
+	{
 		Key: "asset_intel", Name: "信息收集", Description: "企业资产信息收集专家：FOFA 被动测绘、去重归档与范围管理",
 		Prompt: "你是「信息收集」智能体，负责用户明确授权企业的【被动】资产梳理与资产库归档。\n" +
 			"工作边界：只使用 fofa_asset_discover 调用 FOFA 官方 API；不得使用 nmap、httpx、目录扫描、漏洞验证、登录尝试或任何主动探测。\n" +

@@ -173,10 +173,12 @@ func webSearchRunner(prov searchProvider) func(context.Context, json.RawMessage,
 // so failures are surfaced as errors rather than treated as fatal.
 
 const ddgsEndpoint = "https://html.duckduckgo.com/html/"
+const ddgsInstantAnswerEndpoint = "https://api.duckduckgo.com/"
 
 type ddgsProvider struct {
-	client   *http.Client
-	endpoint string
+	client          *http.Client
+	endpoint        string
+	instantEndpoint string
 }
 
 func (p *ddgsProvider) Name() string { return "ddgs" }
@@ -193,21 +195,86 @@ func (p *ddgsProvider) Search(ctx context.Context, query string, limit int) ([]S
 	req.Header.Set("Referer", "https://html.duckduckgo.com/")
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, err
+		return p.searchInstantAnswer(ctx, query, limit, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusTooManyRequests {
-		return nil, fmt.Errorf("DuckDuckGo is rate-limiting (HTTP %d); try again later or switch backend", resp.StatusCode)
+		return p.searchInstantAnswer(ctx, query, limit, fmt.Errorf("DuckDuckGo HTML returned HTTP %d", resp.StatusCode))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("DuckDuckGo returned HTTP %d", resp.StatusCode)
+		return p.searchInstantAnswer(ctx, query, limit, fmt.Errorf("DuckDuckGo HTML returned HTTP %d", resp.StatusCode))
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFetchBytes))
 	doc, err := html.Parse(strings.NewReader(string(body)))
 	if err != nil {
 		return nil, fmt.Errorf("could not parse DuckDuckGo response: %w", err)
 	}
-	return parseDDGS(doc, limit), nil
+	if out := parseDDGS(doc, limit); len(out) > 0 {
+		return out, nil
+	}
+	return p.searchInstantAnswer(ctx, query, limit, fmt.Errorf("DuckDuckGo HTML returned no results"))
+}
+
+// searchInstantAnswer is a keyless official DuckDuckGo fallback. It is less
+// comprehensive than HTML search, but avoids making web search unavailable when
+// the scrape endpoint is rate-limited or blocked by an egress policy.
+func (p *ddgsProvider) searchInstantAnswer(ctx context.Context, query string, limit int, htmlErr error) ([]SearchResult, error) {
+	endpoint := p.instantEndpoint
+	if endpoint == "" {
+		endpoint = ddgsInstantAnswerEndpoint
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, htmlErr
+	}
+	q := u.Query()
+	q.Set("q", query)
+	q.Set("format", "json")
+	q.Set("no_html", "1")
+	q.Set("skip_disambig", "1")
+	u.RawQuery = q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, htmlErr
+	}
+	req.Header.Set("User-Agent", "RestXtraAI/1.0")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%v; Instant Answer fallback failed: %w. Configure a web-search proxy or use Brave/Tavily", htmlErr, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%v; Instant Answer fallback returned HTTP %d. Configure a web-search proxy or use Brave/Tavily", htmlErr, resp.StatusCode)
+	}
+	var payload struct {
+		AbstractText  string `json:"AbstractText"`
+		AbstractURL   string `json:"AbstractURL"`
+		Heading       string `json:"Heading"`
+		RelatedTopics []struct {
+			Text     string `json:"Text"`
+			FirstURL string `json:"FirstURL"`
+		} `json:"RelatedTopics"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxFetchBytes)).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("%v; Instant Answer fallback parsing failed: %w", htmlErr, err)
+	}
+	var out []SearchResult
+	if payload.AbstractURL != "" {
+		out = append(out, SearchResult{Title: payload.Heading, URL: payload.AbstractURL, Description: payload.AbstractText, Position: 1})
+	}
+	for _, topic := range payload.RelatedTopics {
+		if len(out) >= limit {
+			break
+		}
+		if topic.FirstURL == "" {
+			continue
+		}
+		out = append(out, SearchResult{Title: topic.Text, URL: topic.FirstURL, Description: topic.Text, Position: len(out) + 1})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%v; Instant Answer fallback returned no results. Configure a web-search proxy or use Brave/Tavily", htmlErr)
+	}
+	return out, nil
 }
 
 // parseDDGS walks the DuckDuckGo HTML result page. Each result carries a title
