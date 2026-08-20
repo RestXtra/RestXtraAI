@@ -12,10 +12,22 @@ PG_USER="${RESTXTRA_PG_USER:-root}"
 PG_PASS="${RESTXTRA_PG_PASS:-123456}"
 PG_DB="${RESTXTRA_PG_DB:-restxtra_ai}"
 
-# ── 0. 确保 PostgreSQL 运行 ──────────────────────────────────────────────
+# ── 0. 确保 PostgreSQL 可用 ─────────────────────────────────────────────
+# 优先用 TCP 探测 5432：若已有实例响应（如 Docker 容器 postgres:16 映射的
+# 0.0.0.0:5432），说明数据库就绪，直接跳过本机 cluster 逻辑（本机 cluster
+# 会因端口被占而无法启动，反而报 socket 错误）。
+pg_ready() {
+  command -v pg_isready >/dev/null 2>&1 && pg_isready -q -h 127.0.0.1 -p 5432
+}
+
 ensure_postgres() {
+  # 已有实例在 TCP 5432 响应 → 视为就绪，跳过
+  if pg_ready; then
+    echo "[pg] 检测到 127.0.0.1:5432 已有 PostgreSQL 实例（如 Docker 容器），直接使用"
+    return 0
+  fi
+  # 否则尝试启动本机 cluster
   if command -v pg_lsclusters >/dev/null 2>&1; then
-    # 任一 cluster 的 status 不是 online 就尝试启动
     if ! pg_lsclusters 2>/dev/null | awk 'NR>1 && $4=="down"' | grep -q .; then
       echo "[pg] 检测到 cluster 全部 online，跳过启动"
     else
@@ -25,9 +37,8 @@ ensure_postgres() {
         || true
     fi
   fi
-  # 等就绪
   for i in $(seq 1 30); do
-    if command -v pg_isready >/dev/null 2>&1 && pg_isready -q -h 127.0.0.1 -p 5432; then
+    if pg_ready; then
       echo "[pg] PostgreSQL 就绪 (127.0.0.1:5432)"
       return 0
     fi
@@ -37,7 +48,13 @@ ensure_postgres() {
 }
 
 # ── 1. 确保角色与库存在（幂等） ─────────────────────────────────────────
+# 仅在 TCP 5432 无实例（刚由本机 cluster 启动）时才需要初始化；
+# 若 5432 来自 Docker 容器，用户/库/表已就绪，无需也无需初始化。
 ensure_role_db() {
+  if pg_ready; then
+    echo "[pg] 5432 已有实例，跳过角色/库初始化"
+    return 0
+  fi
   local ok=1
   sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$PG_USER'" 2>/dev/null | grep -q 1 || ok=0
   if [ "$ok" = "0" ]; then
