@@ -43,6 +43,8 @@ func builtinToolsByAgent() map[string][]actool.CoreTool {
 		// pentest（独立渗透 agent）默认绑：查资产 / 插资产 / 报漏洞 / 查漏洞 / 查企业。
 		// 新库由此 seed 写入；老库由 seedPentestDefaultBindings 迁移。
 		"pentest": {ts.listAssets(), ts.insertAssets(), ts.addFinding(), ts.listFindings(), ts.listCompanies()},
+		// 信息收集智能体只拥有被动 FOFA 测绘与资产归档能力。
+		"asset_intel": {ts.fofaAssetDiscover(), ts.listAssets(), ts.listCompanies()},
 	}
 }
 
@@ -50,7 +52,7 @@ func builtinToolsByAgent() map[string][]actool.CoreTool {
 // list_assets 三者都有）合成一条，Agents 取并集。顺序稳定（mainagent→planner→worker）。
 func BuiltinToolSeeds() []ToolSeed {
 	byAgent := builtinToolsByAgent()
-	order := []string{"mainagent", "planner", "worker", "auto", "pentest"}
+	order := []string{"mainagent", "planner", "worker", "auto", "pentest", "asset_intel"}
 
 	type acc struct {
 		tool   actool.CoreTool
