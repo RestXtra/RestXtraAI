@@ -54,24 +54,25 @@ type Conversation struct {
 	AgentKey     string    `json:"agent_key"`
 	Title        string    `json:"title"`
 	LLMProfileID *int64    `json:"llm_profile_id,omitempty"`
+	CompanyID    *int64    `json:"company_id,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-const convCols = `id, agent_key, title, llm_profile_id, created_at, updated_at`
+const convCols = `id, agent_key, title, llm_profile_id, company_id, created_at, updated_at`
 
 func scanConv(row interface{ Scan(...any) error }) (Conversation, error) {
 	var c Conversation
-	err := row.Scan(&c.ID, &c.AgentKey, &c.Title, &c.LLMProfileID, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.AgentKey, &c.Title, &c.LLMProfileID, &c.CompanyID, &c.CreatedAt, &c.UpdatedAt)
 	return c, err
 }
 
 // CreateConversation opens a new chat thread for agentKey with an initial title.
 // llmProfileID may be nil to use the globally active profile.
-func (d *DB) CreateConversation(agentKey, title string, llmProfileID *int64) (*Conversation, error) {
+func (d *DB) CreateConversation(agentKey, title string, llmProfileID, companyID *int64) (*Conversation, error) {
 	c, err := scanConv(d.QueryRow(`
-INSERT INTO conversations(agent_key, title, llm_profile_id) VALUES ($1, $2, $3)
-RETURNING `+convCols, agentKey, title, llmProfileID))
+INSERT INTO conversations(agent_key, title, llm_profile_id, company_id) VALUES ($1, $2, $3, $4)
+RETURNING `+convCols, agentKey, title, llmProfileID, companyID))
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +88,12 @@ func (d *DB) UpdateConversationProfile(id int64, llmProfileID *int64) error {
 // UpdateConversationAgent 将会话绑定的 agent 切换到新 key（用于会话中途换智能体）。
 func (d *DB) UpdateConversationAgent(id int64, agentKey string) error {
 	_, err := d.Exec(`UPDATE conversations SET agent_key=$2 WHERE id=$1`, id, agentKey)
+	return err
+}
+
+// UpdateConversationCompany assigns a chat thread to an enterprise project.
+func (d *DB) UpdateConversationCompany(id int64, companyID *int64) error {
+	_, err := d.Exec(`UPDATE conversations SET company_id=$2 WHERE id=$1`, id, companyID)
 	return err
 }
 

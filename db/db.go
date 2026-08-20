@@ -99,6 +99,11 @@ func Open(dsn string) (*DB, error) {
 		sqlDB.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if _, err := sqlDB.Exec(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS company_id BIGINT REFERENCES companies(id) ON DELETE SET NULL`); err != nil {
+		sqlDB.Exec(`SELECT pg_advisory_unlock(7337741001)`)
+		sqlDB.Close()
+		return nil, fmt.Errorf("migrate conversations company: %w", err)
+	}
 	d := &DB{DB: sqlDB}
 	if err := d.seedBuiltins(); err != nil {
 		sqlDB.Exec(`SELECT pg_advisory_unlock(7337741001)`) //nolint:errcheck

@@ -404,6 +404,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     agent_key      TEXT NOT NULL,
     title          TEXT NOT NULL DEFAULT '',
     llm_profile_id BIGINT REFERENCES llm_profiles(id) ON DELETE SET NULL,
+    company_id     BIGINT REFERENCES companies(id) ON DELETE SET NULL,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );

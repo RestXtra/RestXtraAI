@@ -44,6 +44,7 @@ func (s *Server) pgCreateConversation(w http.ResponseWriter, r *http.Request) {
 		AgentKey     string `json:"agent_key"`
 		Title        string `json:"title"`
 		LLMProfileID *int64 `json:"llm_profile_id"`
+		CompanyID    *int64 `json:"company_id"`
 	}
 	if err := decode(r, &req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -73,7 +74,7 @@ func (s *Server) pgCreateConversation(w http.ResponseWriter, r *http.Request) {
 	if title == "" {
 		title = "新对话"
 	}
-	c, err := pg.CreateConversation(req.AgentKey, title, req.LLMProfileID)
+	c, err := pg.CreateConversation(req.AgentKey, title, req.LLMProfileID, req.CompanyID)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -89,6 +90,7 @@ func (s *Server) pgUpdateConversation(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		LLMProfileID *int64 `json:"llm_profile_id"` // null clears the override
 		AgentKey     string `json:"agent_key"`      // 可选：切换会话绑定的智能体
+		CompanyID    *int64 `json:"company_id"`     // 可选：关联企业项目
 	}
 	if err := decode(r, &req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -106,6 +108,16 @@ func (s *Server) pgUpdateConversation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := pg.UpdateConversationAgent(c.ID, req.AgentKey); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.CompanyID != nil {
+		if company, err := pg.Companies().GetCompany(*req.CompanyID); err != nil || company == nil {
+			writeErr(w, 400, "指定的企业不存在")
+			return
+		}
+		if err := pg.UpdateConversationCompany(c.ID, req.CompanyID); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
@@ -462,7 +474,7 @@ func (s *Server) runTriggeredRun(item triggeredRun) {
 		}
 	}()
 	pg := s.m.pg
-	c, err := pg.CreateConversation(item.agentKey, firstLine(item.title, 60), nil)
+	c, err := pg.CreateConversation(item.agentKey, firstLine(item.title, 60), nil, nil)
 	if err != nil {
 		log.Printf("[trigger] create conversation for %s failed: %v", item.agentKey, err)
 		return

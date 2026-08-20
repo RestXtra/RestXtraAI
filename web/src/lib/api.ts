@@ -434,13 +434,15 @@ export const api = {
 
   // ---- conversations (chat page) ----
   conversations: () => get<{ conversations: Conversation[] }>("/conversations").then((r) => arr(r.conversations)),
-  createConversation: (agent_key: string, title = "", llm_profile_id?: number | null) =>
-    post<Conversation>("/conversations", { agent_key, title, llm_profile_id: llm_profile_id ?? null }),
+  createConversation: (agent_key: string, title = "", llm_profile_id?: number | null, company_id?: number | null) =>
+    post<Conversation>("/conversations", { agent_key, title, llm_profile_id: llm_profile_id ?? null, company_id: company_id ?? null }),
   renameConversation: (id: number, title: string) => patch<{ ok: boolean }>(`/conversations/${id}`, { title }),
   updateConversationProfile: (id: number, llm_profile_id: number | null) =>
     patch<{ ok: boolean }>(`/conversations/${id}/profile`, { llm_profile_id }),
   updateConversationAgent: (id: number, agent_key: string) =>
     patch<{ ok: boolean }>(`/conversations/${id}/profile`, { agent_key }),
+  updateConversationCompany: (id: number, company_id: number) =>
+    patch<{ ok: boolean }>(`/conversations/${id}/profile`, { company_id }),
   deleteConversation: (id: number) => del<{ deleted: number }>(`/conversations/${id}`),
   conversationMessages: (id: number, since = 0) =>
     get<{ items: Activity[]; cursor: number; running: boolean }>(`/conversations/${id}/messages?since=${since}`).then(

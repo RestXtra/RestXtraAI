@@ -16,7 +16,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import type { Activity, Agent, Conversation, LLMProfile } from "@/lib/types";
+import type { Activity, Agent, Company, Conversation, LLMProfile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useChatNavStore } from "@/stores/chat-nav-store";
 
@@ -80,10 +80,10 @@ function Composer({
   return (
     <div className="px-3 pt-0">
       <div className="relative mx-auto max-w-[840px]">
-        <div className="mx-auto flex max-w-[840px] items-end rounded-[29px] border border-border bg-background pr-1.5 shadow-sm backdrop-blur-lg focus-within:ring-1 focus-within:ring-ring/40 dark:bg-card/40">
+        <div className="mx-auto flex max-w-[840px] items-end rounded-[29px] border border-border/60 bg-background pr-1.5 shadow-sm backdrop-blur-lg transition-colors focus-within:border-transparent focus-within:ring-0 dark:bg-card/40">
           {leftSlot}
           <Textarea
-            className="max-h-[200px] min-h-10 flex-1 resize-none border-0 bg-transparent p-3 text-base shadow-none outline-none placeholder:truncate placeholder:text-muted-foreground md:p-4 md:pl-6"
+            className="max-h-[200px] min-h-10 flex-1 resize-none border-0 bg-transparent p-3 text-base shadow-none outline-none ring-0 focus:border-0 focus:outline-none focus:ring-0 focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0 placeholder:truncate placeholder:text-muted-foreground md:p-4 md:pl-6"
             rows={1}
             placeholder={placeholder}
             value={value}
@@ -109,7 +109,7 @@ function Composer({
               size="icon"
               onClick={onSend}
               disabled={disabled || !value.trim()}
-              className="mb-1 size-10 shrink-0 rounded-full bg-slate-600 text-white hover:bg-primary/90 md:mb-1.5 md:size-11"
+              className="mb-1 size-10 shrink-0 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 md:mb-1.5 md:size-11"
             >
               <ArrowUpIcon className="size-5 md:size-6" />
             </Button>
@@ -129,6 +129,7 @@ function LLMProfileRow({
   disabled,
   leftSlot,
   rightSlot,
+  bottomSlot,
 }: {
   profiles: LLMProfile[];
   selected: number | null;
@@ -136,6 +137,7 @@ function LLMProfileRow({
   disabled?: boolean;
   leftSlot?: React.ReactNode;
   rightSlot?: React.ReactNode;
+  bottomSlot?: React.ReactNode;
 }) {
   const [open, setOpen] = React.useState(false);
   const activeDefault = profiles.find((p) => p.is_default);
@@ -201,6 +203,7 @@ function LLMProfileRow({
         </PopoverContent>
       </Popover>
       {rightSlot}
+      {bottomSlot}
     </div>
   );
 }
@@ -212,14 +215,17 @@ function LLMProfileRow({
 function DraftChat({
   agents,
   profiles,
+  companies,
   onStarted,
 }: {
   agents: Agent[];
   profiles: LLMProfile[];
+  companies: Company[];
   onStarted: (c: Conversation) => void;
 }) {
   const [agentKey, setAgentKey] = React.useState("");
   const [llmProfileId, setLlmProfileId] = React.useState<number | null>(null);
+  const [companyId, setCompanyId] = React.useState<number | null>(null);
   const [input, setInput] = React.useState("");
   const [sending, setSending] = React.useState(false);
 
@@ -235,7 +241,7 @@ function DraftChat({
     if (!msg || !agentKey || sending) return;
     setSending(true);
     try {
-      const c = await api.createConversation(agentKey, "", llmProfileId);
+      const c = await api.createConversation(agentKey, "", llmProfileId, companyId);
       await api.sendConversationMessage(c.id, msg);
       onStarted(c);
     } catch (e) {
@@ -291,6 +297,12 @@ function DraftChat({
         onChange={setLlmProfileId}
         disabled={sending}
         leftSlot={agentPicker}
+        bottomSlot={
+          <Select value={companyId == null ? "none" : String(companyId)} onValueChange={(v) => setCompanyId(v === "none" ? null : Number(v))} disabled={sending}>
+            <SelectTrigger size="sm" className="w-40"><SelectValue placeholder="企业" /></SelectTrigger>
+            <SelectContent><SelectItem value="none">未关联企业</SelectItem>{companies.map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
+          </Select>
+        }
       />
     </>
   );
@@ -303,12 +315,14 @@ function ChatView({
   conv,
   agents,
   profiles,
+  companies,
   onTitleMaybeChanged,
   onConvUpdated,
 }: {
   conv: Conversation;
   agents: Agent[];
   profiles: LLMProfile[];
+  companies: Company[];
   onTitleMaybeChanged: () => void;
   onConvUpdated: () => void;
 }) {
@@ -565,6 +579,12 @@ function ChatView({
         onChange={changeProfile}
         disabled={running || sending}
         rightSlot={<TodoPopover seq={latestTodoSeq} fetchDetail={fetchDetail} />}
+        bottomSlot={
+          <Select value={conv.company_id ? String(conv.company_id) : "none"} onValueChange={async (v) => { if (v !== "none") { try { await api.updateConversationCompany(conv.id, Number(v)); onConvUpdated(); } catch (e) { toast.error(`关联企业失败：${(e as Error).message}`); } } }} disabled={running || sending}>
+            <SelectTrigger size="sm" className="w-36"><SelectValue placeholder="企业" /></SelectTrigger>
+            <SelectContent><SelectItem value="none">未关联企业</SelectItem>{companies.map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
+          </Select>
+        }
       />
     </>
   );
@@ -581,6 +601,7 @@ function ChatPageInner() {
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [convs, setConvs] = React.useState<Conversation[]>([]);
+  const [companies, setCompanies] = React.useState<Company[]>([]);
   const _bump = useChatNavStore((s) => s.bump);
   const select = useChatNavStore((s) => s.select);
 
@@ -604,6 +625,7 @@ function ChatPageInner() {
       .llmProfiles()
       .then(setProfiles)
       .catch(() => {});
+    api.companies().then(setCompanies).catch(() => {});
     reloadConvs();
   }, [reloadConvs]);
   // 侧栏列表增删会话后同步刷新（bump 由 ConversationList 触发）。
@@ -622,13 +644,14 @@ function ChatPageInner() {
       data-content-padding="false"
       className="flex h-[calc(100svh-3rem)] flex-col overflow-hidden md:h-[calc(100svh-4rem)]"
     >
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card">
+      <div className="chat-surface flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
         {selected ? (
           <ChatView
             key={selected.id}
             conv={selected}
             agents={agents}
             profiles={profiles}
+            companies={companies}
             onTitleMaybeChanged={reloadConvs}
             onConvUpdated={reloadConvs}
           />
@@ -636,6 +659,7 @@ function ChatPageInner() {
           <DraftChat
             agents={chatAgents}
             profiles={profiles}
+            companies={companies}
             onStarted={(c) => {
               reloadConvs();
               useChatNavStore.getState().refresh();

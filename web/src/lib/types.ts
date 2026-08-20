@@ -258,6 +258,7 @@ export interface Conversation {
   agent_key: string;
   title: string;
   llm_profile_id?: number;
+  company_id?: number;
   created_at: string;
   updated_at: string;
 }

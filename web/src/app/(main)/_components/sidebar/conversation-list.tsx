@@ -4,7 +4,7 @@ import * as React from "react";
 
 import { useRouter } from "next/navigation";
 
-import { ArchiveIcon, Bot, Check, MessageCircleIcon, PinIcon, Trash2Icon } from "lucide-react";
+import { ArchiveIcon, ArchiveRestoreIcon, Bot, FolderIcon, MessageCircleIcon, PinIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -23,36 +23,32 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SidebarMenuButton } from "@/components/ui/sidebar";
 import { api } from "@/lib/api";
-import type { Agent, Conversation } from "@/lib/types";
+import type { Agent, Company, Conversation } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useChatNavStore } from "@/stores/chat-nav-store";
 
 function ConversationItem({
   conv,
-  agent,
   active,
   onSelect,
   onDelete,
   pinned,
   archived,
   onTogglePin,
-  onToggleArchive,
 }: {
   conv: Conversation;
-  agent?: Agent;
   active: boolean;
   onSelect: () => void;
   onDelete: () => void;
   pinned: boolean;
   archived: boolean;
   onTogglePin: () => void;
-  onToggleArchive: () => void;
 }) {
   return (
     <div
       className={cn(
         "group ml-1 flex min-w-0 items-center gap-1 rounded-lg py-0.5 pr-1 transition-colors",
-        active ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
+        active ? "conversation-active text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/60",
       )}
     >
       <button
@@ -64,7 +60,6 @@ function ConversationItem({
         <div className="truncate text-[13px]">{conv.title || "新对话"}</div>
         <div className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
           <Bot className="size-2.5 shrink-0" />
-          <span className="min-w-0 truncate">{agent?.name ?? conv.agent_key}</span>
           <span className="shrink-0 opacity-60">
             · {new Date(conv.created_at).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })}
           </span>
@@ -73,9 +68,6 @@ function ConversationItem({
       <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100">
         <Button variant="ghost" size="icon-sm" className="size-7" title={pinned ? "取消置顶" : "置顶"} onClick={onTogglePin}>
           <PinIcon className={cn("size-3.5", pinned && "fill-current text-primary")} />
-        </Button>
-        <Button variant="ghost" size="icon-sm" className="size-7" title={archived ? "取消归档" : "归档"} onClick={onToggleArchive}>
-          {archived ? <Check className="size-3.5" /> : <ArchiveIcon className="size-3.5" />}
         </Button>
       </div>
       <AlertDialog>
@@ -110,6 +102,7 @@ export function ConversationList() {
   const router = useRouter();
   const [convs, setConvs] = React.useState<Conversation[]>([]);
   const [agents, setAgents] = React.useState<Agent[]>([]);
+  const [companies, setCompanies] = React.useState<Company[]>([]);
   const selectedId = useChatNavStore((s) => s.selectedId);
   const _bump = useChatNavStore((s) => s.bump);
   const select = useChatNavStore((s) => s.select);
@@ -117,6 +110,8 @@ export function ConversationList() {
   React.useEffect(() => {
     try { setMeta(JSON.parse(localStorage.getItem("restxtra.conversation-meta") || "{}")); } catch { /* ignore */ }
   }, []);
+  React.useEffect(() => { api.companies().then(setCompanies).catch(() => {}); }, []);
+
   const updateMeta = React.useCallback((id: number, patch: { pinned?: boolean; archived?: boolean }) => {
     setMeta((prev) => {
       const next = { ...prev, [id]: { ...prev[id], ...patch } };
@@ -124,8 +119,39 @@ export function ConversationList() {
       return next;
     });
   }, []);
-  const visible = convs.filter((c) => !meta[c.id]?.archived).sort((a, b) => Number(Boolean(meta[b.id]?.pinned)) - Number(Boolean(meta[a.id]?.pinned)) || +new Date(b.updated_at) - +new Date(a.updated_at));
-  const archived = convs.filter((c) => meta[c.id]?.archived).sort((a, b) => +new Date(b.updated_at) - +new Date(a.updated_at));
+  const archiveGroup = React.useCallback((items: Conversation[]) => {
+    setMeta((prev) => {
+      const next = { ...prev };
+      for (const c of items) next[c.id] = { ...next[c.id], archived: true };
+      try { localStorage.setItem("restxtra.conversation-meta", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+  const restoreGroup = React.useCallback((items: Conversation[]) => {
+    setMeta((prev) => {
+      const next = { ...prev };
+      for (const c of items) next[c.id] = { ...next[c.id], archived: false };
+      try { localStorage.setItem("restxtra.conversation-meta", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+  const grouped = React.useMemo(() => {
+    const map = new Map<string, Conversation[]>();
+    for (const c of [...convs].filter((c) => !meta[c.id]?.archived).sort((a, b) => Number(Boolean(meta[b.id]?.pinned)) - Number(Boolean(meta[a.id]?.pinned)) || +new Date(b.updated_at) - +new Date(a.updated_at))) {
+      const key = String(c.company_id ?? 0);
+      map.set(key, [...(map.get(key) ?? []), c]);
+    }
+    return [...map.entries()].sort(([a], [b]) => Number(b) - Number(a));
+  }, [convs, meta]);
+  const archivedConvs = convs.filter((c) => meta[c.id]?.archived).sort((a, b) => +new Date(b.updated_at) - +new Date(a.updated_at));
+  const archivedGrouped = React.useMemo(() => {
+    const map = new Map<string, Conversation[]>();
+    for (const c of archivedConvs) {
+      const key = String(c.company_id ?? 0);
+      map.set(key, [...(map.get(key) ?? []), c]);
+    }
+    return [...map.entries()].sort(([a], [b]) => Number(b) - Number(a));
+  }, [archivedConvs]);
 
   const reload = React.useCallback(() => {
     api
@@ -164,37 +190,39 @@ export function ConversationList() {
       <ScrollArea type="auto" className="[&_[data-slot=scroll-area-viewport]>div]:block! min-h-0 flex-1">
         <div className="flex min-w-0 flex-col gap-0.5 px-2 pb-2">
           {convs.length === 0 && <p className="px-2 py-6 text-center text-muted-foreground text-xs">暂无对话</p>}
-          {visible.map((c) => (
-            <ConversationItem
-              key={c.id}
-              conv={c}
-              agent={agents.find((a) => a.key === c.agent_key)}
-              active={selectedId === c.id}
-              onSelect={() => openChat(c.id)}
-              onDelete={() => del(c.id)}
-              pinned={Boolean(meta[c.id]?.pinned)}
-              archived={Boolean(meta[c.id]?.archived)}
-              onTogglePin={() => updateMeta(c.id, { pinned: !meta[c.id]?.pinned })}
-              onToggleArchive={() => updateMeta(c.id, { archived: !meta[c.id]?.archived })}
-            />
-          ))}
-          {archived.length > 0 && (
-            <details className="mt-2 border-t pt-2">
-              <summary className="cursor-pointer px-2 py-1 font-medium text-[11px] text-muted-foreground">已归档 ({archived.length})</summary>
-              {archived.map((c) => (
+          {grouped.filter(([key]) => key !== "0").map(([companyKey, items]) => (
+            <details key={companyKey} open className="mt-2 first:mt-0">
+              <summary className="flex cursor-pointer list-none items-center gap-2 border-b border-sidebar-border/50 px-2 py-1 font-medium text-[11px] text-muted-foreground"><FolderIcon className="size-3.5" /><span className="min-w-0 flex-1 truncate">{companies.find((x) => String(x.id) === companyKey)?.name ?? "企业项目"}</span><Button variant="ghost" size="icon-sm" className="size-6" title="归档整个项目" onClick={(e) => { e.preventDefault(); archiveGroup(items); }}><ArchiveIcon className="size-3.5" /></Button></summary>
+              {items.map((c) => (
                 <ConversationItem
                   key={c.id}
                   conv={c}
-                  agent={agents.find((a) => a.key === c.agent_key)}
                   active={selectedId === c.id}
                   onSelect={() => openChat(c.id)}
                   onDelete={() => del(c.id)}
-                  pinned={false}
-                  archived
-                  onTogglePin={() => updateMeta(c.id, { pinned: true })}
-                  onToggleArchive={() => updateMeta(c.id, { archived: false })}
+                  pinned={Boolean(meta[c.id]?.pinned)}
+                  archived={Boolean(meta[c.id]?.archived)}
+                  onTogglePin={() => updateMeta(c.id, { pinned: !meta[c.id]?.pinned })}
                 />
               ))}
+            </details>
+          ))}
+          {grouped.find(([key]) => key === "0")?.[1].length ? <details open className="mt-2"><summary className="flex cursor-pointer list-none items-center gap-2 border-b border-sidebar-border/50 px-2 py-1 font-medium text-[11px] text-muted-foreground"><FolderIcon className="size-3.5" /><span className="min-w-0 flex-1 truncate">未关联企业</span><Button variant="ghost" size="icon-sm" className="size-6" title="归档整个项目" onClick={(e) => { e.preventDefault(); archiveGroup(grouped.find(([key]) => key === "0")?.[1] ?? []); }}><ArchiveIcon className="size-3.5" /></Button></summary>{grouped.find(([key]) => key === "0")?.[1].map((c) => <ConversationItem key={c.id} conv={c} active={selectedId === c.id} onSelect={() => openChat(c.id)} onDelete={() => del(c.id)} pinned={Boolean(meta[c.id]?.pinned)} archived={false} onTogglePin={() => updateMeta(c.id, { pinned: !meta[c.id]?.pinned })} />)}</details> : null}
+          {archivedConvs.length > 0 && (
+            <details className="mt-3 border-t border-sidebar-border/60 pt-2">
+              <summary className="cursor-pointer px-2 py-1 font-medium text-[11px] text-muted-foreground">已归档 ({archivedConvs.length})</summary>
+              <div className="mt-1 flex flex-col gap-1">
+                {archivedGrouped.map(([companyKey, items]) => (
+                  <details key={companyKey} className="rounded-md" open>
+                    <summary className="flex cursor-pointer list-none items-center gap-2 border-b border-sidebar-border/40 px-2 py-1 font-medium text-[11px] text-muted-foreground">
+                      <FolderIcon className="size-3.5" />
+                      <span className="min-w-0 flex-1 truncate">{companyKey === "0" ? "未关联企业" : companies.find((x) => String(x.id) === companyKey)?.name ?? "企业项目"}</span>
+                      <Button variant="ghost" size="icon-sm" className="size-6" title="恢复整个项目" onClick={(e) => { e.preventDefault(); restoreGroup(items); }}><ArchiveRestoreIcon className="size-3.5" /></Button>
+                    </summary>
+                    {items.map((c) => <ConversationItem key={c.id} conv={c} active={selectedId === c.id} onSelect={() => openChat(c.id)} onDelete={() => del(c.id)} pinned={Boolean(meta[c.id]?.pinned)} archived onTogglePin={() => updateMeta(c.id, { pinned: !meta[c.id]?.pinned })} />)}
+                  </details>
+                ))}
+              </div>
             </details>
           )}
         </div>
