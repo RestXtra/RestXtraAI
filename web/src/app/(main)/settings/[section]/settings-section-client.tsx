@@ -32,7 +32,7 @@ export function SettingsSectionClient({ section }: { section: string }) {
   return (
     <div
       data-content-padding="false"
-      className="flex min-h-0 flex-1 flex-col bg-background"
+      className="flex min-h-0 flex-1 flex-col bg-transparent"
     >
       <div className="codex-shell-header flex items-center gap-2 border-b px-4 py-3 lg:px-6">
         <h1 className="font-semibold text-xl tracking-tight">设置</h1>
@@ -40,7 +40,7 @@ export function SettingsSectionClient({ section }: { section: string }) {
       </div>
       <div className="flex min-h-0 flex-1">
         {/* 左侧分节栏（学 kanna SettingsPage registry） */}
-        <nav className="w-52 shrink-0 overflow-y-auto border-r bg-sidebar p-2 text-sidebar-foreground">
+        <nav className="w-52 shrink-0 overflow-y-auto border-r border-sidebar-border/70 bg-transparent p-2 text-sidebar-foreground">
           <div className="flex flex-col gap-0.5">
             {sections.map((s) => {
               const Icon = s.icon;
@@ -53,8 +53,8 @@ export function SettingsSectionClient({ section }: { section: string }) {
                   className={cn(
                     "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
                     isActive
-                      ? "bg-accent font-medium text-accent-foreground"
-                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                      ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
                   )}
                 >
                   {Icon && <Icon className="size-4 shrink-0" />}
@@ -66,7 +66,7 @@ export function SettingsSectionClient({ section }: { section: string }) {
         </nav>
 
         {/* 右侧内容区：iframe 内嵌现有页面（?embed=1 隐藏内嵌页的侧栏/头部） */}
-        <div className="relative min-h-0 min-w-0 flex-1">
+        <div className="relative min-h-0 min-w-0 flex-1 bg-transparent">
           {loading && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/95">
               <Loader2 className="size-6 animate-spin text-muted-foreground" />
@@ -76,7 +76,20 @@ export function SettingsSectionClient({ section }: { section: string }) {
             <iframe
               key={active.id}
               src={`${active.url}?embed=1`}
-              onLoad={() => setLoading(false)}
+              onLoad={(event) => {
+                setLoading(false);
+                const root = document.documentElement;
+                event.currentTarget.contentWindow?.postMessage({
+                  type: "restxtra:pref",
+                  key: "theme_mode",
+                  value: root.getAttribute("data-theme-mode") ?? (root.classList.contains("dark") ? "dark" : "light"),
+                }, "*");
+                event.currentTarget.contentWindow?.postMessage({
+                  type: "restxtra:pref",
+                  key: "theme_preset",
+                  value: root.getAttribute("data-theme-preset") ?? "default",
+                }, "*");
+              }}
               className="h-full w-full border-0 bg-transparent"
               title={active.label}
             />

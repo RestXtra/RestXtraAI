@@ -41,12 +41,14 @@ export function PreferencesPanel() {
     applyThemePreset(preset);
     setThemePreset(preset);
     void persistPreference("theme_preset", preset);
+    if (window.parent !== window) window.parent.postMessage({ type: "restxtra:pref", key: "theme_preset", value: preset }, "*");
   };
 
   const onThemeModeChange = (mode: ThemeMode | "") => {
     if (!mode) return;
     setThemeMode(mode);
     void persistPreference("theme_mode", mode);
+    if (window.parent !== window) window.parent.postMessage({ type: "restxtra:pref", key: "theme_mode", value: mode }, "*");
   };
 
   const onContentLayoutChange = (layout: ContentLayout | "") => {
@@ -173,84 +175,7 @@ export function PreferencesPanel() {
           </ToggleGroup>
         </div>
 
-        <div className="space-y-1">
-          <Label className="font-medium text-xs">页面布局</Label>
-          <ToggleGroup
-            size="sm"
-            spacing={0}
-            variant="outline"
-            type="single"
-            value={contentLayout}
-            onValueChange={onContentLayoutChange}
-          >
-            <ToggleGroupItem value="centered" aria-label="居中">
-              居中
-            </ToggleGroupItem>
-            <ToggleGroupItem value="full-width" aria-label="通栏">
-              通栏
-            </ToggleGroupItem>
-          </ToggleGroup>
-        </div>
-
-        <div className="space-y-1">
-          <Label className="font-medium text-xs">顶栏行为</Label>
-          <ToggleGroup
-            size="sm"
-            spacing={0}
-            variant="outline"
-            type="single"
-            value={navbarStyle}
-            onValueChange={onNavbarStyleChange}
-          >
-            <ToggleGroupItem value="sticky" aria-label="固定">
-              固定
-            </ToggleGroupItem>
-            <ToggleGroupItem value="scroll" aria-label="随页面滚动">
-              随页面滚动
-            </ToggleGroupItem>
-          </ToggleGroup>
-        </div>
-
-        <div className="space-y-1">
-          <Label className="font-medium text-xs">侧栏样式</Label>
-          <ToggleGroup
-            size="sm"
-            spacing={0}
-            variant="outline"
-            type="single"
-            value={variant}
-            onValueChange={onSidebarStyleChange}
-          >
-            <ToggleGroupItem value="inset" aria-label="内嵌">
-              内嵌
-            </ToggleGroupItem>
-            <ToggleGroupItem value="sidebar" aria-label="侧栏">
-              侧栏
-            </ToggleGroupItem>
-            <ToggleGroupItem value="floating" aria-label="浮动">
-              浮动
-            </ToggleGroupItem>
-          </ToggleGroup>
-        </div>
-
-        <div className="space-y-1">
-          <Label className="font-medium text-xs">侧栏折叠方式</Label>
-          <ToggleGroup
-            size="sm"
-            spacing={0}
-            variant="outline"
-            type="single"
-            value={collapsible}
-            onValueChange={onSidebarCollapseModeChange}
-          >
-            <ToggleGroupItem value="icon" aria-label="折叠为图标">
-              折叠为图标
-            </ToggleGroupItem>
-            <ToggleGroupItem value="offcanvas" aria-label="抽屉式">
-              抽屉式
-            </ToggleGroupItem>
-          </ToggleGroup>
-        </div>
+        <p className="text-muted-foreground text-xs">布局、顶栏和侧栏折叠方式已按 Codex 固定为内嵌布局与图标折叠。</p>
 
         <Button type="button" size="sm" variant="outline" className="w-full text-xs" onClick={handleRestore}>
           恢复默认

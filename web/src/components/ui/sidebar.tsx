@@ -137,7 +137,7 @@ function SidebarProvider({
           } as React.CSSProperties
         }
         className={cn(
-          "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
+          "group/sidebar-wrapper flex min-h-svh w-full min-w-0 overflow-hidden has-data-[variant=inset]:bg-sidebar",
           className
         )}
         {...props}
@@ -205,8 +205,8 @@ function Sidebar({
   }
 
   return (
-    <div
-      className="group peer hidden text-sidebar-foreground md:block"
+      <div
+        className="group peer hidden shrink-0 text-sidebar-foreground md:block"
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
       data-variant={variant}
@@ -245,9 +245,42 @@ function Sidebar({
         >
           {children}
         </div>
+        <SidebarResizeHandle />
       </div>
     </div>
   )
+}
+
+function SidebarResizeHandle() {
+  const frame = React.useRef<number | null>(null);
+  return <div aria-label="调整侧栏宽度" className="absolute inset-y-0 right-0 z-30 hidden w-1 cursor-col-resize hover:bg-sidebar-ring/60 md:block" onPointerDown={(event) => {
+    event.preventDefault();
+    const handle = event.currentTarget as HTMLElement;
+    const wrapper = handle.closest('[data-slot="sidebar-wrapper"]') as HTMLElement | null;
+    if (!wrapper) return;
+    const startX = event.clientX;
+    const startWidth = Number.parseFloat(getComputedStyle(wrapper).getPropertyValue("--sidebar-width")) || 272;
+    wrapper.dataset.resizing = "true";
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const move = (e: PointerEvent) => {
+      if (frame.current != null) cancelAnimationFrame(frame.current);
+      const width = Math.min(420, Math.max(220, startWidth + e.clientX - startX));
+      frame.current = requestAnimationFrame(() => wrapper.style.setProperty("--sidebar-width", `${width}px`));
+    };
+    const done = () => {
+      if (frame.current != null) cancelAnimationFrame(frame.current);
+      wrapper.removeAttribute("data-resizing");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", done);
+      document.removeEventListener("pointercancel", done);
+    };
+    document.addEventListener("pointermove", move, { passive: true });
+    document.addEventListener("pointerup", done, { once: true });
+    document.addEventListener("pointercancel", done, { once: true });
+  }} />;
 }
 
 function SidebarTrigger({
@@ -306,7 +339,7 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        "relative flex w-full flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
+        "relative flex w-0 min-w-0 max-w-full basis-0 flex-1 flex-col overflow-hidden bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
         className
       )}
       {...props}

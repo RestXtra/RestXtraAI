@@ -102,8 +102,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           {/* 导航区可滚动，避免撑满后把下方最近对话挤出/裁剪 */}
           <div className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto">
             <NavMain items={nav} />
-          </div>
-          <div className="w-full shrink-0 border-t py-1">
             <CollapsedConversationLauncher />
           </div>
         </SidebarContent>
@@ -126,8 +124,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </SidebarContent>
       )}
 
-      {/* 底部：设置 + 用户菜单（折叠态隐藏） */}
-      {!isCollapsed && <SidebarFooter />}
+      {/* 底部：设置 + 用户菜单；折叠态保留设置图标 */}
+      <SidebarFooter />
     </Sidebar>
   );
 }

@@ -8,6 +8,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { auth } from "@/lib/auth";
 import { getClientCookie } from "@/lib/cookie.client";
 import { applyContentLayout, applyNavbarStyle } from "@/lib/preferences/layout-utils";
+import { applyThemeMode, applyThemePreset } from "@/lib/preferences/theme-utils";
 import { cn } from "@/lib/utils";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
@@ -46,6 +47,8 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
   const navbarStyle = usePreferencesStore((s) => s.navbarStyle);
   const setSidebarVariant = usePreferencesStore((s) => s.setSidebarVariant);
   const setSidebarCollapsible = usePreferencesStore((s) => s.setSidebarCollapsible);
+  const setThemeMode = usePreferencesStore((s) => s.setThemeMode);
+  const setThemePreset = usePreferencesStore((s) => s.setThemePreset);
 
   // 从 /settings 的 iframe 接收偏好变更（postMessage），实时同步父页面侧栏。
   React.useEffect(() => {
@@ -54,10 +57,12 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
       if (d?.type !== "restxtra:pref") return;
       if (d.key === "sidebar_variant" && d.value) setSidebarVariant(d.value as typeof variant);
       if (d.key === "sidebar_collapsible" && d.value) setSidebarCollapsible(d.value as typeof collapsible);
+      if (d.key === "theme_mode" && d.value) { applyThemeMode(d.value as "light" | "dark" | "system"); setThemeMode(d.value as "light" | "dark" | "system"); }
+      if (d.key === "theme_preset" && d.value) { applyThemePreset(d.value); setThemePreset(d.value as Parameters<typeof setThemePreset>[0]); }
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [setSidebarVariant, setSidebarCollapsible]);
+  }, [setSidebarVariant, setSidebarCollapsible, setThemeMode, setThemePreset]);
 
   // Sync the html data-* attributes (which the CSS-driven rules for the content
   // wrapper and sticky header read) whenever the store changes, so switching
@@ -92,12 +97,13 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
       <AppSidebar variant={variant} collapsible={collapsible} />
       <SidebarInset
         className={cn(
-          "[html[data-content-layout=centered]_&>*]:mx-auto",
-          "[html[data-content-layout=centered]_&>*]:w-full",
-          "[html[data-content-layout=centered]_&>*]:max-w-screen-2xl",
+          // The shell itself must always occupy the full space beside the
+          // sidebar. Page-specific surfaces can still choose their own max
+          // width, but the global centered-layout cap must not shrink them.
+          "[&>*]:min-w-0 [&>*]:w-full",
           "peer-data-[variant=inset]:border",
           "[--dashboard-header-height:--spacing(12)]",
-          "min-w-0 overflow-x-hidden",
+          "main-flex-panel min-w-0 max-w-full basis-0 flex-1 overflow-x-hidden",
         )}
       >
         <MainContent>{children}</MainContent>

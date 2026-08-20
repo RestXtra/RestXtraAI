@@ -433,7 +433,7 @@ function UserRow({ step, intent, getDetail }: { step: Activity; intent?: boolean
   }, [step.seq, getDetail, step.summary]);
   return (
     <div className="mt-3 mb-2 flex justify-end gap-2">
-      <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-lg rounded-tr-sm bg-primary px-3 py-1.5 text-sm text-primary-foreground">
+      <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-lg rounded-tr-sm bg-muted px-3 py-1.5 text-sm text-foreground">
         {full ?? step.summary}
       </div>
       <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10">
@@ -465,7 +465,7 @@ function AnswerBlock({ step, getDetail }: { step: Activity; getDetail: (seq: num
     <div className="mb-2 mt-1 flex">
       <div
         className={
-          "min-w-0 flex-1 break-words rounded-lg bg-muted px-3 py-2 " +
+          "min-w-0 flex-1 break-words rounded-lg bg-transparent px-3 py-2 " +
           (step.is_error ? "text-sm text-red-600 dark:text-red-400" : "")
         }
       >

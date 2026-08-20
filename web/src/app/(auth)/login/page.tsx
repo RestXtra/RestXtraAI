@@ -28,7 +28,7 @@ export default function LoginPage() {
       .then(({ initialized }) => {
         if (!initialized) router.replace("/setup");
       })
-      .catch(() => setError("无法连接到后端服务"))
+      .catch(() => setError("无法连接到后端服务（请先启动 RestXtra 后端 :8787）"))
       .finally(() => setChecking(false));
   }, [router]);
 
