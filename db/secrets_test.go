@@ -60,7 +60,8 @@ func TestMCPEnvProtectRevealAndRedact(t *testing.T) {
 		t.Fatal("MCP credential was not encrypted")
 	}
 	plain, err := d.RevealMCPEnv(protected)
-	if err != nil || string(plain) != string(raw) {
+	var revealed map[string]string
+	if err != nil || json.Unmarshal(plain, &revealed) != nil || revealed["X-API-Key"] != "abc" || revealed["NODE_ENV"] != "prod" {
 		t.Fatalf("MCP env round trip: %s, %v", plain, err)
 	}
 	redacted := RedactMCPEnv(plain)

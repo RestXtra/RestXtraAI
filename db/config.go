@@ -592,7 +592,7 @@ func (d *DB) SaveMCP(m *MCPServer) (int64, error) {
 			m.Name, m.Transport, m.Command, args, env, m.URL, m.Enabled).Scan(&id)
 		return id, err
 	}
-	_, err := d.Exec(`UPDATE mcp_servers SET name=$1,transport=$2,command=NULLIF($3,''),args=$4,env=$5,url=NULLIF($6,''),enabled=$7 WHERE id=$8`,
+	_, err = d.Exec(`UPDATE mcp_servers SET name=$1,transport=$2,command=NULLIF($3,''),args=$4,env=$5,url=NULLIF($6,''),enabled=$7 WHERE id=$8`,
 		m.Name, m.Transport, m.Command, args, env, m.URL, m.Enabled, m.ID)
 	return m.ID, err
 }
