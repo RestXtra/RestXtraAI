@@ -4,13 +4,14 @@ import type { ReactNode } from "react";
 
 import { ShieldXIcon } from "lucide-react";
 
-import { hasPerm, useCurrentUser } from "@/hooks/use-current-user";
+import { hasPerm, useCurrentUserState } from "@/hooks/use-current-user";
 
 // PermissionGate renders children when the signed-in user holds the permission,
 // otherwise a 403 panel (admin bypasses). Wraps pages whose backend routes are
 // RBAC-gated so unauthorized users see an explicit denial instead of a bare error.
 export function PermissionGate({ perm, children }: { perm: string; children: ReactNode }) {
-  const user = useCurrentUser();
+  const { user, status } = useCurrentUserState();
+  if (status === "loading") return null;
   if (hasPerm(user, perm)) return <>{children}</>;
   return (
     <div className="flex h-full items-center justify-center py-24">

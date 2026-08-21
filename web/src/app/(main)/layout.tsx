@@ -5,7 +5,7 @@ import * as React from "react";
 
 import { AppSidebar } from "@/app/(main)/_components/sidebar/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
-import { api } from "@/lib/api";
+import { CurrentUserProvider, useCurrentUserState } from "@/hooks/use-current-user";
 import { getClientCookie } from "@/lib/cookie.client";
 import { applyContentLayout, applyNavbarStyle } from "@/lib/preferences/layout-utils";
 import { applyThemeMode, applyThemePreset } from "@/lib/preferences/theme-utils";
@@ -20,19 +20,14 @@ function isEmbed() {
   return new URLSearchParams(window.location.search).get("embed") === "1";
 }
 
-export default function Layout({ children }: Readonly<{ children: ReactNode }>) {
-  // Client-side auth gate — replaces the Next proxy/middleware that static export
-  // disables. No token → bounce to /login; render nothing until confirmed so no
-  // protected UI (or its API calls) flashes for a logged-out visitor.
-  const [authed, setAuthed] = React.useState(false);
+function AuthenticatedLayout({ children }: Readonly<{ children: ReactNode }>) {
+  const { status } = useCurrentUserState();
+
+  // Static export has no server middleware. The shared profile load is the
+  // client-side authentication gate and prevents protected UI/API calls flashing.
   React.useEffect(() => {
-    api
-      .platformMy()
-      .then(() => setAuthed(true))
-      .catch(() => {
-        window.location.href = "/login";
-      });
-  }, []);
+    if (status === "error") window.location.href = "/login";
+  }, [status]);
 
   const [embed, setEmbed] = React.useState(false);
   React.useEffect(() => {
@@ -81,7 +76,7 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
     applyNavbarStyle(navbarStyle);
   }, [navbarStyle]);
 
-  if (!authed) return null;
+  if (status !== "ready") return null;
 
   // embed 模式：iframe 内嵌，跳过侧栏 + 顶部 header，直接渲染内容。
   if (embed) {
@@ -116,5 +111,13 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
         <MainContent>{children}</MainContent>
       </SidebarInset>
     </SidebarProvider>
+  );
+}
+
+export default function Layout({ children }: Readonly<{ children: ReactNode }>) {
+  return (
+    <CurrentUserProvider>
+      <AuthenticatedLayout>{children}</AuthenticatedLayout>
+    </CurrentUserProvider>
   );
 }
