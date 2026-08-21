@@ -66,7 +66,13 @@ function ConversationItem({
         </div>
       </button>
       <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100">
-        <Button variant="ghost" size="icon-sm" className="size-7" title={pinned ? "取消置顶" : "置顶"} onClick={onTogglePin}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="size-7"
+          title={pinned ? "取消置顶" : "置顶"}
+          onClick={onTogglePin}
+        >
           <PinIcon className={cn("size-3.5", pinned && "fill-current text-primary")} />
         </Button>
       </div>
@@ -108,14 +114,27 @@ export function ConversationList() {
   const select = useChatNavStore((s) => s.select);
   const [meta, setMeta] = React.useState<Record<string, { pinned?: boolean; archived?: boolean }>>({});
   React.useEffect(() => {
-    try { setMeta(JSON.parse(localStorage.getItem("restxtra.conversation-meta") || "{}")); } catch { /* ignore */ }
+    try {
+      setMeta(JSON.parse(localStorage.getItem("restxtra.conversation-meta") || "{}"));
+    } catch {
+      /* ignore */
+    }
   }, []);
-  React.useEffect(() => { api.companies().then(setCompanies).catch(() => {}); }, []);
+  React.useEffect(() => {
+    api
+      .companies()
+      .then(setCompanies)
+      .catch(() => {});
+  }, []);
 
   const updateMeta = React.useCallback((id: number, patch: { pinned?: boolean; archived?: boolean }) => {
     setMeta((prev) => {
       const next = { ...prev, [id]: { ...prev[id], ...patch } };
-      try { localStorage.setItem("restxtra.conversation-meta", JSON.stringify(next)); } catch { /* ignore */ }
+      try {
+        localStorage.setItem("restxtra.conversation-meta", JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
       return next;
     });
   }, []);
@@ -123,7 +142,11 @@ export function ConversationList() {
     setMeta((prev) => {
       const next = { ...prev };
       for (const c of items) next[c.id] = { ...next[c.id], archived: true };
-      try { localStorage.setItem("restxtra.conversation-meta", JSON.stringify(next)); } catch { /* ignore */ }
+      try {
+        localStorage.setItem("restxtra.conversation-meta", JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
       return next;
     });
   }, []);
@@ -131,19 +154,31 @@ export function ConversationList() {
     setMeta((prev) => {
       const next = { ...prev };
       for (const c of items) next[c.id] = { ...next[c.id], archived: false };
-      try { localStorage.setItem("restxtra.conversation-meta", JSON.stringify(next)); } catch { /* ignore */ }
+      try {
+        localStorage.setItem("restxtra.conversation-meta", JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
       return next;
     });
   }, []);
   const grouped = React.useMemo(() => {
     const map = new Map<string, Conversation[]>();
-    for (const c of [...convs].filter((c) => !meta[c.id]?.archived).sort((a, b) => Number(Boolean(meta[b.id]?.pinned)) - Number(Boolean(meta[a.id]?.pinned)) || +new Date(b.updated_at) - +new Date(a.updated_at))) {
+    for (const c of [...convs]
+      .filter((c) => !meta[c.id]?.archived)
+      .sort(
+        (a, b) =>
+          Number(Boolean(meta[b.id]?.pinned)) - Number(Boolean(meta[a.id]?.pinned)) ||
+          +new Date(b.updated_at) - +new Date(a.updated_at),
+      )) {
       const key = String(c.company_id ?? 0);
       map.set(key, [...(map.get(key) ?? []), c]);
     }
     return [...map.entries()].sort(([a], [b]) => Number(b) - Number(a));
   }, [convs, meta]);
-  const archivedConvs = convs.filter((c) => meta[c.id]?.archived).sort((a, b) => +new Date(b.updated_at) - +new Date(a.updated_at));
+  const archivedConvs = convs
+    .filter((c) => meta[c.id]?.archived)
+    .sort((a, b) => +new Date(b.updated_at) - +new Date(a.updated_at));
   const archivedGrouped = React.useMemo(() => {
     const map = new Map<string, Conversation[]>();
     for (const c of archivedConvs) {
@@ -160,8 +195,8 @@ export function ConversationList() {
       .catch(() => setConvs([]));
   }, []);
   React.useEffect(() => {
-    reload();
-  }, [reload]);
+    if (_bump >= 0) reload();
+  }, [reload, _bump]);
   React.useEffect(() => {
     api
       .agents()
@@ -190,36 +225,116 @@ export function ConversationList() {
       <ScrollArea type="auto" className="[&_[data-slot=scroll-area-viewport]>div]:block! min-h-0 flex-1">
         <div className="flex min-w-0 flex-col gap-0.5 px-2 pb-2">
           {convs.length === 0 && <p className="px-2 py-6 text-center text-muted-foreground text-xs">暂无对话</p>}
-          {grouped.filter(([key]) => key !== "0").map(([companyKey, items]) => (
-            <details key={companyKey} open className="mt-2 first:mt-0">
-              <summary className="flex cursor-pointer list-none items-center gap-2 border-b border-sidebar-border/50 px-2 py-1 font-medium text-[11px] text-muted-foreground"><FolderIcon className="size-3.5" /><span className="min-w-0 flex-1 truncate">{companies.find((x) => String(x.id) === companyKey)?.name ?? "企业项目"}</span><Button variant="ghost" size="icon-sm" className="size-6" title="归档整个项目" onClick={(e) => { e.preventDefault(); archiveGroup(items); }}><ArchiveIcon className="size-3.5" /></Button></summary>
-              {items.map((c) => (
-                <ConversationItem
-                  key={c.id}
-                  conv={c}
-                  active={selectedId === c.id}
-                  onSelect={() => openChat(c.id)}
-                  onDelete={() => del(c.id)}
-                  pinned={Boolean(meta[c.id]?.pinned)}
-                  archived={Boolean(meta[c.id]?.archived)}
-                  onTogglePin={() => updateMeta(c.id, { pinned: !meta[c.id]?.pinned })}
-                />
-              ))}
+          {grouped
+            .filter(([key]) => key !== "0")
+            .map(([companyKey, items]) => (
+              <details key={companyKey} open className="mt-2 first:mt-0">
+                <summary className="flex cursor-pointer list-none items-center gap-2 border-b border-sidebar-border/50 px-2 py-1 font-medium text-[11px] text-muted-foreground">
+                  <FolderIcon className="size-3.5" />
+                  <span className="min-w-0 flex-1 truncate">
+                    {companies.find((x) => String(x.id) === companyKey)?.name ?? "企业项目"}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-6"
+                    title="归档整个项目"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      archiveGroup(items);
+                    }}
+                  >
+                    <ArchiveIcon className="size-3.5" />
+                  </Button>
+                </summary>
+                {items.map((c) => (
+                  <ConversationItem
+                    key={c.id}
+                    conv={c}
+                    active={selectedId === c.id}
+                    onSelect={() => openChat(c.id)}
+                    onDelete={() => del(c.id)}
+                    pinned={Boolean(meta[c.id]?.pinned)}
+                    archived={Boolean(meta[c.id]?.archived)}
+                    onTogglePin={() => updateMeta(c.id, { pinned: !meta[c.id]?.pinned })}
+                  />
+                ))}
+              </details>
+            ))}
+          {grouped.find(([key]) => key === "0")?.[1].length ? (
+            <details open className="mt-2">
+              <summary className="flex cursor-pointer list-none items-center gap-2 border-b border-sidebar-border/50 px-2 py-1 font-medium text-[11px] text-muted-foreground">
+                <FolderIcon className="size-3.5" />
+                <span className="min-w-0 flex-1 truncate">未关联企业</span>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-6"
+                  title="归档整个项目"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    archiveGroup(grouped.find(([key]) => key === "0")?.[1] ?? []);
+                  }}
+                >
+                  <ArchiveIcon className="size-3.5" />
+                </Button>
+              </summary>
+              {grouped
+                .find(([key]) => key === "0")?.[1]
+                .map((c) => (
+                  <ConversationItem
+                    key={c.id}
+                    conv={c}
+                    active={selectedId === c.id}
+                    onSelect={() => openChat(c.id)}
+                    onDelete={() => del(c.id)}
+                    pinned={Boolean(meta[c.id]?.pinned)}
+                    archived={false}
+                    onTogglePin={() => updateMeta(c.id, { pinned: !meta[c.id]?.pinned })}
+                  />
+                ))}
             </details>
-          ))}
-          {grouped.find(([key]) => key === "0")?.[1].length ? <details open className="mt-2"><summary className="flex cursor-pointer list-none items-center gap-2 border-b border-sidebar-border/50 px-2 py-1 font-medium text-[11px] text-muted-foreground"><FolderIcon className="size-3.5" /><span className="min-w-0 flex-1 truncate">未关联企业</span><Button variant="ghost" size="icon-sm" className="size-6" title="归档整个项目" onClick={(e) => { e.preventDefault(); archiveGroup(grouped.find(([key]) => key === "0")?.[1] ?? []); }}><ArchiveIcon className="size-3.5" /></Button></summary>{grouped.find(([key]) => key === "0")?.[1].map((c) => <ConversationItem key={c.id} conv={c} active={selectedId === c.id} onSelect={() => openChat(c.id)} onDelete={() => del(c.id)} pinned={Boolean(meta[c.id]?.pinned)} archived={false} onTogglePin={() => updateMeta(c.id, { pinned: !meta[c.id]?.pinned })} />)}</details> : null}
+          ) : null}
           {archivedConvs.length > 0 && (
             <details className="mt-3 border-t border-sidebar-border/60 pt-2">
-              <summary className="cursor-pointer px-2 py-1 font-medium text-[11px] text-muted-foreground">已归档 ({archivedConvs.length})</summary>
+              <summary className="cursor-pointer px-2 py-1 font-medium text-[11px] text-muted-foreground">
+                已归档 ({archivedConvs.length})
+              </summary>
               <div className="mt-1 flex flex-col gap-1">
                 {archivedGrouped.map(([companyKey, items]) => (
                   <details key={companyKey} className="rounded-md" open>
                     <summary className="flex cursor-pointer list-none items-center gap-2 border-b border-sidebar-border/40 px-2 py-1 font-medium text-[11px] text-muted-foreground">
                       <FolderIcon className="size-3.5" />
-                      <span className="min-w-0 flex-1 truncate">{companyKey === "0" ? "未关联企业" : companies.find((x) => String(x.id) === companyKey)?.name ?? "企业项目"}</span>
-                      <Button variant="ghost" size="icon-sm" className="size-6" title="恢复整个项目" onClick={(e) => { e.preventDefault(); restoreGroup(items); }}><ArchiveRestoreIcon className="size-3.5" /></Button>
+                      <span className="min-w-0 flex-1 truncate">
+                        {companyKey === "0"
+                          ? "未关联企业"
+                          : (companies.find((x) => String(x.id) === companyKey)?.name ?? "企业项目")}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="size-6"
+                        title="恢复整个项目"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          restoreGroup(items);
+                        }}
+                      >
+                        <ArchiveRestoreIcon className="size-3.5" />
+                      </Button>
                     </summary>
-                    {items.map((c) => <ConversationItem key={c.id} conv={c} active={selectedId === c.id} onSelect={() => openChat(c.id)} onDelete={() => del(c.id)} pinned={Boolean(meta[c.id]?.pinned)} archived onTogglePin={() => updateMeta(c.id, { pinned: !meta[c.id]?.pinned })} />)}
+                    {items.map((c) => (
+                      <ConversationItem
+                        key={c.id}
+                        conv={c}
+                        active={selectedId === c.id}
+                        onSelect={() => openChat(c.id)}
+                        onDelete={() => del(c.id)}
+                        pinned={Boolean(meta[c.id]?.pinned)}
+                        archived
+                        onTogglePin={() => updateMeta(c.id, { pinned: !meta[c.id]?.pinned })}
+                      />
+                    ))}
                   </details>
                 ))}
               </div>
@@ -235,7 +350,12 @@ export function CollapsedConversationLauncher() {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [convs, setConvs] = React.useState<Conversation[]>([]);
-  React.useEffect(() => { api.conversations().then(setConvs).catch(() => {}); }, []);
+  React.useEffect(() => {
+    api
+      .conversations()
+      .then(setConvs)
+      .catch(() => {});
+  }, []);
   const recent = [...convs].sort((a, b) => +new Date(b.updated_at) - +new Date(a.updated_at)).slice(0, 8);
   return (
     // px-2 与 NavMain 的 SidebarGroup(p-2) 对齐基准一致，保证折叠态图标同列
@@ -249,11 +369,24 @@ export function CollapsedConversationLauncher() {
         </PopoverTrigger>
         <PopoverContent side="right" align="start" className="w-72 p-2">
           <p className="px-2 py-1.5 font-medium text-muted-foreground text-xs">最近对话</p>
-          {recent.length === 0 ? <p className="px-2 py-4 text-center text-muted-foreground text-xs">暂无对话</p> : recent.map((c) => (
-            <button key={c.id} type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent" onClick={() => { setOpen(false); router.push(`/chat?id=${c.id}`); }}>
-              <Bot className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate">{c.title || "新对话"}</span>
-            </button>
-          ))}
+          {recent.length === 0 ? (
+            <p className="px-2 py-4 text-center text-muted-foreground text-xs">暂无对话</p>
+          ) : (
+            recent.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent"
+                onClick={() => {
+                  setOpen(false);
+                  router.push(`/chat?id=${c.id}`);
+                }}
+              >
+                <Bot className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">{c.title || "新对话"}</span>
+              </button>
+            ))
+          )}
         </PopoverContent>
       </Popover>
     </div>

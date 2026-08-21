@@ -298,9 +298,22 @@ function DraftChat({
         disabled={sending}
         leftSlot={agentPicker}
         bottomSlot={
-          <Select value={companyId == null ? "none" : String(companyId)} onValueChange={(v) => setCompanyId(v === "none" ? null : Number(v))} disabled={sending}>
-            <SelectTrigger size="sm" className="w-40"><SelectValue placeholder="企业" /></SelectTrigger>
-            <SelectContent><SelectItem value="none">未关联企业</SelectItem>{companies.map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
+          <Select
+            value={companyId == null ? "none" : String(companyId)}
+            onValueChange={(v) => setCompanyId(v === "none" ? null : Number(v))}
+            disabled={sending}
+          >
+            <SelectTrigger size="sm" className="w-40">
+              <SelectValue placeholder="企业" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">未关联企业</SelectItem>
+              {companies.map((c) => (
+                <SelectItem key={c.id} value={String(c.id)}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
         }
       />
@@ -344,7 +357,11 @@ function ChatView({
             <span className="flex items-center gap-2">
               <Bot className="size-3.5" />
               {a.name}
-              {!a.builtin && <Badge variant="outline" className="px-1 py-0 text-[9px]">自定义</Badge>}
+              {!a.builtin && (
+                <Badge variant="outline" className="px-1 py-0 text-[9px]">
+                  自定义
+                </Badge>
+              )}
             </span>
           </SelectItem>
         ))}
@@ -578,9 +595,31 @@ function ChatView({
         leftSlot={agentPicker}
         rightSlot={<TodoPopover seq={latestTodoSeq} fetchDetail={fetchDetail} />}
         bottomSlot={
-          <Select value={conv.company_id ? String(conv.company_id) : "none"} onValueChange={async (v) => { if (v !== "none") { try { await api.updateConversationCompany(conv.id, Number(v)); onConvUpdated(); } catch (e) { toast.error(`关联企业失败：${(e as Error).message}`); } } }} disabled={running || sending}>
-            <SelectTrigger size="sm" className="w-36"><SelectValue placeholder="企业" /></SelectTrigger>
-            <SelectContent><SelectItem value="none">未关联企业</SelectItem>{companies.map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
+          <Select
+            value={conv.company_id ? String(conv.company_id) : "none"}
+            onValueChange={async (v) => {
+              if (v !== "none") {
+                try {
+                  await api.updateConversationCompany(conv.id, Number(v));
+                  onConvUpdated();
+                } catch (e) {
+                  toast.error(`关联企业失败：${(e as Error).message}`);
+                }
+              }
+            }}
+            disabled={running || sending}
+          >
+            <SelectTrigger size="sm" className="w-36">
+              <SelectValue placeholder="企业" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">未关联企业</SelectItem>
+              {companies.map((c) => (
+                <SelectItem key={c.id} value={String(c.id)}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
         }
       />
@@ -623,14 +662,12 @@ function ChatPageInner() {
       .llmProfiles()
       .then(setProfiles)
       .catch(() => {});
-    api.companies().then(setCompanies).catch(() => {});
+    api
+      .companies()
+      .then(setCompanies)
+      .catch(() => {});
     reloadConvs();
   }, [reloadConvs]);
-  // 侧栏列表增删会话后同步刷新（bump 由 ConversationList 触发）。
-  React.useEffect(() => {
-    reloadConvs();
-  }, [reloadConvs]);
-
   const selected = selectedId != null ? (convs.find((c) => c.id === selectedId) ?? null) : null;
   // conversation agents: custom agents + conversational built-ins (role=assistant,
   // e.g. Auto / 渗透测试). The orchestration built-ins (goals/planner/mainagent/worker)

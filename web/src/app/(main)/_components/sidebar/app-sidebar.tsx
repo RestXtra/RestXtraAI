@@ -18,11 +18,10 @@ import { cn } from "@/lib/utils";
 import { type NavGroup, sidebarItems } from "@/navigation/sidebar/sidebar-items";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
-import { ConversationList } from "./conversation-list";
+import { CollapsedConversationLauncher, ConversationList } from "./conversation-list";
 import { NavMain } from "./nav-main";
 import { SearchDialog } from "./search-dialog";
 import { SidebarFooter } from "./sidebar-footer";
-import { CollapsedConversationLauncher } from "./conversation-list";
 
 // visibleNav hides menu items the signed-in user lacks permission for.
 function visibleNav(user: ReturnType<typeof useCurrentUser>): NavGroup[] {
@@ -57,31 +56,30 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const nav = visibleNav(currentUser);
 
   return (
-    <Sidebar
-      {...props}
-      variant={variant}
-      collapsible={collapsible}
-      className="bg-sidebar"
-    >
+    <Sidebar {...props} variant={variant} collapsible={collapsible} className="bg-sidebar">
       <SidebarHeader>
         {/* 头部行：Logo（即仪表盘/展开入口，靠左）+ 搜索 + 折叠按钮 */}
-        <div className="flex items-center gap-0.5 px-1.5 py-1">
-          <SidebarMenuButton asChild size="lg" className={cn("flex-1", isCollapsed && "flex-none justify-center p-0")}>
+        <div className={cn("flex items-center gap-0.5 px-1.5 py-1", isCollapsed && "justify-center px-0")}>
+          <SidebarMenuButton
+            asChild
+            size="lg"
+            className={cn("flex-1", isCollapsed && "flex size-8 flex-none justify-center p-0")}
+          >
             {isCollapsed ? (
               // 折叠态：点击小 logo 展开侧栏（无独立展开按钮）
               <button
                 type="button"
                 onClick={toggleSidebar}
                 title="展开侧栏"
-                className="flex w-full items-center justify-center p-0"
+                className="flex size-8 items-center justify-center p-0"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/logo.png" alt="RestXtra AI" width={24} height={24} className="shrink-0" />
+                <img src="/logo.png" alt="RestXtra AI" width={26} height={26} className="shrink-0" />
               </button>
             ) : (
               <Link prefetch={false} href="/dashboard" className="flex items-center gap-2" title="仪表盘">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/logo.png" alt="RestXtra AI" width={28} height={28} className="shrink-0" />
+                <img src="/logo.png" alt="RestXtra AI" width={30} height={30} className="shrink-0" />
                 <span className="truncate font-semibold">{APP_CONFIG.name}</span>
               </Link>
             )}
