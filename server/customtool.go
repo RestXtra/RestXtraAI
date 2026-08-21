@@ -78,6 +78,7 @@ func (s *Server) pgCreateCustomTool(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.toolCatalog.Invalidate()
 	writeJSON(w, 200, map[string]any{"key": req.Key})
 }
 
@@ -116,6 +117,7 @@ func (s *Server) pgUpdateCustomTool(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.toolCatalog.Invalidate()
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -129,6 +131,7 @@ func (s *Server) pgDeleteCustomTool(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.toolCatalog.Invalidate()
 	writeJSON(w, 200, map[string]any{"deleted": key})
 }
 

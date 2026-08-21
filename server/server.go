@@ -79,6 +79,7 @@ type Server struct {
 	profMu         sync.Mutex
 	profAgents     map[int64]*profBundle
 	profChatAgents map[int64]*agent.ChatAgent // per-profile ChatAgent cache (chat page)
+	toolCatalog    toolCatalogCache           // invalidated by tool/binding writers
 }
 
 // profBundle is a planner/worker pair built from one LLM profile.
@@ -216,12 +217,12 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		s.seedAgentModelBindings()                      // P1.4 强/弱模型路由：按模型名把 planner 绑强模型、worker 绑弱模型(一次性)
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
 		domainReg := buildDomainReg(m.Assets())
-		wireTools(m.pg, domainReg)    // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
-		seedPrompts(m.pg)             // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
-		s.seedOrchestrationTools()    // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
-		s.seedPythonInterpreter()     // 自定义脚本工具:开机检测 python 解释器入库(仅空时)
-		go newScheduler(s).Run(s.ctx) // P3 触发器调度(定时/finding/目标事件),仅自定义 agent
-		s.startBatchScheduler()       // 批量任务队列后台排空(骨架执行器)
+		wireTools(m.pg, domainReg, &s.toolCatalog) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
+		seedPrompts(m.pg)                          // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
+		s.seedOrchestrationTools()                 // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
+		s.seedPythonInterpreter()                  // 自定义脚本工具:开机检测 python 解释器入库(仅空时)
+		go newScheduler(s).Run(s.ctx)              // P3 触发器调度(定时/finding/目标事件),仅自定义 agent
+		s.startBatchScheduler()                    // 批量任务队列后台排空(骨架执行器)
 		// Fill the tool cache for any enabled MCP that has none yet (notably the
 		// seeded browser MCP on first run). Async so it never blocks startup.
 		go s.discoverEmptyMCPsOnStartup()

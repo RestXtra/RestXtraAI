@@ -7,6 +7,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/Autumn-27/norma/skill"
 	actool "github.com/Autumn-27/norma/tool"
@@ -151,7 +152,7 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 				if !contains(boundAgents, a.Key) {
 					continue // only defer names this agent is actually bound to
 				}
-				allNames = append(allNames, name)    // schema withheld from the prompt
+				allNames = append(allNames, name)       // schema withheld from the prompt
 				globalNames = append(globalNames, name) // advertised in the deferred block
 				globalSet[name] = true
 				if unlock != nil {
@@ -205,7 +206,51 @@ func seedPrompts(pg *db.DB) {
 // tool-assembly time each built-in tool is filtered by its agent binding / enabled
 // flag and, if kept, wrapped so the model sees the DB-overridden description/schema
 // and缺省入参 get injected. MCP/skill/host tools have no row and pass through.
-func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool) {
+// toolCatalogCache keeps the immutable DB tool rows used during agent assembly.
+// Tool resolution happens for every fresh agent session, while edits are rare.
+// Writers call Invalidate after a successful transaction, so a changed binding or
+// schema is visible to the very next session without a polling window.
+type toolCatalogCache struct {
+	mu   sync.RWMutex
+	rows []*db.Tool
+	ok   bool
+}
+
+func (c *toolCatalogCache) get(load func() ([]*db.Tool, error)) ([]*db.Tool, error) {
+	if c == nil {
+		return load()
+	}
+	c.mu.RLock()
+	if c.ok {
+		rows := c.rows
+		c.mu.RUnlock()
+		return rows, nil
+	}
+	c.mu.RUnlock()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ok {
+		return c.rows, nil
+	}
+	rows, err := load()
+	if err != nil {
+		return nil, err
+	}
+	c.rows, c.ok = rows, true
+	return rows, nil
+}
+
+func (c *toolCatalogCache) Invalidate() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.rows, c.ok = nil, false
+	c.mu.Unlock()
+}
+
+func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, catalog *toolCatalogCache) {
 	// Seed the built-in domain tools (first-insert only; DO NOTHING preserves edits).
 	// No startup prune: rows we didn't seed are left alone so future user-defined
 	// custom tools (system=false, added via the UI) survive restarts.
@@ -240,7 +285,7 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool) {
 	// without ever referencing a tool that isn't injected (§14.1/§14.2).
 	const bashInteractiveShellNote = "\n\n需要【交互输入】的程序（msfconsole / ssh 交互登录 / mysql、psql、python 等 REPL / 密码或 yes/no 提示 / nc 反弹 shell）不要用 Bash（它没有 stdin、会卡住），改用 shell_open 开交互会话（用完 shell_close）。一次性、非交互命令仍用 Bash。"
 	agent.ToolResolve = func(_ context.Context, agentKey string, tools []actool.CoreTool) []actool.CoreTool {
-		rows, err := pg.ListTools()
+		rows, err := catalog.get(pg.ListTools)
 		if err != nil {
 			log.Printf("[tools] 读取工具表失败，按代码默认放行: %v", err)
 			return tools

@@ -217,6 +217,8 @@ func (s *Server) pgDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := pg.RemoveAgentFromToolBindings(a.Key); err != nil {
 		log.Printf("[agents] 清理 %s 工具绑定失败: %v", a.Key, err)
+	} else {
+		s.toolCatalog.Invalidate()
 	}
 	if err := pg.DeleteTriggersForAgent(a.Key); err != nil {
 		log.Printf("[agents] 清理 %s 触发器失败: %v", a.Key, err)
@@ -657,6 +659,7 @@ func (s *Server) pgUpdateTool(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.toolCatalog.Invalidate()
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -679,6 +682,7 @@ func (s *Server) pgResetTool(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 500, err.Error())
 			return
 		}
+		s.toolCatalog.Invalidate()
 		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}
@@ -693,6 +697,7 @@ func (s *Server) pgResetTool(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 500, err.Error())
 			return
 		}
+		s.toolCatalog.Invalidate()
 		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}

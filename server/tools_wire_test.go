@@ -32,7 +32,7 @@ func TestWireTools(t *testing.T) {
 	}
 	defer pg.Close()
 
-	wireTools(pg, nil) // nil domainReg: test only covers filter/decoration, not injection
+	wireTools(pg, nil, nil) // nil domainReg: test only covers filter/decoration, not injection
 	t.Cleanup(func() { agent.ToolResolve = nil })
 	// Prevent interactive-shell Bash decoration: if the worker agent has
 	// interactive_shell=true in the DB, ToolResolve would append a note to
