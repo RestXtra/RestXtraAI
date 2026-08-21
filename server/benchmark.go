@@ -28,7 +28,7 @@ const (
 var benchmarkHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 func (s *Server) benchConfig() (token, base string) {
-	token, _, _ = s.m.pg.GetSetting(settingBenchToken)
+	token, _, _ = s.m.pg.GetSecretSetting(settingBenchToken)
 	base, _, _ = s.m.pg.GetSetting(settingBenchBase)
 	if strings.TrimSpace(token) == "" {
 		token = os.Getenv("BENCHMARK_TOKEN")
@@ -76,7 +76,7 @@ func (s *Server) benchSetConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	if err := s.m.pg.SetSetting(settingBenchToken, strings.TrimSpace(req.Token)); err != nil {
+	if err := s.m.pg.SetSecretSetting(settingBenchToken, strings.TrimSpace(req.Token)); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}

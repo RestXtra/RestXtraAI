@@ -2,11 +2,18 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/RestXtra/RestXtraAI/db"
 )
+
+var batchOwner = func() string {
+	h, _ := os.Hostname()
+	return fmt.Sprintf("%s:%d", h, os.Getpid())
+}()
 
 // Batch task queues (platform built-in). A queue holds tasks whose
 // payload drives the executor; the built-in executor spawns a RestXtra exploration
@@ -35,6 +42,7 @@ func (s *Server) drainBatchQueues(limit int) {
 	if s.m.pg == nil {
 		return
 	}
+	_, _ = s.m.pg.RequeueExpiredBatchTasks()
 	queues, err := s.m.pg.ListBatchQueues()
 	if err != nil {
 		return
@@ -45,7 +53,7 @@ func (s *Server) drainBatchQueues(limit int) {
 			continue
 		}
 		for done < limit {
-			task, err := s.m.pg.ClaimBatchTask(q.ID)
+			task, err := s.m.pg.ClaimBatchTaskLease(q.ID, batchOwner, 10*time.Minute)
 			if err != nil || task == nil {
 				break
 			}
@@ -181,7 +189,7 @@ func (s *Server) batchRunQueue(w http.ResponseWriter, r *http.Request) {
 	}
 	ran := 0
 	for {
-		task, err := pg.ClaimBatchTask(id)
+		task, err := pg.ClaimBatchTaskLease(id, batchOwner, 10*time.Minute)
 		if err != nil || task == nil {
 			break
 		}

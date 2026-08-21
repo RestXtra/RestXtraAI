@@ -99,10 +99,10 @@ func Open(dsn string) (*DB, error) {
 		sqlDB.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	if _, err := sqlDB.Exec(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS company_id BIGINT REFERENCES companies(id) ON DELETE SET NULL`); err != nil {
+	if err := applyMigrations(sqlDB); err != nil {
 		sqlDB.Exec(`SELECT pg_advisory_unlock(7337741001)`)
 		sqlDB.Close()
-		return nil, fmt.Errorf("migrate conversations company: %w", err)
+		return nil, fmt.Errorf("apply migrations: %w", err)
 	}
 	d := &DB{DB: sqlDB}
 	if err := d.seedBuiltins(); err != nil {
@@ -229,17 +229,17 @@ ON CONFLICT (name) DO NOTHING`,
 // declares `mcps: ScopeSentry`, which only takes effect once it's made visible and
 // that MCP is enabled/configured.
 var builtinSkillVisibility = map[string][]string{
-	"api-recon":                     {"auto", "pentest", "worker"},
-	"web-security-advanced":         {"worker", "pentest", "auto"},
-	"redteam-evasion-detail-pack":    {"pentest", "worker"},
-	"redteam-cloud-detail-pack":      {"pentest"},
-	"ctf-web":                       {"worker", "pentest"},
-	"redteam-sqli-detail-pack":       {"worker", "pentest"},
-	"redteam-ssrf-detail-pack":       {"worker", "pentest"},
-	"redteam-reverse-detail-pack":    {"pentest"},
-	"redteam-code-audit-detail-pack": {"pentest"},
-	"intranet-pentest-advanced":      {"pentest", "worker"},
-	"redteam-payload-detail-pack":    {"worker", "pentest"},
+	"api-recon":                       {"auto", "pentest", "worker"},
+	"web-security-advanced":           {"worker", "pentest", "auto"},
+	"redteam-evasion-detail-pack":     {"pentest", "worker"},
+	"redteam-cloud-detail-pack":       {"pentest"},
+	"ctf-web":                         {"worker", "pentest"},
+	"redteam-sqli-detail-pack":        {"worker", "pentest"},
+	"redteam-ssrf-detail-pack":        {"worker", "pentest"},
+	"redteam-reverse-detail-pack":     {"pentest"},
+	"redteam-code-audit-detail-pack":  {"pentest"},
+	"intranet-pentest-advanced":       {"pentest", "worker"},
+	"redteam-payload-detail-pack":     {"worker", "pentest"},
 	"redteam-deserialize-detail-pack": {"worker", "pentest"},
 }
 
@@ -402,30 +402,30 @@ func (d *DB) seedDefaultInterceptRules() error {
 		//   2. Python HTTP 客户端 .delete() 方法
 		//   3. JS/通用脚本里的 method: 'DELETE' / method="DELETE"
 		{
-			name:    "[内置] curl / wget 发送 DELETE 请求",
-			target:  "tool_input",
-			typ:     "regex",
-			pattern: `(?i)\bcurl\b[^|\n&;"]{0,300}(?:-X\s*DELETE|--request\s+DELETE|-XDELETE)|\bwget\b[^|\n&;"]{0,300}--method[=\s]+DELETE`,
-			action:  "deny",
-			message: "禁止通过 curl/wget 发送 HTTP DELETE 请求，可能删除目标系统数据",
+			name:     "[内置] curl / wget 发送 DELETE 请求",
+			target:   "tool_input",
+			typ:      "regex",
+			pattern:  `(?i)\bcurl\b[^|\n&;"]{0,300}(?:-X\s*DELETE|--request\s+DELETE|-XDELETE)|\bwget\b[^|\n&;"]{0,300}--method[=\s]+DELETE`,
+			action:   "deny",
+			message:  "禁止通过 curl/wget 发送 HTTP DELETE 请求，可能删除目标系统数据",
 			priority: 80,
 		},
 		{
-			name:    "[内置] Python HTTP 客户端 DELETE（requests/httpx/aiohttp）",
-			target:  "tool_input",
-			typ:     "regex",
-			pattern: `(?i)\b(?:requests|httpx|aiohttp|urllib\.request)\.delete\s*\(|session\.delete\s*\(|client\.delete\s*\(`,
-			action:  "deny",
-			message: "禁止使用 Python HTTP 客户端发送 DELETE 请求",
+			name:     "[内置] Python HTTP 客户端 DELETE（requests/httpx/aiohttp）",
+			target:   "tool_input",
+			typ:      "regex",
+			pattern:  `(?i)\b(?:requests|httpx|aiohttp|urllib\.request)\.delete\s*\(|session\.delete\s*\(|client\.delete\s*\(`,
+			action:   "deny",
+			message:  "禁止使用 Python HTTP 客户端发送 DELETE 请求",
 			priority: 80,
 		},
 		{
-			name:    "[内置] 脚本中声明 HTTP DELETE 方法（JS/通用）",
-			target:  "tool_input",
-			typ:     "regex",
-			pattern: `(?i)axios\.delete\s*\(|method\s*[:=]\s*['"]DELETE['"]`,
-			action:  "deny",
-			message: "禁止在脚本中声明并发送 HTTP DELETE 请求",
+			name:     "[内置] 脚本中声明 HTTP DELETE 方法（JS/通用）",
+			target:   "tool_input",
+			typ:      "regex",
+			pattern:  `(?i)axios\.delete\s*\(|method\s*[:=]\s*['"]DELETE['"]`,
+			action:   "deny",
+			message:  "禁止在脚本中声明并发送 HTTP DELETE 请求",
 			priority: 80,
 		},
 		{

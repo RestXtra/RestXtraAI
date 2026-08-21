@@ -714,6 +714,9 @@ func (s *Server) pgListMCP(w http.ResponseWriter, r *http.Request) {
 	if ms == nil {
 		ms = []*db.MCPServer{}
 	}
+	for _, m := range ms {
+		m.Env = db.RedactMCPEnv(m.Env)
+	}
 	writeJSON(w, 200, map[string]any{"servers": ms})
 }
 

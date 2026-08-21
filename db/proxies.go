@@ -21,35 +21,39 @@ func parseInt(s string) (int, error) {
 // Proxy 是一条代理池记录。凭证明文落库（与 llm_profiles.api_key 同策略），
 // 读接口永不回显 password，仅通过 PasswordSet 告知 UI 是否已配置。
 type Proxy struct {
-	ID           int64      `json:"id"`
-	Name         string     `json:"name"`
-	Protocol     string     `json:"protocol"` // http | https | socks5 | socks5h
-	Host         string     `json:"host"`
-	Port         int        `json:"port"`
-	Username     string     `json:"username"`
-	Password     string     `json:"-"`
-	PasswordSet  bool       `json:"password_set"`
-	Region       string     `json:"region"`
-	Enabled      bool       `json:"enabled"`
-	Note         string     `json:"note"`
-	Source       string     `json:"source"` // manual | import | subscription
-	LastCheckAt  *time.Time `json:"last_check_at"`
-	LastCheckOK  bool       `json:"last_check_ok"`
-	LatencyMs    int        `json:"latency_ms"`
-	FailCount    int        `json:"fail_count"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID          int64      `json:"id"`
+	Name        string     `json:"name"`
+	Protocol    string     `json:"protocol"` // http | https | socks5 | socks5h
+	Host        string     `json:"host"`
+	Port        int        `json:"port"`
+	Username    string     `json:"username"`
+	Password    string     `json:"-"`
+	PasswordSet bool       `json:"password_set"`
+	Region      string     `json:"region"`
+	Enabled     bool       `json:"enabled"`
+	Note        string     `json:"note"`
+	Source      string     `json:"source"` // manual | import | subscription
+	LastCheckAt *time.Time `json:"last_check_at"`
+	LastCheckOK bool       `json:"last_check_ok"`
+	LatencyMs   int        `json:"latency_ms"`
+	FailCount   int        `json:"fail_count"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 const proxyCols = `id, name, protocol, host, port, username, password, region, enabled, note, source,
 last_check_at, last_check_ok, latency_ms, fail_count, created_at, updated_at`
 
-func scanProxy(row interface{ Scan(...any) error }) (*Proxy, error) {
+func scanProxy(d *DB, row interface{ Scan(...any) error }) (*Proxy, error) {
 	var p Proxy
 	var password string
 	err := row.Scan(&p.ID, &p.Name, &p.Protocol, &p.Host, &p.Port, &p.Username, &password,
 		&p.Region, &p.Enabled, &p.Note, &p.Source, &p.LastCheckAt, &p.LastCheckOK,
 		&p.LatencyMs, &p.FailCount, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	password, err = d.RevealSecret(password)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +70,7 @@ func (d *DB) ListProxies() ([]*Proxy, error) {
 	defer rows.Close()
 	var out []*Proxy
 	for rows.Next() {
-		p, err := scanProxy(rows)
+		p, err := scanProxy(d, rows)
 		if err != nil {
 			return nil, err
 		}
@@ -78,7 +82,7 @@ func (d *DB) ListProxies() ([]*Proxy, error) {
 // ProxyByID 返回单条代理（密码不回显）。
 func (d *DB) ProxyByID(id int64) (*Proxy, error) {
 	row := d.QueryRow(`SELECT `+proxyCols+` FROM proxies WHERE id=$1`, id)
-	p, err := scanProxy(row)
+	p, err := scanProxy(d, row)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -87,11 +91,15 @@ func (d *DB) ProxyByID(id int64) (*Proxy, error) {
 
 // SaveProxy 新建（id==0）或更新一条代理。password 为空时更新操作保留原密码。
 func (d *DB) SaveProxy(p *Proxy) (int64, error) {
+	password, err := d.ProtectSecret(p.Password)
+	if err != nil {
+		return 0, err
+	}
 	if p.ID == 0 {
 		var id int64
 		err := d.QueryRow(`INSERT INTO proxies(name,protocol,host,port,username,password,region,enabled,note,source)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-			p.Name, p.Protocol, p.Host, p.Port, p.Username, p.Password,
+			p.Name, p.Protocol, p.Host, p.Port, p.Username, password,
 			p.Region, p.Enabled, p.Note, p.Source).Scan(&id)
 		return id, err
 	}
@@ -100,8 +108,8 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
 			p.Name, p.Protocol, p.Host, p.Port, p.Username, p.Region, p.Enabled, p.Note, p.ID)
 		return p.ID, err
 	}
-	_, err := d.Exec(`UPDATE proxies SET name=$1,protocol=$2,host=$3,port=$4,username=$5,password=$6,region=$7,enabled=$8,note=$9 WHERE id=$10`,
-		p.Name, p.Protocol, p.Host, p.Port, p.Username, p.Password, p.Region, p.Enabled, p.Note, p.ID)
+	_, err = d.Exec(`UPDATE proxies SET name=$1,protocol=$2,host=$3,port=$4,username=$5,password=$6,region=$7,enabled=$8,note=$9 WHERE id=$10`,
+		p.Name, p.Protocol, p.Host, p.Port, p.Username, password, p.Region, p.Enabled, p.Note, p.ID)
 	return p.ID, err
 }
 
@@ -147,11 +155,11 @@ func (d *DB) RecordProxyCheckResult(ok bool, ids []int64) {
 
 // ProxyStats 聚合统计。
 type ProxyStats struct {
-	Total     int `json:"total"`
-	Enabled   int `json:"enabled"`
-	Healthy   int `json:"healthy"` // enabled && last_check_ok
-	Unchecked int `json:"unchecked"`
-	Failing   int `json:"failing"` // enabled && 最近测活失败
+	Total      int `json:"total"`
+	Enabled    int `json:"enabled"`
+	Healthy    int `json:"healthy"` // enabled && last_check_ok
+	Unchecked  int `json:"unchecked"`
+	Failing    int `json:"failing"` // enabled && 最近测活失败
 	AvgLatency int `json:"avg_latency_ms"`
 }
 
@@ -193,6 +201,10 @@ func (d *DB) ProxyRawByID(id int64) (*ProxyRaw, error) {
 	if err != nil {
 		return nil, err
 	}
+	password, err = d.RevealSecret(password)
+	if err != nil {
+		return nil, err
+	}
 	return &ProxyRaw{Proxy: p, Password: password}, nil
 }
 
@@ -210,6 +222,10 @@ func (d *DB) ListProxyRawAll() ([]*ProxyRaw, error) {
 		if err := rows.Scan(&p.ID, &p.Name, &p.Protocol, &p.Host, &p.Port, &p.Username, &password,
 			&p.Region, &p.Enabled, &p.Note, &p.Source, &p.LastCheckAt, &p.LastCheckOK,
 			&p.LatencyMs, &p.FailCount, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		password, err = d.RevealSecret(password)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, &ProxyRaw{Proxy: p, Password: password})
@@ -238,6 +254,10 @@ func (d *DB) ListHealthyProxies(region string) ([]*ProxyRaw, error) {
 		if err := rows.Scan(&p.ID, &p.Name, &p.Protocol, &p.Host, &p.Port, &p.Username, &password,
 			&p.Region, &p.Enabled, &p.Note, &p.Source, &p.LastCheckAt, &p.LastCheckOK,
 			&p.LatencyMs, &p.FailCount, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		password, err = d.RevealSecret(password)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, &ProxyRaw{Proxy: p, Password: password})
@@ -473,13 +493,13 @@ type clashProxyNode struct {
 
 // clashConfig 是 Clash 配置的顶层结构（只取我们关心的字段）。
 type clashConfig struct {
-	Proxies      []clashProxyNode `yaml:"proxies"`
-	ProxyGroups  []map[string]any `yaml:"proxy-groups"`
-	Rules        []string         `yaml:"rules"`
-	MixedPort    int              `yaml:"mixed-port"`
-	Port         int              `yaml:"port"`
-	SocksPort    int              `yaml:"socks-port"`
-	Mode         string           `yaml:"mode"`
+	Proxies     []clashProxyNode `yaml:"proxies"`
+	ProxyGroups []map[string]any `yaml:"proxy-groups"`
+	Rules       []string         `yaml:"rules"`
+	MixedPort   int              `yaml:"mixed-port"`
+	Port        int              `yaml:"port"`
+	SocksPort   int              `yaml:"socks-port"`
+	Mode        string           `yaml:"mode"`
 }
 
 // ParseClashText 解析 Clash YAML 文本。返回可导入的代理（仅 socks5/socks5h/http/https，

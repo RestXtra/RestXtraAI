@@ -39,6 +39,7 @@ var platformPermissions = []permissionDef{
 	{"sandbox.write", "管理沙箱与出口范围"},
 	// 工作日志
 	{"worklog.read", "查看流量 / 工具执行 / LLM 录制"},
+	{"worklog.write", "清理流量 / 工具执行 / LLM 录制"},
 	// Agent 管理
 	{"agent.read", "查看 Agent / MCP / Skill / 工具"},
 	{"agent.write", "管理 Agent / MCP / Skill / 工具"},
@@ -48,6 +49,12 @@ var platformPermissions = []permissionDef{
 	{"playbook.write", "管理攻击模式库"},
 	{"batch.read", "查看批量任务"},
 	{"batch.write", "管理批量任务"},
+	{"workflow.read", "查看工作流与运行记录"},
+	{"workflow.write", "创建 / 修改 / 执行工作流"},
+	{"workspace.read", "查看 Agent 工作空间文件"},
+	{"workspace.write", "删除 / 清理 Agent 工作空间文件"},
+	{"benchmark.read", "查看基准测试配置与题目"},
+	{"benchmark.run", "配置并执行基准测试"},
 	// 工作台
 	{"task.read", "查看任务 / 发现 / 资产"},
 	{"task.create", "创建任务"},
@@ -58,7 +65,7 @@ var platformPermissions = []permissionDef{
 // systemRoleDefs maps a system role to its permission keys. admin is implicit
 // (bypasses the catalog in ResolveAccess) and listed with an empty set.
 var systemRoleDefs = map[string][]string{
-	RoleAdmin:    {},
+	RoleAdmin: {},
 	RoleOperator: {
 		"platform.user.read", "platform.user.write", "platform.user.role",
 		"platform.role.read", "platform.role.write",
@@ -70,21 +77,24 @@ var systemRoleDefs = map[string][]string{
 		"cap.proxy.read", "cap.proxy.write",
 		"cap.spacesearch.read", "cap.spacesearch.write",
 		"sandbox.read", "sandbox.write",
-		"worklog.read",
+		"worklog.read", "worklog.write",
 		"agent.read", "agent.write",
 		"knowledge.read", "knowledge.write",
 		"playbook.read", "playbook.write",
 		"batch.read", "batch.write",
+		"workflow.read", "workflow.write", "workspace.read", "workspace.write",
+		"benchmark.read", "benchmark.run",
 		"task.read", "task.create", "task.run", "task.kill",
 	},
 	RoleAuditor: {
 		"sec.audit.read", "sec.audit.export",
-		"worklog.read",
+		"worklog.read", "workflow.read", "benchmark.read",
 		"task.read", "cap.report.read", "platform.settings.read", "agent.read",
 	},
 	RoleViewer: {
 		"task.read", "agent.read", "sec.intercept.read",
 		"worklog.read", "cap.report.read", "platform.settings.read", "playbook.read",
+		"workflow.read", "benchmark.read",
 	},
 }
 

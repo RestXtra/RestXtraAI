@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -21,6 +22,24 @@ import (
 	"github.com/RestXtra/RestXtraAI/traffic"
 )
 
+const secretsKeyFilename = "secrets.key"
+
+func loadOrCreateSecretsKey(dataDir string) ([]byte, error) {
+	path := filepath.Join(dataDir, secretsKeyFilename)
+	if key, err := os.ReadFile(path); err == nil && len(key) == 32 {
+		return key, nil
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, fmt.Errorf("generate secrets key: %w", err)
+	}
+	if err := os.WriteFile(path, key, 0600); err != nil {
+		return nil, fmt.Errorf("write secrets key: %w", err)
+	}
+	log.Printf("[secrets] 新凭据加密密钥已写入 %s", path)
+	return key, nil
+}
+
 // Task is one engagement: a description + goal + its own exploration store,
 // sharing the process-wide asset store. ID is the PG task id as a string; ExpID
 // is the exploration the task owns.
@@ -36,9 +55,9 @@ type Task struct {
 	LLMProfileID *int64 `json:"llm_profile_id,omitempty"` // 指定运行本任务 planner/worker 的 LLM 配置;nil=用全局激活配置
 	Status       string `json:"status"`                   // persisted lifecycle status (done/failed/timeout 为终态；空/其它则由运行态推导)
 	// 任务级超时(见 docs/任务级超时与收尾设计.md)。DeadlineAt/FirstRunAt 为 unix 秒,0=未设/未运行。
-	TimeoutSeconds int                    `json:"timeout_seconds"`
-	FirstRunAt     int64                  `json:"first_run_at,omitempty"`
-	DeadlineAt     int64                  `json:"deadline_at,omitempty"`
+	TimeoutSeconds int   `json:"timeout_seconds"`
+	FirstRunAt     int64 `json:"first_run_at,omitempty"`
+	DeadlineAt     int64 `json:"deadline_at,omitempty"`
 	// PlanHeartbeatSeconds 是 planner 心跳触发间隔(秒;0=不心跳)。db.CreateTask 归一 >=600。
 	PlanHeartbeatSeconds int                    `json:"plan_heartbeat_seconds"`
 	Store                *pgdb.ExplorationStore `json:"-"`
@@ -46,7 +65,7 @@ type Task struct {
 	notify               chan struct{}
 
 	// 企业归属：主企业 + 多企业关联（由 taskFromPG 从 pgdb.Task 填充）。
-	CompanyID int64           `json:"company_id,omitempty"`
+	CompanyID int64             `json:"company_id,omitempty"`
 	Companies []pgdb.CompanyRef `json:"companies,omitempty"`
 
 	// pendingTriggers accumulates the concrete changes (worker done / finding) that
@@ -89,8 +108,8 @@ type Manager struct {
 	dir         string
 	pg          *pgdb.DB
 	assets      *pgdb.AssetStore
-	traffic     *traffic.Traffic    // process-wide recording proxy (may be nil)
-	enrich      *enrich.Engine      // engine-side asset auto-completion (DNS/HTTP)
+	traffic     *traffic.Traffic       // process-wide recording proxy (may be nil)
+	enrich      *enrich.Engine         // engine-side asset auto-completion (DNS/HTTP)
 	interceptor *intercept.Interceptor // user-configured tool-call interception rules
 
 	mu        sync.RWMutex
@@ -173,6 +192,15 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
+	secretKey, err := loadOrCreateSecretsKey(dir)
+	if err != nil {
+		pg.Close()
+		return nil, err
+	}
+	if err := pg.SetSecretKey(secretKey); err != nil {
+		pg.Close()
+		return nil, err
+	}
 	// LLM 录制持久化表（幂等建表 + 老库补列）。
 	if err := pg.EnsureLLMRecordsTable(); err != nil {
 		log.Printf("[llmrec] create table: %v", err)
@@ -204,10 +232,10 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	} else {
 		m.webSearchBackend = defaultWebSearchBackend
 	}
-	if v, ok, _ := pg.GetSetting(settingBraveKey); ok {
+	if v, ok, _ := pg.GetSecretSetting(settingBraveKey); ok {
 		m.braveKey = v
 	}
-	if v, ok, _ := pg.GetSetting(settingTavilyKey); ok {
+	if v, ok, _ := pg.GetSecretSetting(settingTavilyKey); ok {
 		m.tavilyKey = v
 	}
 	if v, ok, _ := pg.GetSetting(settingWebSearchProxy); ok {
@@ -313,7 +341,7 @@ func (m *Manager) SetWebSearch(on bool, backend string, braveKey, tavilyKey, pro
 	m.webSearchBackend = backend
 	m.mu.Unlock()
 	if braveKey != nil {
-		if err := m.pg.SetSetting(settingBraveKey, *braveKey); err != nil {
+		if err := m.pg.SetSecretSetting(settingBraveKey, *braveKey); err != nil {
 			return err
 		}
 		m.mu.Lock()
@@ -321,7 +349,7 @@ func (m *Manager) SetWebSearch(on bool, backend string, braveKey, tavilyKey, pro
 		m.mu.Unlock()
 	}
 	if tavilyKey != nil {
-		if err := m.pg.SetSetting(settingTavilyKey, *tavilyKey); err != nil {
+		if err := m.pg.SetSecretSetting(settingTavilyKey, *tavilyKey); err != nil {
 			return err
 		}
 		m.mu.Lock()

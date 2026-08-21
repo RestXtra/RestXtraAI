@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"log"
 	"math/big"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/RestXtra/RestXtraAI/db"
@@ -19,11 +21,13 @@ import (
 )
 
 const (
-	jwtKeyFilename = "jwt.key"
-	authPassKey    = "auth.password_hash"
-	jwtTTL         = 7 * 24 * time.Hour
-	keyChars       = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	adminUsername  = "RestXtra" // 默认首个管理员用户名（与登录页预填一致）
+	jwtKeyFilename   = "jwt.key"
+	authPassKey      = "auth.password_hash"
+	jwtTTL           = 7 * 24 * time.Hour
+	maxLoginAttempts = 8
+	loginWindow      = 5 * time.Minute
+	keyChars         = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	adminUsername    = "RestXtra" // 默认首个管理员用户名（与登录页预填一致）
 )
 
 // loadOrCreateJWTKey reads the 32-byte signing key from dataDir/jwt.key.
@@ -50,14 +54,57 @@ func loadOrCreateJWTKey(dataDir string) ([]byte, error) {
 
 // tokenClaims carries the platform user identity inside the JWT.
 type tokenClaims struct {
-	UID int64 `json:"uid"`
+	UID                 int64  `json:"uid"`
+	PasswordFingerprint string `json:"pwd_fp"`
 	jwt.RegisteredClaims
 }
 
+type loginLimiter struct {
+	mu      sync.Mutex
+	entries map[string][]time.Time
+}
+
+func (l *loginLimiter) allow(key string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.entries == nil {
+		l.entries = map[string][]time.Time{}
+	}
+	cut := now.Add(-loginWindow)
+	// Bound memory when an attacker rotates source IPs. Expired buckets are
+	// opportunistically removed during normal login traffic.
+	if len(l.entries) > 10000 {
+		for k, ts := range l.entries {
+			if len(ts) == 0 || !ts[len(ts)-1].After(cut) {
+				delete(l.entries, k)
+			}
+		}
+	}
+	old := l.entries[key]
+	kept := old[:0]
+	for _, t := range old {
+		if t.After(cut) {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) >= maxLoginAttempts {
+		l.entries[key] = kept
+		return false
+	}
+	l.entries[key] = append(kept, now)
+	return true
+}
+
 // signUserJWT issues a 7-day HS256 token for a platform user.
-func signUserJWT(key []byte, uid int64, username string) (string, error) {
+func signUserJWT(key []byte, uid int64, username string, passwordHash ...string) (string, error) {
+	fp := ""
+	if len(passwordHash) > 0 && passwordHash[0] != "" {
+		sum := sha256.Sum256([]byte(passwordHash[0]))
+		fp = fmt.Sprintf("%x", sum[:])
+	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, tokenClaims{
-		UID: uid,
+		UID:                 uid,
+		PasswordFingerprint: fp,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   username,
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(jwtTTL)),
@@ -78,8 +125,9 @@ func verifyUserJWT(tokenStr string, key []byte) (*tokenClaims, bool) {
 	return claims, err == nil && t.Valid
 }
 
-// extractToken reads the JWT from Authorization: Bearer header,
-// restxtra_token cookie, or ?token= query param (for SSE connections).
+// extractToken reads the JWT from Authorization: Bearer header or the
+// restxtra_token cookie. Query-string tokens are accepted only by the two SSE
+// endpoints because URLs are routinely persisted in proxy/access logs.
 func extractToken(r *http.Request) string {
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
@@ -87,7 +135,10 @@ func extractToken(r *http.Request) string {
 	if c, err := r.Cookie("restxtra_token"); err == nil && c.Value != "" {
 		return c.Value
 	}
-	return r.URL.Query().Get("token")
+	if strings.HasSuffix(r.URL.Path, "/stream") {
+		return r.URL.Query().Get("token")
+	}
+	return ""
 }
 
 type principalKey struct{}
@@ -128,7 +179,21 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 			writeErr(w, 401, "token 无效或已过期")
 			return
 		}
-		r = withPrincipal(r, claims.UID, claims.Subject)
+		if s.m.pg == nil || claims.UID <= 0 {
+			writeErr(w, 401, "token 无效或已过期")
+			return
+		}
+		user, err := s.m.pg.GetUserByID(claims.UID)
+		if err != nil || user == nil || !user.Enabled {
+			writeErr(w, 401, "账户不存在或已禁用")
+			return
+		}
+		sum := sha256.Sum256([]byte(user.PasswordHash))
+		if claims.PasswordFingerprint == "" || claims.PasswordFingerprint != fmt.Sprintf("%x", sum[:]) {
+			writeErr(w, 401, "token 已失效")
+			return
+		}
+		r = withPrincipal(r, user.ID, user.Username)
 		h.ServeHTTP(w, r)
 	})
 }
@@ -148,8 +213,13 @@ func (s *Server) authInitialized() bool {
 
 // clientIP extracts the peer address for audit records.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.Split(xff, ",")[0])
+	// Forwarded headers are client-controlled unless the deployment explicitly
+	// declares a trusted reverse proxy. Using them by default lets an attacker
+	// rotate the apparent source IP and bypass the login limiter.
+	if os.Getenv("RESTXTRA_TRUST_PROXY") == "true" {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			return strings.TrimSpace(strings.Split(xff, ",")[0])
+		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -202,8 +272,8 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Password string `json:"password"`
 	}
-	if err := decode(r, &req); err != nil || req.Password == "" {
-		writeErr(w, 400, "密码不能为空")
+	if err := decode(r, &req); err != nil || len([]rune(req.Password)) < 8 {
+		writeErr(w, 400, "密码至少需要 8 位")
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -222,7 +292,7 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	}
 	// keep the legacy settings hash in sync (migration / compatibility)
 	_ = pg.SetSetting(authPassKey, string(hash))
-	tok, err := signUserJWT(s.jwtKey, userID, adminUsername)
+	tok, err := signUserJWT(s.jwtKey, userID, adminUsername, string(hash))
 	if err != nil {
 		writeErr(w, 500, "token 生成失败")
 		return
@@ -290,6 +360,12 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
+	key := clientIP(r)
+	if !s.loginAttempts.allow(key, time.Now()) {
+		w.Header().Set("Retry-After", "300")
+		writeErr(w, http.StatusTooManyRequests, "登录尝试过于频繁，请稍后再试")
+		return
+	}
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -332,7 +408,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, "用户名或密码错误")
 		return
 	}
-	tok, err := signUserJWT(s.jwtKey, user.ID, user.Username)
+	tok, err := signUserJWT(s.jwtKey, user.ID, user.Username, user.PasswordHash)
 	if err != nil {
 		writeErr(w, 500, "token 生成失败")
 		return

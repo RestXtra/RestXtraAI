@@ -10,11 +10,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Autumn-27/norma/llm"
@@ -38,12 +40,13 @@ type Server struct {
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
 
-	cfgMu     sync.Mutex
-	mainAgent *agent.MainAgent // nil when no LLM provider is configured
-	chatAgent *agent.ChatAgent // conversational runner for the chat page; nil w/o LLM
-	llmCfg    agent.Config     // current LLM config (key not exposed)
-	llmOn     bool
-	llmProf   string // active LLM profile name (for llmrec tagging)
+	cfgMu         sync.Mutex
+	mainAgent     *agent.MainAgent // nil when no LLM provider is configured
+	chatAgent     *agent.ChatAgent // conversational runner for the chat page; nil w/o LLM
+	llmCfg        agent.Config     // current LLM config (key not exposed)
+	llmOn         bool
+	llmProf       string // active LLM profile name (for llmrec tagging)
+	loginAttempts loginLimiter
 
 	// chatBusy guards the per-task main-agent run: the chat handler launches the
 	// agent on the server's background ctx (not the request ctx) and returns
@@ -210,15 +213,15 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		}
 		// 六域智能体体系（幂等播种：创建领域 agent + 绑定技能/MCP/工具）。
 		s.seedSixDomainAgents()
-		s.seedAgentModelBindings() // P1.4 强/弱模型路由：按模型名把 planner 绑强模型、worker 绑弱模型(一次性)
+		s.seedAgentModelBindings()                      // P1.4 强/弱模型路由：按模型名把 planner 绑强模型、worker 绑弱模型(一次性)
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
 		domainReg := buildDomainReg(m.Assets())
-		wireTools(m.pg, domainReg)                      // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
-		seedPrompts(m.pg)                               // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
-		s.seedOrchestrationTools()                      // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
-		s.seedPythonInterpreter()                       // 自定义脚本工具:开机检测 python 解释器入库(仅空时)
-		go newScheduler(s).Run(s.ctx)                   // P3 触发器调度(定时/finding/目标事件),仅自定义 agent
-		s.startBatchScheduler()                          // 批量任务队列后台排空(骨架执行器)
+		wireTools(m.pg, domainReg)    // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
+		seedPrompts(m.pg)             // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
+		s.seedOrchestrationTools()    // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
+		s.seedPythonInterpreter()     // 自定义脚本工具:开机检测 python 解释器入库(仅空时)
+		go newScheduler(s).Run(s.ctx) // P3 触发器调度(定时/finding/目标事件),仅自定义 agent
+		s.startBatchScheduler()       // 批量任务队列后台排空(骨架执行器)
 		// Fill the tool cache for any enabled MCP that has none yet (notably the
 		// seeded browser MCP on first run). Async so it never blocks startup.
 		go s.discoverEmptyMCPsOnStartup()
@@ -842,7 +845,7 @@ func (s *Server) Handler() http.Handler {
 	// /api/* goes through CORS + JWT; everything else is served by the embedded
 	// frontend (public — auth is enforced client-side and on the API). With the
 	// no-embed build the webui handler just 404s (run `next dev` separately).
-	api := cors(s.requireAuth(mux))
+	api := requestID(cors(s.requireAuth(s.authorizeAPI(mux))))
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
 	root.Handle("/", s.webuiHandler())
@@ -947,8 +950,8 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	companyID := int64(atoiDefault(r.URL.Query().Get("company_id"), 0))
 	list := s.m.List()
-	toks, _ := s.m.PG().TokenTotalsAll()     // whole-task token totals, one query for all tasks
-	lastAct, _ := s.m.PG().LastActivityAll() // persisted last-activity per task, one query
+	toks, _ := s.m.PG().TokenTotalsAll()      // whole-task token totals, one query for all tasks
+	lastAct, _ := s.m.PG().LastActivityAll()  // persisted last-activity per task, one query
 	goalCounts, _ := s.m.PG().GoalCountsAll() // goal progress per exploration, one query
 	dtos := make([]TaskDTO, 0, len(list))
 	for _, t := range list {
@@ -1117,7 +1120,7 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		Proxy           string `json:"proxy"`
 		APIKey          string `json:"api_key"`
 		ReasoningEffort string `json:"reasoning_effort"`
-		AuthMode        string `json:"auth_mode"` // ""|x-api-key|bearer
+		AuthMode        string `json:"auth_mode"`  // ""|x-api-key|bearer
 		ProfileID       *int64 `json:"profile_id"` // 测已存 profile 时传入：api_key 为空则用它存的 key
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1177,13 +1180,13 @@ type TaskWorkflowStep struct {
 }
 
 type createTaskReq struct {
-	Description    string        `json:"description"`
-	Goal           string        `json:"goal"`
-	LLMProfileID   *int64        `json:"llm_profile_id,omitempty"` // 指定运行本任务的 LLM 配置;省略/null=用激活配置
-	TimeoutSeconds int           `json:"timeout_seconds"`          // 任务级超时(秒);0/省略=不限时
+	Description    string `json:"description"`
+	Goal           string `json:"goal"`
+	LLMProfileID   *int64 `json:"llm_profile_id,omitempty"` // 指定运行本任务的 LLM 配置;省略/null=用激活配置
+	TimeoutSeconds int    `json:"timeout_seconds"`          // 任务级超时(秒);0/省略=不限时
 	// PlanHeartbeatSeconds 是 planner 心跳触发间隔(秒;0/省略=不心跳, <600 归一 600)。
 	PlanHeartbeatSeconds int           `json:"plan_heartbeat_seconds"`
-	Workflow             *TaskWorkflow `json:"workflow,omitempty"` // 可选：初始探索方向 + 战略提示
+	Workflow             *TaskWorkflow `json:"workflow,omitempty"`    // 可选：初始探索方向 + 战略提示
 	CompanyIDs           []int64       `json:"company_ids,omitempty"` // 可选：企业归属(第一个=主企业)
 }
 
@@ -1403,8 +1406,6 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, t)
 }
-
-
 
 func (s *Server) frontier(w http.ResponseWriter, r *http.Request) {
 	t := s.m.ResolveTask(r.URL.Query().Get("task"))
@@ -1791,7 +1792,6 @@ func (s *Server) activityDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"detail": d})
 }
 
-
 func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 	tr := s.m.Traffic()
 	if tr == nil {
@@ -1883,15 +1883,15 @@ func (s *Server) settingsPayload() map[string]any {
 	on, backend, braveKey, tavilyKey, proxy := s.m.WebSearch()
 	pyStored, _, _ := s.m.pg.GetSetting(settingPythonInterp)
 	return map[string]any{
-		"traffic_capture":     s.m.TrafficEnabled(),
-		"llm_record":          s.m.LLMRecordEnabled(),
-		"web_search_enabled":  on,
-		"web_search_backend":  backend,
-		"brave_key_set":       strings.TrimSpace(braveKey) != "",
-		"tavily_key_set":      strings.TrimSpace(tavilyKey) != "",
-		"web_search_proxy":    proxy,                       // 独立出口代理(http/https/socks5)，空=直连
-		"python_interpreter":  strings.TrimSpace(pyStored), // 用户/自动设的值(空=用运行时检测)
-		"workers":             s.m.Workers(),               // 并发工作 agent 数(默认3)；对之后启动的任务生效
+		"traffic_capture":    s.m.TrafficEnabled(),
+		"llm_record":         s.m.LLMRecordEnabled(),
+		"web_search_enabled": on,
+		"web_search_backend": backend,
+		"brave_key_set":      strings.TrimSpace(braveKey) != "",
+		"tavily_key_set":     strings.TrimSpace(tavilyKey) != "",
+		"web_search_proxy":   proxy,                       // 独立出口代理(http/https/socks5)，空=直连
+		"python_interpreter": strings.TrimSpace(pyStored), // 用户/自动设的值(空=用运行时检测)
+		"workers":            s.m.Workers(),               // 并发工作 agent 数(默认3)；对之后启动的任务生效
 	}
 }
 
@@ -2185,15 +2185,54 @@ func (s *Server) gc(w http.ResponseWriter, r *http.Request) {
 
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		origin := r.Header.Get("Origin")
+		if origin != "" && corsOriginAllowed(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Add("Vary", "Origin")
+		}
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Max-Age", "600")
 		if r.Method == http.MethodOptions {
+			if origin != "" && !corsOriginAllowed(origin) {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
 			w.WriteHeader(204)
 			return
 		}
+		// Keep JSON and control endpoints bounded. File upload handlers apply a
+		// tighter, endpoint-specific limit after this outer safety ceiling.
+		r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
 		next.ServeHTTP(w, r)
 	})
+}
+
+var requestSequence uint64
+
+func requestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.Header.Get("X-Request-ID")
+		if id == "" || len(id) > 128 {
+			id = fmt.Sprintf("rx-%d-%d", time.Now().UnixNano(), atomic.AddUint64(&requestSequence, 1))
+		}
+		w.Header().Set("X-Request-ID", id)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func corsOriginAllowed(origin string) bool {
+	for _, allowed := range strings.Split(os.Getenv("RESTXTRA_CORS_ORIGINS"), ",") {
+		if strings.TrimSpace(allowed) == origin {
+			return true
+		}
+	}
+	// Development defaults; production deployments should set an explicit list.
+	return origin == "http://localhost:5173" || origin == "http://127.0.0.1:5173"
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -2203,7 +2242,12 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]any{"error": msg})
+	requestID := w.Header().Get("X-Request-ID")
+	payload := map[string]any{"error": msg, "code": http.StatusText(code)}
+	if requestID != "" {
+		payload["request_id"] = requestID
+	}
+	writeJSON(w, code, payload)
 }
 
 func atoiDefault(s string, d int) int {

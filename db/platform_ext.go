@@ -83,15 +83,16 @@ func (d *DB) DeleteKnowledge(id int64) error {
 // ---------- WebShell ----------
 
 type WebshellConn struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	URL       string    `json:"url"`
-	Type      string    `json:"type"`
-	Password  string    `json:"password"`
-	Headers   string    `json:"headers"`
-	Note      string    `json:"note"`
-	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	URL         string    `json:"url"`
+	Type        string    `json:"type"`
+	Password    string    `json:"-"`
+	PasswordSet bool      `json:"password_set"`
+	Headers     string    `json:"headers"`
+	Note        string    `json:"note"`
+	Enabled     bool      `json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func (d *DB) ListWebshells() ([]*WebshellConn, error) {
@@ -106,20 +107,29 @@ func (d *DB) ListWebshells() ([]*WebshellConn, error) {
 		if err := rows.Scan(&w.ID, &w.Name, &w.URL, &w.Type, &w.Password, &w.Headers, &w.Note, &w.Enabled, &w.CreatedAt); err != nil {
 			return nil, err
 		}
+		w.Password, err = d.RevealSecret(w.Password)
+		if err != nil {
+			return nil, err
+		}
+		w.PasswordSet = w.Password != ""
 		out = append(out, &w)
 	}
 	return out, rows.Err()
 }
 
 func (d *DB) SaveWebshell(w *WebshellConn) (int64, error) {
+	password, err := d.ProtectSecret(w.Password)
+	if err != nil {
+		return 0, err
+	}
 	if w.ID == 0 {
 		var id int64
 		err := d.QueryRow(`INSERT INTO webshell_conns(name,url,type,password,headers,note,enabled) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-			w.Name, w.URL, w.Type, w.Password, w.Headers, w.Note, w.Enabled).Scan(&id)
+			w.Name, w.URL, w.Type, password, w.Headers, w.Note, w.Enabled).Scan(&id)
 		return id, err
 	}
-	_, err := d.Exec(`UPDATE webshell_conns SET name=$1,url=$2,type=$3,password=$4,headers=$5,note=$6,enabled=$7 WHERE id=$8`,
-		w.Name, w.URL, w.Type, w.Password, w.Headers, w.Note, w.Enabled, w.ID)
+	_, err = d.Exec(`UPDATE webshell_conns SET name=$1,url=$2,type=$3,password=$4,headers=$5,note=$6,enabled=$7 WHERE id=$8`,
+		w.Name, w.URL, w.Type, password, w.Headers, w.Note, w.Enabled, w.ID)
 	return w.ID, err
 }
 

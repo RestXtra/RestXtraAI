@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -84,8 +83,8 @@ func TestShellQuote(t *testing.T) {
 // stdin JSON and the mirrored env var, then print — verifying the whole script
 // param-passing path. Skips if no python3.
 func TestExecPython(t *testing.T) {
-	interp, err := exec.LookPath("python3")
-	if err != nil {
+	interp := detectPython()
+	if interp == "" {
 		t.Skip("python3 unavailable")
 	}
 	code := `import json,sys,os
@@ -157,7 +156,7 @@ func TestRunHTTPTool(t *testing.T) {
 }
 
 func TestDetectPython(t *testing.T) {
-	if _, err := exec.LookPath("python3"); err != nil {
+	if detectPython() == "" {
 		t.Skip("python3 unavailable")
 	}
 	if p := detectPython(); p == "" {

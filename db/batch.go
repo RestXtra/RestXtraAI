@@ -31,6 +31,8 @@ type BatchTask struct {
 	CreatedAt  time.Time       `json:"created_at"`
 	StartedAt  *time.Time      `json:"started_at"`
 	FinishedAt *time.Time      `json:"finished_at"`
+	Owner      string          `json:"owner,omitempty"`
+	LeaseUntil *time.Time      `json:"lease_until,omitempty"`
 }
 
 // CreateBatchQueue inserts a queue and returns its id.
@@ -119,7 +121,7 @@ func (d *DB) AddBatchTask(queueID int64, title string, payload json.RawMessage) 
 // ListBatchTasks returns a queue's tasks ordered by id.
 func (d *DB) ListBatchTasks(queueID int64) ([]*BatchTask, error) {
 	rows, err := d.Query(`
-SELECT id, queue_id, title, payload, status, attempts, error, created_at, started_at, finished_at
+SELECT id, queue_id, title, payload, status, attempts, error, created_at, started_at, finished_at, owner, lease_until
 FROM batch_tasks WHERE queue_id=$1 ORDER BY id`, queueID)
 	if err != nil {
 		return nil, err
@@ -128,7 +130,7 @@ FROM batch_tasks WHERE queue_id=$1 ORDER BY id`, queueID)
 	var out []*BatchTask
 	for rows.Next() {
 		t := &BatchTask{}
-		if err := rows.Scan(&t.ID, &t.QueueID, &t.Title, &t.Payload, &t.Status, &t.Attempts, &t.Error, &t.CreatedAt, &t.StartedAt, &t.FinishedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.QueueID, &t.Title, &t.Payload, &t.Status, &t.Attempts, &t.Error, &t.CreatedAt, &t.StartedAt, &t.FinishedAt, &t.Owner, &t.LeaseUntil); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -138,12 +140,22 @@ FROM batch_tasks WHERE queue_id=$1 ORDER BY id`, queueID)
 
 // ClaimBatchTask atomically claims the oldest pending task from a queue.
 func (d *DB) ClaimBatchTask(queueID int64) (*BatchTask, error) {
+	return d.ClaimBatchTaskLease(queueID, "legacy", 10*time.Minute)
+}
+
+// ClaimBatchTaskLease atomically reclaims expired work and leases the oldest
+// available task to owner. FOR UPDATE SKIP LOCKED makes concurrent instances
+// safe without serializing unrelated queues.
+func (d *DB) ClaimBatchTaskLease(queueID int64, owner string, lease time.Duration) (*BatchTask, error) {
 	t := &BatchTask{}
+	if lease <= 0 {
+		lease = 10 * time.Minute
+	}
 	err := d.QueryRow(`
-UPDATE batch_tasks SET status='running', attempts=attempts+1, started_at=now(), error=''
-WHERE id = (SELECT id FROM batch_tasks WHERE queue_id=$1 AND status='pending' ORDER BY id LIMIT 1)
-RETURNING id, queue_id, title, payload, status, attempts, error, created_at, started_at, finished_at`, queueID).
-		Scan(&t.ID, &t.QueueID, &t.Title, &t.Payload, &t.Status, &t.Attempts, &t.Error, &t.CreatedAt, &t.StartedAt, &t.FinishedAt)
+	UPDATE batch_tasks SET status='running', attempts=attempts+1, started_at=COALESCE(started_at, now()), lease_until=now()+($2 * interval '1 second'), owner=$3, error=''
+WHERE id = (SELECT id FROM batch_tasks WHERE queue_id=$1 AND (status='pending' OR (status='running' AND lease_until IS NOT NULL AND lease_until < now())) ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1)
+	RETURNING id, queue_id, title, payload, status, attempts, error, created_at, started_at, finished_at, owner, lease_until`, queueID, lease.Seconds(), owner).
+		Scan(&t.ID, &t.QueueID, &t.Title, &t.Payload, &t.Status, &t.Attempts, &t.Error, &t.CreatedAt, &t.StartedAt, &t.FinishedAt, &t.Owner, &t.LeaseUntil)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -155,12 +167,22 @@ RETURNING id, queue_id, title, payload, status, attempts, error, created_at, sta
 
 // FinishBatchTask marks a task completed/failed and records the error.
 func (d *DB) FinishBatchTask(id int64, status, errMsg string) error {
-	_, err := d.Exec(`UPDATE batch_tasks SET status=$1, error=$2, finished_at=now() WHERE id=$3`, status, errMsg, id)
+	_, err := d.Exec(`UPDATE batch_tasks SET status=$1, error=$2, finished_at=now(), lease_until=NULL WHERE id=$3`, status, errMsg, id)
 	return err
 }
 
 // ResetBatchTask puts a task back to pending (for retry).
 func (d *DB) ResetBatchTask(id int64) error {
-	_, err := d.Exec(`UPDATE batch_tasks SET status='pending', started_at=NULL, finished_at=NULL, error='' WHERE id=$1`, id)
+	_, err := d.Exec(`UPDATE batch_tasks SET status='pending', owner='', lease_until=NULL, started_at=NULL, finished_at=NULL, error='' WHERE id=$1`, id)
 	return err
+}
+
+// RequeueExpiredBatchTasks makes crash recovery explicit and observable.
+func (d *DB) RequeueExpiredBatchTasks() (int64, error) {
+	res, err := d.Exec(`UPDATE batch_tasks SET status='pending', owner='', lease_until=NULL, started_at=NULL, error='lease expired' WHERE status='running' AND lease_until IS NOT NULL AND lease_until < now()`)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }

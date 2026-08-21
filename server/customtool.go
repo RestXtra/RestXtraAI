@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -186,6 +187,11 @@ const settingPythonInterp = "python_interpreter"
 func detectPython() string {
 	for _, c := range []string{"python3", "python"} {
 		if p, err := exec.LookPath(c); err == nil {
+			// WindowsApps\python*.exe is the Microsoft Store execution alias;
+			// it exists on PATH but cannot execute in a server process.
+			if runtime.GOOS == "windows" && strings.Contains(strings.ToLower(filepath.ToSlash(p)), "/windowsapps/") {
+				continue
+			}
 			return p
 		}
 	}

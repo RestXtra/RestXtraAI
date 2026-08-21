@@ -5,9 +5,9 @@ package db
 
 const (
 	// Setting keys for space-search provider credentials.
-	SettingFofaKey    = "spacesearch_fofa_key"
-	SettingHunterKey  = "spacesearch_hunter_key"
-	SettingQuakeKey   = "spacesearch_quake_key"
+	SettingFofaKey   = "spacesearch_fofa_key"
+	SettingHunterKey = "spacesearch_hunter_key"
+	SettingQuakeKey  = "spacesearch_quake_key"
 )
 
 // SpaceSearchConfig 是某个引擎的配置摘要（key 仅回显尾 4 位）。
@@ -30,11 +30,11 @@ func (d *DB) SpaceSearchConfigs() []SpaceSearchConfig {
 func (d *DB) SpaceSearchKey(provider string) string {
 	switch provider {
 	case "fofa":
-		return d.GetSettingVal(SettingFofaKey)
+		return d.GetSecretSettingVal(SettingFofaKey)
 	case "hunter":
-		return d.GetSettingVal(SettingHunterKey)
+		return d.GetSecretSettingVal(SettingHunterKey)
 	case "quake":
-		return d.GetSettingVal(SettingQuakeKey)
+		return d.GetSecretSettingVal(SettingQuakeKey)
 	}
 	return ""
 }
@@ -54,14 +54,19 @@ func (d *DB) SaveSpaceSearchKey(provider, key string) error {
 		return nil
 	}
 	if key == "" {
-		return d.SetSetting(settingsKey, "")
+		return d.SetSecretSetting(settingsKey, "")
 	}
-	return d.SetSetting(settingsKey, key)
+	return d.SetSecretSetting(settingsKey, key)
 }
 
 // GetSettingVal 读取 setting，缺省返回空串。
 func (d *DB) GetSettingVal(key string) string {
 	v, _, _ := d.GetSetting(key)
+	return v
+}
+
+func (d *DB) GetSecretSettingVal(key string) string {
+	v, _, _ := d.GetSecretSetting(key)
 	return v
 }
 

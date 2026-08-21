@@ -8,8 +8,35 @@ permissions:
   packages: write  # 推送 GHCR 镜像需要
 
 jobs:
+  # ⓪ Quality gates run before any release artifact is built.
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: go test ./...
+      - run: go vet ./...
+      - run: npm ci
+        working-directory: web
+      - run: npx tsc --noEmit
+        working-directory: web
+      # Existing frontend lint debt is tracked separately under P3; keep the
+      # diagnostic visible without blocking backend/security releases yet.
+      - run: npm run lint
+        continue-on-error: true
+        working-directory: web
+
   # ① 前端静态导出（一次），产物给交叉编译各平台复用
   frontend:
+    needs: quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

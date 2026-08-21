@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -58,6 +59,10 @@ func (d *DB) ActiveProfile() (*LLMProfile, error) {
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
+	if err != nil {
+		return &p, err
+	}
+	p.APIKey, err = d.RevealSecret(p.APIKey)
 	return &p, err
 }
 
@@ -70,11 +75,19 @@ func (d *DB) ProfileByID(id int64) (*LLMProfile, error) {
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
+	if err != nil {
+		return &p, err
+	}
+	p.APIKey, err = d.RevealSecret(p.APIKey)
 	return &p, err
 }
 
 // SaveProfile inserts (id==0) or updates a profile. Empty apiKey on update keeps existing.
 func (d *DB) SaveProfile(p *LLMProfile) (int64, error) {
+	apiKey, err := d.ProtectSecret(p.APIKey)
+	if err != nil {
+		return 0, err
+	}
 	hint := p.APIKeyHint
 	if len(p.APIKey) >= 4 {
 		hint = "…" + p.APIKey[len(p.APIKey)-4:]
@@ -83,7 +96,7 @@ func (d *DB) SaveProfile(p *LLMProfile) (int64, error) {
 		var id int64
 		err := d.QueryRow(`INSERT INTO llm_profiles(name,format,base_url,proxy,model,api_key,api_key_hint,rate_per_second,rate_per_minute,context_window_k,reasoning_effort,auth_mode)
 VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,NULLIF($6,''),NULLIF($7,''),$8,$9,$10,$11,$12) RETURNING id`,
-			p.Name, p.Format, p.BaseURL, p.Proxy, p.Model, p.APIKey, hint, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.AuthMode).Scan(&id)
+			p.Name, p.Format, p.BaseURL, p.Proxy, p.Model, apiKey, hint, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.AuthMode).Scan(&id)
 		return id, err
 	}
 	if p.APIKey == "" {
@@ -91,8 +104,8 @@ VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,NULLIF($6,''),NULLIF($7,''),$8,$9,$
 			p.Name, p.Format, p.BaseURL, p.Proxy, p.Model, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.AuthMode, p.ID)
 		return p.ID, err
 	}
-	_, err := d.Exec(`UPDATE llm_profiles SET name=$1,format=$2,base_url=NULLIF($3,''),proxy=NULLIF($4,''),model=$5,api_key=$6,api_key_hint=$7,rate_per_second=$8,rate_per_minute=$9,context_window_k=$10,reasoning_effort=$11,auth_mode=$12 WHERE id=$13`,
-		p.Name, p.Format, p.BaseURL, p.Proxy, p.Model, p.APIKey, hint, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.AuthMode, p.ID)
+	_, err = d.Exec(`UPDATE llm_profiles SET name=$1,format=$2,base_url=NULLIF($3,''),proxy=NULLIF($4,''),model=$5,api_key=$6,api_key_hint=$7,rate_per_second=$8,rate_per_minute=$9,context_window_k=$10,reasoning_effort=$11,auth_mode=$12 WHERE id=$13`,
+		p.Name, p.Format, p.BaseURL, p.Proxy, p.Model, apiKey, hint, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.AuthMode, p.ID)
 	return p.ID, err
 }
 
@@ -457,7 +470,12 @@ func (d *DB) ListMCP() ([]*MCPServer, error) {
 			rows.Close()
 			return nil, err
 		}
-		m.Args, m.Env = json.RawMessage(args), json.RawMessage(env)
+		m.Args = json.RawMessage(args)
+		m.Env, err = d.RevealMCPEnv(json.RawMessage(env))
+		if err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("decrypt MCP env: %w", err)
+		}
 		out = append(out, &m)
 	}
 	if err := rows.Err(); err != nil {
@@ -541,6 +559,33 @@ func (d *DB) SaveMCP(m *MCPServer) (int64, error) {
 	if env == "" {
 		env = "{}"
 	}
+	if m.ID != 0 {
+		var oldRaw []byte
+		if err := d.QueryRow(`SELECT env FROM mcp_servers WHERE id=$1`, m.ID).Scan(&oldRaw); err == nil {
+			oldPlain, derr := d.RevealMCPEnv(json.RawMessage(oldRaw))
+			if derr != nil {
+				return 0, fmt.Errorf("decrypt existing MCP env: %w", derr)
+			}
+			var incoming, old map[string]string
+			if json.Unmarshal([]byte(env), &incoming) == nil && json.Unmarshal(oldPlain, &old) == nil {
+				for k, v := range incoming {
+					if mcpSecretKey(k) && v == "***" {
+						if previous, ok := old[k]; ok {
+							incoming[k] = previous
+						}
+					}
+				}
+				if merged, merr := json.Marshal(incoming); merr == nil {
+					env = string(merged)
+				}
+			}
+		}
+	}
+	protectedEnv, err := d.ProtectMCPEnv(json.RawMessage(env))
+	if err != nil {
+		return 0, fmt.Errorf("encrypt MCP env: %w", err)
+	}
+	env = string(protectedEnv)
 	if m.ID == 0 {
 		var id int64
 		err := d.QueryRow(`INSERT INTO mcp_servers(name,transport,command,args,env,url,enabled) VALUES ($1,$2,NULLIF($3,''),$4,$5,NULLIF($6,''),$7) RETURNING id`,
