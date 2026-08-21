@@ -1,22 +1,10 @@
 "use client";
 
 import * as React from "react";
+
 import { BoxesIcon, Loader2Icon, PlayIcon, PlusIcon, RotateCwIcon, SquareIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,15 +15,28 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
-import type { SandboxContainer, SandboxHost, DockerImage } from "@/lib/types";
+import type { DockerImage, SandboxContainer, SandboxHost } from "@/lib/types";
 
-function fmtSize(n: number): string {
+function _fmtSize(n: number): string {
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)}GB`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(0)}MB`;
   return `${(n / 1e3).toFixed(0)}KB`;
@@ -108,7 +109,9 @@ function CreateContainerDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>创建沙箱容器</DialogTitle>
-          <DialogDescription>默认只读根 + cap-drop ALL + 资源限额，勾选「受管」会打 sandbox.managed 标签。</DialogDescription>
+          <DialogDescription>
+            默认只读根 + cap-drop ALL + 资源限额，勾选「受管」会打 sandbox.managed 标签。
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
           <div className="grid gap-2">
@@ -118,7 +121,9 @@ function CreateContainerDialog({
                 <SelectValue placeholder="选择镜像" />
               </SelectTrigger>
               <SelectContent>
-                {imageOptions.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">该主机暂无镜像</div>}
+                {imageOptions.length === 0 && (
+                  <div className="px-2 py-1 text-muted-foreground text-xs">该主机暂无镜像</div>
+                )}
                 {imageOptions.map((t) => (
                   <SelectItem key={t} value={t}>
                     {t}
@@ -127,11 +132,18 @@ function CreateContainerDialog({
                 <SelectItem value={image ? image : "__manual__"} className="hidden" />
               </SelectContent>
             </Select>
-            {!imageOptions.includes(image) && image && <p className="text-muted-foreground text-xs">将使用手动输入的镜像：{image}</p>}
+            {!imageOptions.includes(image) && image && (
+              <p className="text-muted-foreground text-xs">将使用手动输入的镜像：{image}</p>
+            )}
           </div>
           <div className="grid gap-2">
             <Label htmlFor="c-name">容器名（可选）</Label>
-            <Input id="c-name" placeholder="留空则 Docker 随机命名" value={name} onChange={(e) => setName(e.target.value)} />
+            <Input
+              id="c-name"
+              placeholder="留空则 Docker 随机命名"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </div>
           <div className="grid grid-cols-3 gap-2">
             <div className="grid gap-1.5">
@@ -208,7 +220,8 @@ export default function SandboxContainersPage() {
   const toggleCheck = (id: string) => {
     setChecked((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -243,7 +256,10 @@ export default function SandboxContainersPage() {
   };
 
   React.useEffect(() => {
-    api.sandboxHosts().then(setHosts).catch(() => setHosts([]));
+    api
+      .sandboxHosts()
+      .then(setHosts)
+      .catch(() => setHosts([]));
   }, []);
   // 默认选中第一个主机
   React.useEffect(() => {
@@ -258,7 +274,10 @@ export default function SandboxContainersPage() {
       .then((r) => setContainers(r.containers ?? []))
       .catch(() => setContainers([]))
       .finally(() => setLoading(false));
-    api.sandboxImages(hostId).then((r) => setImages(r.images ?? [])).catch(() => setImages([]));
+    api
+      .sandboxImages(hostId)
+      .then((r) => setImages(r.images ?? []))
+      .catch(() => setImages([]));
   }, [hostId, managedOnly]);
 
   React.useEffect(() => {
@@ -269,7 +288,9 @@ export default function SandboxContainersPage() {
     setActing(cid);
     try {
       await api.sandboxContainerAction(hostId, cid, action);
-      toast.success(`已${action === "start" ? "启动" : action === "stop" ? "停止" : action === "restart" ? "重启" : "删除"}`);
+      toast.success(
+        `已${action === "start" ? "启动" : action === "stop" ? "停止" : action === "restart" ? "重启" : "删除"}`,
+      );
       load();
     } catch (e) {
       toast.error(`${action} 失败：${(e as Error).message}`);
@@ -282,7 +303,7 @@ export default function SandboxContainersPage() {
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       <div className="flex flex-wrap items-center gap-2">
         <BoxesIcon className="size-5 text-muted-foreground" />
-        <h1 className="text-xl font-semibold tracking-tight">沙箱容器</h1>
+        <h1 className="font-semibold text-xl tracking-tight">沙箱容器</h1>
         <Select value={hostId} onValueChange={setHostId}>
           <SelectTrigger className="w-56">
             <SelectValue placeholder="选择沙箱主机" />
@@ -293,24 +314,36 @@ export default function SandboxContainersPage() {
                 {h.name} · {h.addr}
               </SelectItem>
             ))}
-            {hosts.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">请先在「沙箱主机」添加主机</div>}
+            {hosts.length === 0 && (
+              <div className="px-2 py-1 text-muted-foreground text-xs">请先在「沙箱主机」添加主机</div>
+            )}
           </SelectContent>
         </Select>
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <label className="flex items-center gap-1.5 text-muted-foreground text-xs">
           <Switch size="sm" checked={managedOnly} onCheckedChange={setManagedOnly} />
           仅看受管容器
         </label>
         {hostId && <CreateContainerDialog hostId={hostId} images={images} onCreated={load} />}
         {checked.size > 0 && (
           <>
-            <Button variant="destructive" size="sm" onClick={() => { setDeleteAll(false); setDeleteOpen(true); }}>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                setDeleteAll(false);
+                setDeleteOpen(true);
+              }}
+            >
               <Trash2Icon className="size-3.5" /> 删除已选 ({checked.size})
             </Button>
             <Button
               variant="outline"
               size="sm"
               className="text-destructive hover:text-destructive"
-              onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+              onClick={() => {
+                setDeleteAll(true);
+                setDeleteOpen(true);
+              }}
             >
               <Trash2Icon className="size-3.5" /> 删除全部
             </Button>
@@ -321,7 +354,7 @@ export default function SandboxContainersPage() {
       <Card className="overflow-hidden py-0">
         <div className="max-h-[70vh] overflow-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted/50 sticky top-0">
+            <thead className="sticky top-0 bg-muted/50">
               <tr className="text-left text-muted-foreground text-xs">
                 <th className="w-8 px-3 py-2 font-medium">
                   <Checkbox
@@ -347,7 +380,7 @@ export default function SandboxContainersPage() {
                 </tr>
               ) : containers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-muted-foreground py-12 text-center text-sm">
+                  <td colSpan={7} className="py-12 text-center text-muted-foreground text-sm">
                     该主机暂无容器{managedOnly ? "（受管）" : ""}，点击「创建容器」。
                   </td>
                 </tr>
@@ -367,7 +400,7 @@ export default function SandboxContainersPage() {
                       </td>
                       <td className="max-w-[240px] px-3 py-2">
                         <code className="block truncate font-mono text-xs">{name}</code>
-                        <span className="text-muted-foreground text-[11px]">{c.Id.slice(0, 12)}</span>
+                        <span className="text-[11px] text-muted-foreground">{c.Id.slice(0, 12)}</span>
                       </td>
                       <td className="max-w-[200px] truncate px-3 py-2 font-mono text-xs">{c.Image}</td>
                       <td className="px-3 py-2">
@@ -378,24 +411,52 @@ export default function SandboxContainersPage() {
                         ) : (
                           <Badge variant="outline">{c.State === "exited" ? "已停止" : c.State || "—"}</Badge>
                         )}
-                        <div className="text-muted-foreground text-[11px]">{c.Status}</div>
+                        <div className="text-[11px] text-muted-foreground">{c.Status}</div>
                       </td>
-                      <td className="text-muted-foreground px-3 py-2 text-xs">{fmtTime(c.Created)}</td>
+                      <td className="px-3 py-2 text-muted-foreground text-xs">{fmtTime(c.Created)}</td>
                       <td className="px-3 py-2">
-                        {isManaged ? <Badge variant="outline">sandbox</Badge> : <span className="text-muted-foreground text-xs">—</span>}
+                        {isManaged ? (
+                          <Badge variant="outline">sandbox</Badge>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">—</span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <Button size="icon" variant="ghost" disabled={acting === c.Id || running} onClick={() => act(c.Id, "start")} aria-label="启动">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            disabled={acting === c.Id || running}
+                            onClick={() => act(c.Id, "start")}
+                            aria-label="启动"
+                          >
                             <PlayIcon />
                           </Button>
-                          <Button size="icon" variant="ghost" disabled={acting === c.Id || !running} onClick={() => act(c.Id, "stop")} aria-label="停止">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            disabled={acting === c.Id || !running}
+                            onClick={() => act(c.Id, "stop")}
+                            aria-label="停止"
+                          >
                             <SquareIcon />
                           </Button>
-                          <Button size="icon" variant="ghost" disabled={acting === c.Id} onClick={() => act(c.Id, "restart")} aria-label="重启">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            disabled={acting === c.Id}
+                            onClick={() => act(c.Id, "restart")}
+                            aria-label="重启"
+                          >
                             <RotateCwIcon />
                           </Button>
-                          <Button size="icon" variant="ghost" disabled={acting === c.Id} onClick={() => act(c.Id, "remove")} aria-label="删除">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            disabled={acting === c.Id}
+                            onClick={() => act(c.Id, "remove")}
+                            aria-label="删除"
+                          >
                             <Trash2Icon className="text-destructive" />
                           </Button>
                         </div>
@@ -417,14 +478,20 @@ export default function SandboxContainersPage() {
               {deleteAll ? (
                 <>将从沙箱主机强制删除全部容器（含其数据卷，force 删除），此操作不可撤销。</>
               ) : (
-                <>将从沙箱主机强制删除 <span className="font-semibold tabular-nums">{checked.size}</span> 个容器（含其数据卷，force 删除），此操作不可撤销。</>
+                <>
+                  将从沙箱主机强制删除 <span className="font-semibold tabular-nums">{checked.size}</span>{" "}
+                  个容器（含其数据卷，force 删除），此操作不可撤销。
+                </>
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(e) => { e.preventDefault(); confirmBatchRemove(); }}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmBatchRemove();
+              }}
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

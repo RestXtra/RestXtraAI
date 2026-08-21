@@ -1,55 +1,23 @@
 "use client";
 
 import * as React from "react";
+
 import {
   BuildingIcon,
-  GlobeIcon,
-  NetworkIcon,
-  LayoutTemplateIcon,
-  LinkIcon,
-  SearchIcon,
-  KeyRoundIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  RefreshCwIcon,
-  Trash2Icon,
+  GlobeIcon,
+  KeyRoundIcon,
+  LayoutTemplateIcon,
+  LinkIcon,
   type LucideIcon,
+  NetworkIcon,
+  RefreshCwIcon,
+  SearchIcon,
+  Trash2Icon,
 } from "lucide-react";
-
 import { toast } from "sonner";
 
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,35 +28,169 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { cn } from "@/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import type { Asset, Company } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 // ── DSL autocomplete ──────────────────────────────────────────────────────────
 
 const DSL_FIELDS: { name: string; desc: string; ops: { op: string; desc: string }[] }[] = [
-  { name: "domain",       desc: "域名（根域名/子域名/服务域名）",   ops: [{ op: "=",  desc: "模糊匹配" }, { op: "==", desc: "精确匹配" }, { op: "!=", desc: "排除" }] },
-  { name: "ip",           desc: "IPv4/IPv6 地址",                    ops: [{ op: "=",  desc: "模糊匹配" }, { op: "==", desc: "精确匹配" }, { op: "!=", desc: "排除" }] },
-  { name: "url",          desc: "完整 URL（服务/接口）",              ops: [{ op: "=",  desc: "模糊匹配" }, { op: "==", desc: "精确匹配" }, { op: "!=", desc: "排除" }] },
-  { name: "root_domain",  desc: "根域名",                            ops: [{ op: "=",  desc: "模糊匹配" }, { op: "==", desc: "精确匹配" }, { op: "!=", desc: "排除" }] },
-  { name: "page_title",   desc: "页面标题（HTTP 服务）",              ops: [{ op: "=",  desc: "模糊匹配" }, { op: "==", desc: "精确匹配" }, { op: "!=", desc: "排除" }] },
-  { name: "icp",          desc: "ICP 备案号",                        ops: [{ op: "=",  desc: "模糊匹配" }, { op: "==", desc: "精确匹配" }, { op: "!=", desc: "排除" }] },
-  { name: "service_name", desc: "服务名称（非 HTTP 服务）",           ops: [{ op: "=",  desc: "模糊匹配" }, { op: "==", desc: "精确匹配" }, { op: "!=", desc: "排除" }] },
-  { name: "app_name",     desc: "应用名称",                          ops: [{ op: "=",  desc: "模糊匹配" }, { op: "==", desc: "精确匹配" }, { op: "!=", desc: "排除" }] },
-  { name: "method",       desc: "HTTP 方法 GET/POST/PUT/…",          ops: [{ op: "==", desc: "精确匹配" }, { op: "!=", desc: "排除" }] },
-  { name: "service_type", desc: "服务类型：http | other",             ops: [{ op: "==", desc: "精确匹配" }, { op: "!=", desc: "排除" }] },
-  { name: "record_type",  desc: "DNS 解析类型 A/CNAME/MX/…",        ops: [{ op: "==", desc: "精确匹配" }, { op: "!=", desc: "排除" }] },
-  { name: "technology",   desc: "技术指纹（数组字段）",               ops: [{ op: "=",  desc: "模糊匹配" }, { op: "==", desc: "精确匹配" }, { op: "!=", desc: "排除" }] },
-  { name: "port",         desc: "端口号（整数）",                     ops: [{ op: "==", desc: "等于" }, { op: "!=", desc: "不等于" }, { op: ">",  desc: "大于" }, { op: ">=", desc: "大于等于" }, { op: "<",  desc: "小于" }, { op: "<=", desc: "小于等于" }] },
-  { name: "status_code",  desc: "HTTP 状态码（整数）",                ops: [{ op: "==", desc: "等于" }, { op: "!=", desc: "不等于" }, { op: ">",  desc: "大于" }, { op: ">=", desc: "大于等于" }, { op: "<",  desc: "小于" }, { op: "<=", desc: "小于等于" }] },
-  { name: "company_id",   desc: "归属企业 ID（整数）",                ops: [{ op: "==", desc: "等于" }] },
-  { name: "task_id",      desc: "来源任务 ID（整数）",                ops: [{ op: "==", desc: "等于" }] },
+  {
+    name: "domain",
+    desc: "域名（根域名/子域名/服务域名）",
+    ops: [
+      { op: "=", desc: "模糊匹配" },
+      { op: "==", desc: "精确匹配" },
+      { op: "!=", desc: "排除" },
+    ],
+  },
+  {
+    name: "ip",
+    desc: "IPv4/IPv6 地址",
+    ops: [
+      { op: "=", desc: "模糊匹配" },
+      { op: "==", desc: "精确匹配" },
+      { op: "!=", desc: "排除" },
+    ],
+  },
+  {
+    name: "url",
+    desc: "完整 URL（服务/接口）",
+    ops: [
+      { op: "=", desc: "模糊匹配" },
+      { op: "==", desc: "精确匹配" },
+      { op: "!=", desc: "排除" },
+    ],
+  },
+  {
+    name: "root_domain",
+    desc: "根域名",
+    ops: [
+      { op: "=", desc: "模糊匹配" },
+      { op: "==", desc: "精确匹配" },
+      { op: "!=", desc: "排除" },
+    ],
+  },
+  {
+    name: "page_title",
+    desc: "页面标题（HTTP 服务）",
+    ops: [
+      { op: "=", desc: "模糊匹配" },
+      { op: "==", desc: "精确匹配" },
+      { op: "!=", desc: "排除" },
+    ],
+  },
+  {
+    name: "icp",
+    desc: "ICP 备案号",
+    ops: [
+      { op: "=", desc: "模糊匹配" },
+      { op: "==", desc: "精确匹配" },
+      { op: "!=", desc: "排除" },
+    ],
+  },
+  {
+    name: "service_name",
+    desc: "服务名称（非 HTTP 服务）",
+    ops: [
+      { op: "=", desc: "模糊匹配" },
+      { op: "==", desc: "精确匹配" },
+      { op: "!=", desc: "排除" },
+    ],
+  },
+  {
+    name: "app_name",
+    desc: "应用名称",
+    ops: [
+      { op: "=", desc: "模糊匹配" },
+      { op: "==", desc: "精确匹配" },
+      { op: "!=", desc: "排除" },
+    ],
+  },
+  {
+    name: "method",
+    desc: "HTTP 方法 GET/POST/PUT/…",
+    ops: [
+      { op: "==", desc: "精确匹配" },
+      { op: "!=", desc: "排除" },
+    ],
+  },
+  {
+    name: "service_type",
+    desc: "服务类型：http | other",
+    ops: [
+      { op: "==", desc: "精确匹配" },
+      { op: "!=", desc: "排除" },
+    ],
+  },
+  {
+    name: "record_type",
+    desc: "DNS 解析类型 A/CNAME/MX/…",
+    ops: [
+      { op: "==", desc: "精确匹配" },
+      { op: "!=", desc: "排除" },
+    ],
+  },
+  {
+    name: "technology",
+    desc: "技术指纹（数组字段）",
+    ops: [
+      { op: "=", desc: "模糊匹配" },
+      { op: "==", desc: "精确匹配" },
+      { op: "!=", desc: "排除" },
+    ],
+  },
+  {
+    name: "port",
+    desc: "端口号（整数）",
+    ops: [
+      { op: "==", desc: "等于" },
+      { op: "!=", desc: "不等于" },
+      { op: ">", desc: "大于" },
+      { op: ">=", desc: "大于等于" },
+      { op: "<", desc: "小于" },
+      { op: "<=", desc: "小于等于" },
+    ],
+  },
+  {
+    name: "status_code",
+    desc: "HTTP 状态码（整数）",
+    ops: [
+      { op: "==", desc: "等于" },
+      { op: "!=", desc: "不等于" },
+      { op: ">", desc: "大于" },
+      { op: ">=", desc: "大于等于" },
+      { op: "<", desc: "小于" },
+      { op: "<=", desc: "小于等于" },
+    ],
+  },
+  { name: "company_id", desc: "归属企业 ID（整数）", ops: [{ op: "==", desc: "等于" }] },
+  { name: "task_id", desc: "来源任务 ID（整数）", ops: [{ op: "==", desc: "等于" }] },
 ];
 
 const LOGIC_OPS = [
   { label: "AND", desc: "且（两个条件都满足）" },
-  { label: "OR",  desc: "或（满足其中之一）" },
+  { label: "OR", desc: "或（满足其中之一）" },
 ];
 
 interface DslSuggestion {
@@ -125,23 +227,18 @@ function getDslSuggestions(text: string, cursor: number): DslSuggestion[] {
 
   // Everything before the current token (trimmed)
   const beforeToken = before.slice(0, tokenStart).trimEnd();
-  const afterExpression =
-    beforeToken.length > 0 &&
-    !/\b(AND|OR)\s*$/i.test(beforeToken) &&
-    !beforeToken.endsWith("(");
+  const afterExpression = beforeToken.length > 0 && !/\b(AND|OR)\s*$/i.test(beforeToken) && !beforeToken.endsWith("(");
 
   // Current token is a prefix of AND/OR and follows a complete expression
   if (/^(a|an|and|o|or)$/i.test(currentToken) && afterExpression) {
-    return LOGIC_OPS.filter((l) => l.label.startsWith(currentToken.toUpperCase())).map(
-      ({ label, desc }) => ({
-        kind: "logic",
-        label,
-        desc,
-        replaceStart: tokenStart,
-        replaceEnd: cursor,
-        insertText: `${label} `,
-      }),
-    );
+    return LOGIC_OPS.filter((l) => l.label.startsWith(currentToken.toUpperCase())).map(({ label, desc }) => ({
+      kind: "logic",
+      label,
+      desc,
+      replaceStart: tokenStart,
+      replaceEnd: cursor,
+      insertText: `${label} `,
+    }));
   }
 
   // No current token, after a complete expression → suggest AND/OR
@@ -168,18 +265,15 @@ function getDslSuggestions(text: string, cursor: number): DslSuggestion[] {
   }));
 }
 
-function applyDslSuggestion(
-  text: string,
-  s: DslSuggestion,
-): { text: string; cursor: number } {
+function applyDslSuggestion(text: string, s: DslSuggestion): { text: string; cursor: number } {
   const newText = text.slice(0, s.replaceStart) + s.insertText + text.slice(s.replaceEnd);
   return { text: newText, cursor: s.replaceStart + s.insertText.length };
 }
 
 const KIND_STYLE: Record<string, string> = {
-  field:    "text-blue-500 dark:text-blue-400",
+  field: "text-blue-500 dark:text-blue-400",
   operator: "text-amber-500 dark:text-amber-400",
-  logic:    "text-emerald-500 dark:text-emerald-400",
+  logic: "text-emerald-500 dark:text-emerald-400",
 };
 
 const METHOD_COLOR: Record<string, string> = {
@@ -195,7 +289,12 @@ const METHOD_COLOR: Record<string, string> = {
 function MethodBadge({ method }: { method: string }) {
   const m = method.toUpperCase();
   return (
-    <span className={cn("inline-block rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none", METHOD_COLOR[m] ?? "bg-muted text-muted-foreground")}>
+    <span
+      className={cn(
+        "inline-block rounded px-1.5 py-0.5 font-mono font-semibold text-[10px] leading-none",
+        METHOD_COLOR[m] ?? "bg-muted text-muted-foreground",
+      )}
+    >
       {m || "—"}
     </span>
   );
@@ -212,12 +311,12 @@ function statusTone(code: number) {
 const PAGE_SIZES = [25, 50, 100, 200];
 
 const TABS: { key: string; label: string; icon: LucideIcon }[] = [
-  { key: "company",     label: "企业",   icon: BuildingIcon },
+  { key: "company", label: "企业", icon: BuildingIcon },
   { key: "root_domain", label: "根域名", icon: GlobeIcon },
-  { key: "ip",          label: "IP",     icon: NetworkIcon },
-  { key: "subdomain",   label: "子域名", icon: GlobeIcon },
-  { key: "service",     label: "服务",   icon: LayoutTemplateIcon },
-  { key: "endpoint",    label: "接口",   icon: LinkIcon },
+  { key: "ip", label: "IP", icon: NetworkIcon },
+  { key: "subdomain", label: "子域名", icon: GlobeIcon },
+  { key: "service", label: "服务", icon: LayoutTemplateIcon },
+  { key: "endpoint", label: "接口", icon: LinkIcon },
 ];
 
 export default function AssetsPage() {
@@ -233,7 +332,7 @@ export default function AssetsPage() {
   const [page, setPage] = React.useState(0);
   const [size, setSize] = React.useState(50);
   const [dslError, setDslError] = React.useState("");
-  const [refreshKey, setRefreshKey] = React.useState(0);
+  const [_refreshKey, setRefreshKey] = React.useState(0);
 
   // asset selection & delete
   const [selected, setSelected] = React.useState<Set<number>>(new Set());
@@ -248,8 +347,14 @@ export default function AssetsPage() {
 
   // Companies + per-type counts (tab badges) — loaded on demand, no background polling.
   const loadMeta = React.useCallback(() => {
-    api.companies().then(setCompanies).catch(() => {});
-    api.assetCounts().then(setCounts).catch(() => {});
+    api
+      .companies()
+      .then(setCompanies)
+      .catch(() => {});
+    api
+      .assetCounts()
+      .then(setCounts)
+      .catch(() => {});
   }, []);
 
   // Manual refresh: reload counts/companies and re-fetch the current page.
@@ -262,7 +367,8 @@ export default function AssetsPage() {
   const toggleSelect = (id: number) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -290,7 +396,7 @@ export default function AssetsPage() {
       setSelected(new Set());
       refresh();
     } catch (e) {
-      toast.error("删除失败：" + String((e as Error)?.message ?? e));
+      toast.error(`删除失败：${String((e as Error)?.message ?? e)}`);
     } finally {
       setDeleting(false);
       setDeleteOpen(false);
@@ -302,13 +408,14 @@ export default function AssetsPage() {
     setCompanyDeleting(true);
     try {
       const res = await api.deleteCompany(companyDeleteTarget.id, companyDeleteAssets);
-      const msg = companyDeleteAssets && res.assets_deleted > 0
-        ? `已删除企业，同时删除 ${res.assets_deleted} 条资产`
-        : "已删除企业";
+      const msg =
+        companyDeleteAssets && res.assets_deleted > 0
+          ? `已删除企业，同时删除 ${res.assets_deleted} 条资产`
+          : "已删除企业";
       toast.success(msg);
       refresh();
     } catch (e) {
-      toast.error("删除失败：" + String((e as Error)?.message ?? e));
+      toast.error(`删除失败：${String((e as Error)?.message ?? e)}`);
     } finally {
       setCompanyDeleting(false);
       setCompanyDeleteTarget(null);
@@ -325,9 +432,9 @@ export default function AssetsPage() {
     setQuery("");
     setDslError("");
     setSelected(new Set());
-  }, [tab]);
+  }, []);
 
-  React.useEffect(() => setPage(0), [tab, size, query, companyFilter]);
+  React.useEffect(() => setPage(0), []);
 
   const dslMode = query.trim() !== "";
 
@@ -340,9 +447,7 @@ export default function AssetsPage() {
     const cid = companyFilter === "all" ? undefined : companyFilter;
     const run = async () => {
       try {
-        const r = dsl
-          ? await api.searchAssets(dsl, tab, size, offset, cid)
-          : await api.assets(tab, size, offset, cid);
+        const r = dsl ? await api.searchAssets(dsl, tab, size, offset, cid) : await api.assets(tab, size, offset, cid);
         setRows(r.assets);
         setTotal(r.total);
         setDslError("");
@@ -357,7 +462,7 @@ export default function AssetsPage() {
     };
     const tid = setTimeout(run, dsl ? 400 : 0);
     return () => clearTimeout(tid);
-  }, [tab, page, size, query, refreshKey, companyFilter]);
+  }, [tab, page, size, query, companyFilter]);
 
   const companyById = React.useMemo(() => {
     const m = new Map<number, string>();
@@ -388,18 +493,14 @@ export default function AssetsPage() {
     <div className="flex h-[calc(100vh-6rem)] min-h-0 flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">资产</h1>
+          <h1 className="font-semibold text-xl tracking-tight">资产</h1>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-muted-foreground">
+          <span className="text-muted-foreground text-sm">
             共 <span className="tabular-nums">{totalAssets}</span> 项资产
           </span>
           {selected.size > 0 && (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => openDelete(Array.from(selected) as number[])}
-            >
+            <Button variant="destructive" size="sm" onClick={() => openDelete(Array.from(selected) as number[])}>
               <Trash2Icon className="size-3.5" /> 删除已选 ({selected.size})
             </Button>
           )}
@@ -435,7 +536,7 @@ export default function AssetsPage() {
               <TabsTrigger key={t.key} value={t.key}>
                 <t.icon className="size-3.5" />
                 {t.label}
-                <span className="ml-1 tabular-nums text-muted-foreground">{tabCounts[t.key]}</span>
+                <span className="ml-1 text-muted-foreground tabular-nums">{tabCounts[t.key]}</span>
               </TabsTrigger>
             ))}
           </TabsList>
@@ -463,16 +564,18 @@ export default function AssetsPage() {
                           <span className="font-medium">{c.name}</span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right tabular-nums text-sm">{c.asset_count}</TableCell>
+                      <TableCell className="text-right text-sm tabular-nums">{c.asset_count}</TableCell>
                       <TableCell>
                         {c.scope?.length ? (
                           <div className="flex flex-wrap gap-1">
                             {c.scope.map((s, i) => (
-                              <Badge key={i} variant="secondary" className="font-mono text-[11px]">{s.raw}</Badge>
+                              <Badge key={i} variant="secondary" className="font-mono text-[11px]">
+                                {s.raw}
+                              </Badge>
                             ))}
                           </div>
                         ) : (
-                          <span className="text-xs text-muted-foreground">未设置范围</span>
+                          <span className="text-muted-foreground text-xs">未设置范围</span>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
@@ -483,7 +586,10 @@ export default function AssetsPage() {
                             variant="ghost"
                             size="icon"
                             className="size-7 text-muted-foreground hover:text-destructive"
-                            onClick={() => { setCompanyDeleteTarget(c); setCompanyDeleteAssets(false); }}
+                            onClick={() => {
+                              setCompanyDeleteTarget(c);
+                              setCompanyDeleteAssets(false);
+                            }}
                           >
                             <Trash2Icon className="size-3.5" />
                           </Button>
@@ -493,7 +599,7 @@ export default function AssetsPage() {
                   ))}
                   {companies.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={4} className="py-10 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={4} className="py-10 text-center text-muted-foreground text-sm">
                         还没有企业。点击右上角「新增企业」并填写资产范围，系统会自动认领命中的资产。
                       </TableCell>
                     </TableRow>
@@ -524,7 +630,7 @@ export default function AssetsPage() {
                 <TableCell className="w-8 pr-0">
                   <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
                 </TableCell>
-                <TableCell className="font-mono text-xs font-medium">{a.domain}</TableCell>
+                <TableCell className="font-medium font-mono text-xs">{a.domain}</TableCell>
                 <TableCell className="text-xs">{a.icp || "—"}</TableCell>
                 <TableCell className="text-xs">
                   {companyName(a.company_id) || <span className="text-muted-foreground">未归属</span>}
@@ -564,14 +670,14 @@ export default function AssetsPage() {
                 <TableCell className="w-8 pr-0">
                   <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
                 </TableCell>
-                <TableCell className="font-mono text-xs font-medium">{a.ip}</TableCell>
+                <TableCell className="font-medium font-mono text-xs">{a.ip}</TableCell>
                 <TableCell className="font-mono text-xs">{a.c_segment || "—"}</TableCell>
-                <TableCell><Chips items={a.bound_domains ?? []} mono /></TableCell>
+                <TableCell>
+                  <Chips items={a.bound_domains ?? []} mono />
+                </TableCell>
                 <TableCell>
                   <Chips
-                    items={(a.open_ports ?? []).map((p) =>
-                      p.service ? `${p.port}/${p.service}` : String(p.port),
-                    )}
+                    items={(a.open_ports ?? []).map((p) => (p.service ? `${p.port}/${p.service}` : String(p.port)))}
                     mono
                   />
                 </TableCell>
@@ -610,10 +716,12 @@ export default function AssetsPage() {
                 <TableCell className="w-8 pr-0">
                   <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
                 </TableCell>
-                <TableCell className="font-mono text-xs font-medium">{a.domain}</TableCell>
+                <TableCell className="font-medium font-mono text-xs">{a.domain}</TableCell>
                 <TableCell className="font-mono text-xs">{a.root_domain || "—"}</TableCell>
                 <TableCell className="text-xs">{a.record_type || "—"}</TableCell>
-                <TableCell className="max-w-xs truncate font-mono text-xs">{(Array.isArray(a.record_value) ? a.record_value.join(", ") : a.record_value) || "—"}</TableCell>
+                <TableCell className="max-w-xs truncate font-mono text-xs">
+                  {(Array.isArray(a.record_value) ? a.record_value.join(", ") : a.record_value) || "—"}
+                </TableCell>
                 <TableCell className="w-8 pl-0">
                   <Button
                     variant="ghost"
@@ -679,16 +787,22 @@ export default function AssetsPage() {
                   <TableCell className="font-mono text-xs tabular-nums">{a.port || "—"}</TableCell>
                   <TableCell>
                     {a.status_code != null ? (
-                      <span className={cn("font-mono text-xs font-semibold tabular-nums", statusTone(a.status_code))}>
+                      <span className={cn("font-mono font-semibold text-xs tabular-nums", statusTone(a.status_code))}>
                         {a.status_code}
                       </span>
-                    ) : "—"}
+                    ) : (
+                      "—"
+                    )}
                   </TableCell>
-                  <TableCell className="max-w-[12rem] truncate text-xs" title={a.page_title}>{a.page_title || "—"}</TableCell>
-                  <TableCell><Chips items={a.technologies ?? []} /></TableCell>
+                  <TableCell className="max-w-[12rem] truncate text-xs" title={a.page_title}>
+                    {a.page_title || "—"}
+                  </TableCell>
+                  <TableCell>
+                    <Chips items={a.technologies ?? []} />
+                  </TableCell>
                   <TableCell>
                     {(a.auth ?? []).length === 0 ? (
-                      <span className="text-xs text-muted-foreground">—</span>
+                      <span className="text-muted-foreground text-xs">—</span>
                     ) : (
                       (a.auth ?? []).map((authItem, i) => {
                         const item = authItem as Record<string, string>;
@@ -738,8 +852,12 @@ export default function AssetsPage() {
                 <TableCell className="w-8 pr-0">
                   <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
                 </TableCell>
-                <TableCell className="w-16"><MethodBadge method={a.method || ""} /></TableCell>
-                <TableCell className="max-w-sm truncate font-mono text-xs" title={a.url}>{a.url || "—"}</TableCell>
+                <TableCell className="w-16">
+                  <MethodBadge method={a.method || ""} />
+                </TableCell>
+                <TableCell className="max-w-sm truncate font-mono text-xs" title={a.url}>
+                  {a.url || "—"}
+                </TableCell>
                 <TableCell>
                   <Chips
                     items={(a.params ?? []).map((p) => {
@@ -770,13 +888,17 @@ export default function AssetsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>确认删除</AlertDialogTitle>
             <AlertDialogDescription>
-              将永久删除 <span className="font-semibold tabular-nums">{deleteIds.length}</span> 条资产记录，此操作不可撤销。
+              将永久删除 <span className="font-semibold tabular-nums">{deleteIds.length}</span>{" "}
+              条资产记录，此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(e) => { e.preventDefault(); confirmDelete(); }}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDelete();
+              }}
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
@@ -786,7 +908,15 @@ export default function AssetsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={!!companyDeleteTarget} onOpenChange={(o) => { if (!o) { setCompanyDeleteTarget(null); setCompanyDeleteAssets(false); } }}>
+      <AlertDialog
+        open={!!companyDeleteTarget}
+        onOpenChange={(o) => {
+          if (!o) {
+            setCompanyDeleteTarget(null);
+            setCompanyDeleteAssets(false);
+          }
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>删除企业 · {companyDeleteTarget?.name}</AlertDialogTitle>
@@ -801,9 +931,7 @@ export default function AssetsPage() {
                   />
                   <span className="text-sm leading-snug">
                     同时删除该企业下的所有资产
-                    <span className="block text-xs text-muted-foreground">
-                      不勾选则保留资产，仅取消归属关系
-                    </span>
+                    <span className="block text-muted-foreground text-xs">不勾选则保留资产，仅取消归属关系</span>
                   </span>
                 </label>
               </div>
@@ -812,7 +940,10 @@ export default function AssetsPage() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={companyDeleting}>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(e) => { e.preventDefault(); confirmDeleteCompany(); }}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDeleteCompany();
+              }}
               disabled={companyDeleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
@@ -886,14 +1017,16 @@ function TabSearchBox({
       setSelIdx((i) => Math.max(i - 1, 0));
     } else if (e.key === "Tab" || e.key === "Enter") {
       const s = suggestions[selIdx];
-      if (s) { e.preventDefault(); apply(s); }
+      if (s) {
+        e.preventDefault();
+        apply(s);
+      }
     } else if (e.key === "Escape") {
       setOpen(false);
     }
   };
 
-  const cursorPos = () =>
-    inputRef.current?.selectionStart ?? query.length;
+  const cursorPos = () => inputRef.current?.selectionStart ?? query.length;
 
   return (
     <div className="flex flex-col gap-1">
@@ -920,12 +1053,13 @@ function TabSearchBox({
                   i === selIdx ? "bg-accent" : "hover:bg-accent/50",
                 )}
                 onMouseEnter={() => setSelIdx(i)}
-                onMouseDown={(e) => { e.preventDefault(); apply(s); }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  apply(s);
+                }}
               >
-                <span className={cn("shrink-0 font-mono text-xs font-semibold", KIND_STYLE[s.kind])}>
-                  {s.label}
-                </span>
-                <span className="text-xs text-muted-foreground">{s.desc}</span>
+                <span className={cn("shrink-0 font-mono font-semibold text-xs", KIND_STYLE[s.kind])}>{s.label}</span>
+                <span className="text-muted-foreground text-xs">{s.desc}</span>
               </div>
             ))}
           </div>
@@ -933,11 +1067,7 @@ function TabSearchBox({
       </div>
       {query.trim() && !open && (
         <p className="pl-1 text-[11px] text-muted-foreground">
-          {loading
-            ? "搜索中…"
-            : error
-            ? <span className="text-destructive">{error}</span>
-            : `找到 ${count ?? 0} 条`}
+          {loading ? "搜索中…" : error ? <span className="text-destructive">{error}</span> : `找到 ${count ?? 0} 条`}
         </p>
       )}
     </div>
@@ -980,7 +1110,7 @@ function AssetCard({
 
   return (
     <Card className="flex min-h-0 flex-1 flex-col overflow-hidden py-0">
-      <div className="min-h-0 flex-1 overflow-auto scrollbar-thin scrollbar-track-transparent">
+      <div className="scrollbar-thin scrollbar-track-transparent min-h-0 flex-1 overflow-auto">
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
@@ -994,14 +1124,16 @@ function AssetCard({
                   </TableHead>
                 ) : (
                   <TableHead key={c + i}>{c}</TableHead>
-                )
+                ),
               )}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {childRows.length > 0 ? childRows : (
+            {childRows.length > 0 ? (
+              childRows
+            ) : (
               <TableRow>
-                <TableCell colSpan={cols.length} className="py-12 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={cols.length} className="py-12 text-center text-muted-foreground text-sm">
                   {loaded ? "暂无数据。" : "加载中…"}
                 </TableCell>
               </TableRow>
@@ -1010,21 +1142,43 @@ function AssetCard({
         </Table>
       </div>
       {total > 0 && (
-        <div className="flex shrink-0 items-center gap-2 border-t px-3 py-1.5 text-xs text-muted-foreground">
+        <div className="flex shrink-0 items-center gap-2 border-t px-3 py-1.5 text-muted-foreground text-xs">
           <Select value={String(size)} onValueChange={(v) => onSize(Number(v))}>
-            <SelectTrigger size="sm" className="h-7 w-24"><SelectValue /></SelectTrigger>
+            <SelectTrigger size="sm" className="h-7 w-24">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              {PAGE_SIZES.map((n) => <SelectItem key={n} value={String(n)}>{n} / 页</SelectItem>)}
+              {PAGE_SIZES.map((n) => (
+                <SelectItem key={n} value={String(n)}>
+                  {n} / 页
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
-          <span className="tabular-nums">{start}–{end} / {total}</span>
+          <span className="tabular-nums">
+            {start}–{end} / {total}
+          </span>
           {pageCount > 1 && (
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="icon" className="size-7" disabled={page <= 0} onClick={() => onPage((p) => Math.max(0, p - 1))}>
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-7"
+                disabled={page <= 0}
+                onClick={() => onPage((p) => Math.max(0, p - 1))}
+              >
                 <ChevronLeftIcon />
               </Button>
-              <span className="tabular-nums">{page + 1} / {pageCount}</span>
-              <Button variant="outline" size="icon" className="size-7" disabled={page + 1 >= pageCount} onClick={() => onPage((p) => Math.min(pageCount - 1, p + 1))}>
+              <span className="tabular-nums">
+                {page + 1} / {pageCount}
+              </span>
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-7"
+                disabled={page + 1 >= pageCount}
+                onClick={() => onPage((p) => Math.min(pageCount - 1, p + 1))}
+              >
                 <ChevronRightIcon />
               </Button>
             </div>
@@ -1037,11 +1191,13 @@ function AssetCard({
 
 function Chips({ items, mono }: { items: string[]; mono?: boolean }) {
   const clean = items.filter(Boolean);
-  if (clean.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+  if (clean.length === 0) return <span className="text-muted-foreground text-xs">—</span>;
   return (
     <div className="flex flex-wrap gap-1">
       {clean.map((s, i) => (
-        <Badge key={i} variant="outline" className={cn("text-[10px]", mono && "font-mono")}>{s}</Badge>
+        <Badge key={i} variant="outline" className={cn("text-[10px]", mono && "font-mono")}>
+          {s}
+        </Badge>
       ))}
     </div>
   );
@@ -1073,7 +1229,10 @@ function CompanyDialog({ onSaved }: { onSaved: () => void }) {
   }, [open]);
 
   const submit = async () => {
-    if (!name.trim()) { toast.error("请填写企业名称"); return; }
+    if (!name.trim()) {
+      toast.error("请填写企业名称");
+      return;
+    }
     setBusy(true);
     try {
       const res = await api.createCompany(name.trim(), logo.trim(), scope);
@@ -1086,7 +1245,7 @@ function CompanyDialog({ onSaved }: { onSaved: () => void }) {
     } catch (e) {
       const msg = String((e as Error)?.message ?? e);
       if (/:\s*409$/.test(msg)) toast.error("企业已存在，请换个名称");
-      else toast.error("保存失败：" + msg);
+      else toast.error(`保存失败：${msg}`);
     } finally {
       setBusy(false);
     }
@@ -1095,19 +1254,27 @@ function CompanyDialog({ onSaved }: { onSaved: () => void }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm"><BuildingIcon className="size-3.5" /> 新增企业</Button>
+        <Button size="sm">
+          <BuildingIcon className="size-3.5" /> 新增企业
+        </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>新增企业</DialogTitle>
           <DialogDescription>
-            资产范围是归属的唯一来源：命中范围的资产（现有 + 未来）会被自动归到该企业。一行一条：根域名（含全部子域）、IP、或 CIDR 网段。
+            资产范围是归属的唯一来源：命中范围的资产（现有 +
+            未来）会被自动归到该企业。一行一条：根域名（含全部子域）、IP、或 CIDR 网段。
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
           <div className="grid gap-1.5">
             <Label htmlFor="cn-name">企业名称</Label>
-            <Input id="cn-name" placeholder="如 Acme Corp（名称唯一）" value={name} onChange={(e) => setName(e.target.value)} />
+            <Input
+              id="cn-name"
+              placeholder="如 Acme Corp（名称唯一）"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="cn-logo">企业图标 URL（可选）</Label>
@@ -1134,8 +1301,12 @@ function CompanyDialog({ onSaved }: { onSaved: () => void }) {
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>取消</Button>
-          <Button onClick={submit} disabled={busy || !name.trim()}>{busy ? "保存中…" : "保存"}</Button>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
+            取消
+          </Button>
+          <Button onClick={submit} disabled={busy || !name.trim()}>
+            {busy ? "保存中…" : "保存"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1165,7 +1336,7 @@ function EditScopeDialog({ company, onSaved }: { company: Company; onSaved: () =
       setOpen(false);
       onSaved();
     } catch (e) {
-      toast.error("保存失败：" + String((e as Error)?.message ?? e));
+      toast.error(`保存失败：${String((e as Error)?.message ?? e)}`);
     } finally {
       setBusy(false);
     }
@@ -1174,14 +1345,14 @@ function EditScopeDialog({ company, onSaved }: { company: Company; onSaved: () =
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7">编辑</Button>
+        <Button variant="outline" size="sm" className="h-7">
+          编辑
+        </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>编辑资产范围 · {company.name}</DialogTitle>
-          <DialogDescription>
-            编辑后将替换该企业的全部现有范围。一行一条：根域名、IP、或 CIDR 网段。
-          </DialogDescription>
+          <DialogDescription>编辑后将替换该企业的全部现有范围。一行一条：根域名、IP、或 CIDR 网段。</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
           <div className="grid gap-1.5">
@@ -1197,12 +1368,21 @@ function EditScopeDialog({ company, onSaved }: { company: Company; onSaved: () =
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="es-reason">归属依据（可选）</Label>
-            <Input id="es-reason" placeholder="如 证书 / whois / ASN 佐证" value={reason} onChange={(e) => setReason(e.target.value)} />
+            <Input
+              id="es-reason"
+              placeholder="如 证书 / whois / ASN 佐证"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>取消</Button>
-          <Button onClick={submit} disabled={busy}>{busy ? "保存中…" : "覆盖保存"}</Button>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
+            取消
+          </Button>
+          <Button onClick={submit} disabled={busy}>
+            {busy ? "保存中…" : "覆盖保存"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1223,7 +1403,10 @@ function AppendScopeDialog({ company, onSaved }: { company: Company; onSaved: ()
   }, [open]);
 
   const submit = async () => {
-    if (!scope.trim()) { toast.error("请填写要追加的范围"); return; }
+    if (!scope.trim()) {
+      toast.error("请填写要追加的范围");
+      return;
+    }
     setBusy(true);
     try {
       const res = await api.addCompanyScope(company.id, scope, reason);
@@ -1233,7 +1416,7 @@ function AppendScopeDialog({ company, onSaved }: { company: Company; onSaved: ()
       setOpen(false);
       onSaved();
     } catch (e) {
-      toast.error("保存失败：" + String((e as Error)?.message ?? e));
+      toast.error(`保存失败：${String((e as Error)?.message ?? e)}`);
     } finally {
       setBusy(false);
     }
@@ -1242,7 +1425,9 @@ function AppendScopeDialog({ company, onSaved }: { company: Company; onSaved: ()
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7">追加</Button>
+        <Button variant="outline" size="sm" className="h-7">
+          追加
+        </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -1265,12 +1450,21 @@ function AppendScopeDialog({ company, onSaved }: { company: Company; onSaved: ()
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="as-reason">归属依据（可选）</Label>
-            <Input id="as-reason" placeholder="如 证书 / whois / ASN 佐证" value={reason} onChange={(e) => setReason(e.target.value)} />
+            <Input
+              id="as-reason"
+              placeholder="如 证书 / whois / ASN 佐证"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>取消</Button>
-          <Button onClick={submit} disabled={busy || !scope.trim()}>{busy ? "保存中…" : "追加"}</Button>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
+            取消
+          </Button>
+          <Button onClick={submit} disabled={busy || !scope.trim()}>
+            {busy ? "保存中…" : "追加"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

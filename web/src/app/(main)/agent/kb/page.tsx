@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+
 import { BookOpenIcon, PlusIcon, SearchIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
@@ -62,11 +63,21 @@ function ItemForm({ onSaved }: { onSaved: () => void }) {
         <div className="grid gap-3 py-2">
           <div className="grid gap-2">
             <Label htmlFor="kb-title">标题</Label>
-            <Input id="kb-title" placeholder="例如：SQL 注入绕过手法" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <Input
+              id="kb-title"
+              placeholder="例如：SQL 注入绕过手法"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="kb-tags">标签（逗号分隔，可选）</Label>
-            <Input id="kb-tags" placeholder="sqli, waf, bypass" value={tags} onChange={(e) => setTags(e.target.value)} />
+            <Input
+              id="kb-tags"
+              placeholder="sqli, waf, bypass"
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+            />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="kb-content">内容</Label>
@@ -90,7 +101,10 @@ export default function KnowledgePage() {
   const [selected, setSelected] = React.useState<KnowledgeItem | null>(null);
 
   const load = React.useCallback(() => {
-    api.knowledge().then(setItems).catch(() => setItems([]));
+    api
+      .knowledge()
+      .then(setItems)
+      .catch(() => setItems([]));
   }, []);
   React.useEffect(() => {
     load();
@@ -118,13 +132,13 @@ export default function KnowledgePage() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <BookOpenIcon className="size-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold tracking-tight">知识库</h1>
+          <h1 className="font-semibold text-xl tracking-tight">知识库</h1>
           <Badge variant="secondary">{items.length}</Badge>
         </div>
         <ItemForm onSaved={load} />
       </div>
       <div className="relative max-w-md">
-        <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
+        <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           placeholder="检索：sqli / xss / cloud / evasion…"
           className="pl-8"
@@ -138,15 +152,30 @@ export default function KnowledgePage() {
         <Card className="overflow-hidden py-0">
           <CardContent className="max-h-[62vh] overflow-auto p-2">
             {items.length === 0 ? (
-              <div className="text-muted-foreground py-12 text-center text-sm">暂无文档，点击「新增文档」录入漏洞手法/playbook。</div>
+              <div className="py-12 text-center text-muted-foreground text-sm">
+                暂无文档，点击「新增文档」录入漏洞手法/playbook。
+              </div>
             ) : (
               items.map((k) => (
-                <div key={k.id} className="hover:bg-accent flex items-center gap-2 rounded-md border-b px-2 py-2 last:border-0">
+                <div
+                  key={k.id}
+                  className="flex items-center gap-2 rounded-md border-b px-2 py-2 last:border-0 hover:bg-accent"
+                >
                   <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setSelected(k)}>
-                    <div className="truncate text-sm font-medium">{k.title}</div>
-                    {k.tags && <div className="mt-0.5 flex flex-wrap gap-1">{k.tags.split(",").map((t) => t.trim()).filter(Boolean).map((t) => (
-                      <Badge key={t} variant="outline" className="text-[10px]">{t}</Badge>
-                    ))}</div>}
+                    <div className="truncate font-medium text-sm">{k.title}</div>
+                    {k.tags && (
+                      <div className="mt-0.5 flex flex-wrap gap-1">
+                        {k.tags
+                          .split(",")
+                          .map((t) => t.trim())
+                          .filter(Boolean)
+                          .map((t) => (
+                            <Badge key={t} variant="outline" className="text-[10px]">
+                              {t}
+                            </Badge>
+                          ))}
+                      </div>
+                    )}
                   </button>
                   <Button size="icon" variant="ghost" aria-label="删除" onClick={() => remove(k)}>
                     <Trash2Icon className="text-destructive" />
@@ -159,14 +188,18 @@ export default function KnowledgePage() {
         <Card className="overflow-hidden py-0">
           {selected ? (
             <CardContent className="p-0">
-              <div className="bg-muted/50 flex items-center justify-between gap-2 border-b px-3 py-2">
-                <span className="truncate text-sm font-medium">{selected.title}</span>
-                <Badge variant="outline" className="shrink-0 text-[10px]">{selected.tags || "—"}</Badge>
+              <div className="flex items-center justify-between gap-2 border-b bg-muted/50 px-3 py-2">
+                <span className="truncate font-medium text-sm">{selected.title}</span>
+                <Badge variant="outline" className="shrink-0 text-[10px]">
+                  {selected.tags || "—"}
+                </Badge>
               </div>
-              <pre className="max-h-[58vh] overflow-auto p-3 font-mono text-xs break-all whitespace-pre-wrap">{selected.content}</pre>
+              <pre className="max-h-[58vh] overflow-auto whitespace-pre-wrap break-all p-3 font-mono text-xs">
+                {selected.content}
+              </pre>
             </CardContent>
           ) : (
-            <CardContent className="text-muted-foreground flex items-center justify-center py-16 text-sm">
+            <CardContent className="flex items-center justify-center py-16 text-muted-foreground text-sm">
               点击左侧文档查看内容
             </CardContent>
           )}

@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,7 @@ import (
 const (
 	jwtKeyFilename   = "jwt.key"
 	authPassKey      = "auth.password_hash"
+	authCookieName   = "restxtra_token"
 	jwtTTL           = 7 * 24 * time.Hour
 	maxLoginAttempts = 8
 	loginWindow      = 5 * time.Minute
@@ -125,20 +127,44 @@ func verifyUserJWT(tokenStr string, key []byte) (*tokenClaims, bool) {
 	return claims, err == nil && t.Valid
 }
 
-// extractToken reads the JWT from Authorization: Bearer header or the
-// restxtra_token cookie. Query-string tokens are accepted only by the two SSE
-// endpoints because URLs are routinely persisted in proxy/access logs.
+// extractToken reads the JWT from Authorization: Bearer header or the HttpOnly
+// session cookie. Tokens are deliberately never accepted from URLs because URLs
+// are routinely persisted in browser history and proxy/access logs.
 func extractToken(r *http.Request) string {
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
-	if c, err := r.Cookie("restxtra_token"); err == nil && c.Value != "" {
+	if c, err := r.Cookie(authCookieName); err == nil && c.Value != "" {
 		return c.Value
 	}
-	if strings.HasSuffix(r.URL.Path, "/stream") {
-		return r.URL.Query().Get("token")
-	}
 	return ""
+}
+
+func authCookieSecure(r *http.Request) bool {
+	if r != nil && r.TLS != nil {
+		return true
+	}
+	if os.Getenv("RESTXTRA_SECURE_COOKIES") == "true" {
+		return true
+	}
+	return r != nil && os.Getenv("RESTXTRA_TRUST_PROXY") == "true" &&
+		strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+func setAuthCookie(w http.ResponseWriter, r *http.Request, token string) {
+	w.Header().Set("Cache-Control", "no-store")
+	http.SetCookie(w, &http.Cookie{
+		Name: authCookieName, Value: token, Path: "/", MaxAge: int(jwtTTL.Seconds()),
+		HttpOnly: true, Secure: authCookieSecure(r), SameSite: http.SameSiteStrictMode,
+	})
+}
+
+func clearAuthCookie(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	http.SetCookie(w, &http.Cookie{
+		Name: authCookieName, Path: "/", MaxAge: -1, HttpOnly: true,
+		Secure: authCookieSecure(r), SameSite: http.SameSiteStrictMode,
+	})
 }
 
 type principalKey struct{}
@@ -177,6 +203,10 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 		claims, ok := verifyUserJWT(tok, s.jwtKey)
 		if !ok {
 			writeErr(w, 401, "token 无效或已过期")
+			return
+		}
+		if r.Header.Get("Authorization") == "" && !cookieRequestOriginAllowed(r) {
+			writeErr(w, http.StatusForbidden, "请求来源无效")
 			return
 		}
 		if s.m.pg == nil || claims.UID <= 0 {
@@ -299,6 +329,7 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[auth] 首次初始化管理员账户 %s (uid=%d)", adminUsername, userID)
 	s.recordAuditAs(r, adminUsername, "auth", "init", "success", "初始化平台管理员")
+	setAuthCookie(w, r, tok)
 	writeJSON(w, 200, map[string]any{"token": tok})
 }
 
@@ -347,6 +378,12 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = pg.SetSetting(authPassKey, string(newHash)) // keep legacy hash in sync
+	tok, err := signUserJWT(s.jwtKey, user.ID, user.Username, string(newHash))
+	if err != nil {
+		writeErr(w, 500, "token 生成失败")
+		return
+	}
+	setAuthCookie(w, r, tok)
 	s.recordAuditAs(r, user.Username, "auth", "change_password", "success", "修改密码")
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
@@ -414,5 +451,28 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordAuditAs(r, user.Username, "auth", "login", "success", "登录成功")
+	setAuthCookie(w, r, tok)
 	writeJSON(w, 200, map[string]any{"token": tok})
+}
+
+// POST /api/auth/logout clears the browser session cookie. Bearer tokens remain
+// stateless and expire normally; clients using them should discard them locally.
+func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) {
+	clearAuthCookie(w, r)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func cookieRequestOriginAllowed(r *http.Request) bool {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+		return true
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true // non-browser clients and same-origin requests without Origin
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Host, r.Host) || corsOriginAllowed(origin)
 }

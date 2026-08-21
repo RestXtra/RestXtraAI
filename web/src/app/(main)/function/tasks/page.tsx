@@ -1,36 +1,26 @@
 "use client";
 
 import * as React from "react";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
+
 import {
-  PlusIcon,
-  Trash2Icon,
   ArrowRightIcon,
-  StarIcon,
-  SearchIcon,
-  XIcon,
-  WorkflowIcon,
   PanelsTopLeftIcon,
+  PlusIcon,
+  SearchIcon,
+  StarIcon,
+  Trash2Icon,
+  WorkflowIcon,
+  XIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { StatusBadge } from "@/components/status-badge";
+import { TablePagination } from "@/components/table-pagination";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   Dialog,
   DialogClose,
@@ -41,26 +31,25 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { TablePagination } from "@/components/table-pagination";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import { clearWorkflowDraft, draftToWorkflow, loadWorkflowDraft } from "@/lib/workflow-draft";
+import type { Company, LLMProfile, Task, TaskStatus, TaskWorkflow } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import type { Task, TaskStatus, LLMProfile, TaskWorkflow, Company } from "@/lib/types";
+import { clearWorkflowDraft, draftToWorkflow, loadWorkflowDraft } from "@/lib/workflow-draft";
 
 // ACTIVE_PROFILE is the sentinel Select value for "use the global active profile".
 const ACTIVE_PROFILE = "__active__";
 
 // fmtTokens renders a compact token count (1234 → 1.2k, 2_000_000 → 2M).
 function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1) + "M";
-  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
   return String(n);
 }
 
@@ -88,7 +77,7 @@ function taskDuration(task: Task, nowSec: number): number {
       ? nowSec
       : task.completed_unix && task.completed_unix > 0
         ? task.completed_unix
-        : task.last_activity_unix ?? 0;
+        : (task.last_activity_unix ?? 0);
   return end > start ? end - start : 0;
 }
 
@@ -140,15 +129,15 @@ export default function TasksPage() {
       if (companyFilter !== "all" && !(t.companies ?? []).some((c) => c.id === companyFilter)) return false;
       if (!q) return true;
       return (
-        t.description.toLowerCase().includes(q) ||
-        t.goal.toLowerCase().includes(q) ||
-        t.id.toLowerCase().includes(q)
+        t.description.toLowerCase().includes(q) || t.goal.toLowerCase().includes(q) || t.id.toLowerCase().includes(q)
       );
     });
   }, [tasks, query, statusFilter, companyFilter]);
 
   // reset to page 1 whenever filters change
-  React.useEffect(() => { setPage(1); }, [query, statusFilter, companyFilter]);
+  React.useEffect(() => {
+    setPage(1);
+  }, []);
 
   const paginated = React.useMemo(
     () => filtered.slice((page - 1) * pageSize, page * pageSize),
@@ -156,7 +145,8 @@ export default function TasksPage() {
   );
 
   const load = React.useCallback(() => {
-    api.tasks()
+    api
+      .tasks()
       .then((r) => {
         setTasks(r.tasks.map((t) => (t.id === r.active ? { ...t, active: true } : t)));
       })
@@ -171,12 +161,18 @@ export default function TasksPage() {
 
   // load LLM profiles once for the create-task profile picker.
   React.useEffect(() => {
-    api.llmProfiles().then(setProfiles).catch(() => setProfiles([]));
+    api
+      .llmProfiles()
+      .then(setProfiles)
+      .catch(() => setProfiles([]));
   }, []);
 
   // load companies for the create-task multi-select + list filter.
   React.useEffect(() => {
-    api.companies().then(setCompanies).catch(() => setCompanies([]));
+    api
+      .companies()
+      .then(setCompanies)
+      .catch(() => setCompanies([]));
   }, []);
 
   // 从画板草稿(localStorage)载入工作流（步骤带优先级，优先于内联编辑）。
@@ -243,7 +239,7 @@ export default function TasksPage() {
       setOpen(false);
       load();
     } catch (e) {
-      toast.error("创建失败：" + (e as Error).message);
+      toast.error(`创建失败：${(e as Error).message}`);
     }
   }
 
@@ -253,7 +249,7 @@ export default function TasksPage() {
       toast.success("任务已删除（全局资产图保留）");
       load();
     } catch (e) {
-      toast.error("删除失败：" + (e as Error).message);
+      toast.error(`删除失败：${(e as Error).message}`);
     }
   }
 
@@ -262,7 +258,7 @@ export default function TasksPage() {
       <CardContent className="flex flex-col gap-4 px-0 pt-6">
         <div className="flex flex-wrap items-center gap-2 px-4 lg:px-6">
           <div className="relative w-full sm:max-w-xs">
-            <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="搜索描述 / 目标 / ID"
               value={query}
@@ -274,7 +270,7 @@ export default function TasksPage() {
                 type="button"
                 onClick={() => setQuery("")}
                 aria-label="清除搜索"
-                className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
+                className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
                 <XIcon className="size-4" />
               </button>
@@ -321,11 +317,9 @@ export default function TasksPage() {
             <DialogContent className="sm:max-w-xl">
               <DialogHeader>
                 <DialogTitle>新建任务</DialogTitle>
-                <DialogDescription>
-                  填写测试对象与目标。
-                </DialogDescription>
+                <DialogDescription>填写测试对象与目标。</DialogDescription>
               </DialogHeader>
-              <div className="max-h-[70vh] grid gap-4 overflow-y-auto py-2 pr-1">
+              <div className="grid max-h-[70vh] gap-4 overflow-y-auto py-2 pr-1">
                 <div className="grid gap-2">
                   <Label htmlFor="description">描述</Label>
                   <Textarea
@@ -390,12 +384,10 @@ export default function TasksPage() {
                           key={c.id}
                           type="button"
                           onClick={() =>
-                            setTaskCompanies((prev) =>
-                              on ? prev.filter((id) => id !== c.id) : [...prev, c.id],
-                            )
+                            setTaskCompanies((prev) => (on ? prev.filter((id) => id !== c.id) : [...prev, c.id]))
                           }
                           className={cn(
-                            "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+                            "rounded-md border px-2.5 py-1 font-medium text-xs transition-colors",
                             on
                               ? "border-primary bg-primary text-primary-foreground"
                               : "border-input text-muted-foreground hover:bg-muted",
@@ -406,9 +398,7 @@ export default function TasksPage() {
                       );
                     })}
                     {companies.length === 0 && (
-                      <p className="text-muted-foreground text-xs">
-                        暂无企业。可先在「资产」页新增企业后再关联。
-                      </p>
+                      <p className="text-muted-foreground text-xs">暂无企业。可先在「资产」页新增企业后再关联。</p>
                     )}
                   </div>
                   <p className="text-muted-foreground text-xs">
@@ -456,17 +446,18 @@ export default function TasksPage() {
                       </div>
                       {wfDraftLoaded && (
                         <p className="text-emerald-600 text-xs">
-                          已载入画板工作流：{wfDraft?.steps?.length ?? 0} 步 · {wfDraft?.hints?.length ?? 0} 条提示（创建时优先使用）
+                          已载入画板工作流：{wfDraft?.steps?.length ?? 0} 步 · {wfDraft?.hints?.length ?? 0}{" "}
+                          条提示（创建时优先使用）
                         </p>
                       )}
                       <div className="grid gap-2">
-                        <Label className="text-xs text-muted-foreground">探索步骤（按顺序执行）</Label>
+                        <Label className="text-muted-foreground text-xs">探索步骤（按顺序执行）</Label>
                         {wfSteps.length === 0 && (
                           <p className="text-muted-foreground/70 text-xs">还没有步骤，添加第一步开始。</p>
                         )}
                         {wfSteps.map((s, i) => (
                           <div key={i} className="flex items-start gap-2">
-                            <span className="text-muted-foreground mt-2.5 w-4 font-mono text-xs">{i + 1}.</span>
+                            <span className="mt-2.5 w-4 font-mono text-muted-foreground text-xs">{i + 1}.</span>
                             <Textarea
                               rows={2}
                               className="min-h-0"
@@ -499,7 +490,7 @@ export default function TasksPage() {
                       </div>
                       <Separator />
                       <div className="grid gap-2">
-                        <Label className="text-xs text-muted-foreground">战略提示（供 planner 首轮读取）</Label>
+                        <Label className="text-muted-foreground text-xs">战略提示（供 planner 首轮读取）</Label>
                         {wfHints.map((h, i) => (
                           <div key={i} className="flex items-center gap-2">
                             <Input
@@ -545,11 +536,11 @@ export default function TasksPage() {
         </div>
 
         {tasks.length === 0 ? (
-          <div className="text-muted-foreground mx-4 flex items-center justify-center rounded-lg border border-dashed py-20 text-sm lg:mx-6">
+          <div className="mx-4 flex items-center justify-center rounded-lg border border-dashed py-20 text-muted-foreground text-sm lg:mx-6">
             暂无任务，点击右上角「新建任务」开始。
           </div>
         ) : filtered.length === 0 ? (
-          <div className="text-muted-foreground mx-4 flex items-center justify-center rounded-lg border border-dashed py-20 text-sm lg:mx-6">
+          <div className="mx-4 flex items-center justify-center rounded-lg border border-dashed py-20 text-muted-foreground text-sm lg:mx-6">
             没有匹配的任务。
           </div>
         ) : (
@@ -565,23 +556,23 @@ export default function TasksPage() {
                 <TableHead className="text-right">创建时间</TableHead>
                 <TableHead className="text-right">运行时长</TableHead>
                 <TableHead className="text-right">Token</TableHead>
-                <TableHead className="sticky right-0 z-10 bg-card text-right shadow-[-1px_0_0_0_hsl(var(--border))]">操作</TableHead>
+                <TableHead className="sticky right-0 z-10 bg-card text-right shadow-[-1px_0_0_0_hsl(var(--border))]">
+                  操作
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {paginated.map((task) => (
                 <TableRow key={task.id} className="group border-border/60">
                   <TableCell>
-                    <code className="bg-muted rounded px-1.5 py-0.5 font-mono text-xs">{task.id}</code>
+                    <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{task.id}</code>
                   </TableCell>
                   <TableCell className="font-medium">
                     <div className="flex max-w-xs items-center gap-2">
                       <span className="truncate" title={task.description}>
                         {task.description}
                       </span>
-                      {task.active && (
-                        <StarIcon className="size-4 shrink-0 fill-amber-400 text-amber-400" />
-                      )}
+                      {task.active && <StarIcon className="size-4 shrink-0 fill-amber-400 text-amber-400" />}
                     </div>
                   </TableCell>
                   <TableCell>
@@ -590,29 +581,28 @@ export default function TasksPage() {
                     ) : (
                       <div className="flex max-w-[10rem] flex-wrap gap-1">
                         {(task.companies ?? []).map((c) => (
-                          <span
-                            key={c.id}
-                            className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-foreground/80"
-                          >
+                          <span key={c.id} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-foreground/80">
                             {c.name}
                           </span>
                         ))}
                       </div>
                     )}
                   </TableCell>
-                  <TableCell className="text-muted-foreground max-w-xs truncate">{task.goal}</TableCell>
+                  <TableCell className="max-w-xs truncate text-muted-foreground">{task.goal}</TableCell>
                   <TableCell>
                     <StatusBadge domain="task" value={task.status} dot />
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-center text-xs tabular-nums">
-                    {typeof task.goals_total === "number" && task.goals_total > 0
-                      ? `${task.goals_met}/${task.goals_total}`
-                      : <span className="text-muted-foreground">—</span>}
+                  <TableCell className="text-center text-muted-foreground text-xs tabular-nums">
+                    {typeof task.goals_total === "number" && task.goals_total > 0 ? (
+                      `${task.goals_met}/${task.goals_total}`
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-right text-xs whitespace-nowrap tabular-nums">
+                  <TableCell className="whitespace-nowrap text-right text-muted-foreground text-xs tabular-nums">
                     {fmtDateTime(task.created_unix)}
                   </TableCell>
-                  <TableCell className="text-right text-xs whitespace-nowrap tabular-nums">
+                  <TableCell className="whitespace-nowrap text-right text-xs tabular-nums">
                     {(() => {
                       const secs = taskDuration(task, nowSec);
                       if (secs <= 0) return <span className="text-muted-foreground">—</span>;
@@ -624,7 +614,7 @@ export default function TasksPage() {
                     })()}
                   </TableCell>
                   <TableCell
-                    className="text-right text-xs whitespace-nowrap tabular-nums"
+                    className="whitespace-nowrap text-right text-xs tabular-nums"
                     title={
                       task.tokens
                         ? `输入 ${task.tokens.input_tokens} · 缓存 ${task.tokens.cache_read_tokens} · 输出 ${task.tokens.output_tokens}`
@@ -650,12 +640,7 @@ export default function TasksPage() {
                           进入 <ArrowRightIcon />
                         </Link>
                       </Button>
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        onClick={() => deleteTask(task.id)}
-                        aria-label="删除任务"
-                      >
+                      <Button size="icon" variant="outline" onClick={() => deleteTask(task.id)} aria-label="删除任务">
                         <Trash2Icon className="text-destructive" />
                       </Button>
                     </div>

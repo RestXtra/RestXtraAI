@@ -11,6 +11,7 @@ import (
 	"github.com/Autumn-27/norma/agentcore"
 	acperm "github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/RestXtra/RestXtraAI/agent"
 	"github.com/RestXtra/RestXtraAI/workflow"
 )
 
@@ -34,7 +35,7 @@ func (s *Server) workflowEngine(dry bool) *workflow.Engine {
 			timeout := 120 * time.Second
 			cctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			res, err := actool.NewBash().Call(cctx, bashIn, nil)
+			res, err := agent.HostBash().Call(cctx, bashIn, nil)
 			if err != nil {
 				return "", err
 			}
@@ -93,11 +94,11 @@ func (s *Server) workflowValidate(w http.ResponseWriter, r *http.Request) {
 }
 
 type workflowSaveReq struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Graph       workflow.Graph  `json:"graph"`
-	ID          int64           `json:"id,omitempty"`
-	Enabled     bool            `json:"enabled"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Graph       workflow.Graph `json:"graph"`
+	ID          int64          `json:"id,omitempty"`
+	Enabled     bool           `json:"enabled"`
 }
 
 func (s *Server) workflowSave(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +240,7 @@ func (s *Server) workflowRuns(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) workflowDryRun(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Graph  workflow.Graph   `json:"graph"`
+		Graph  workflow.Graph    `json:"graph"`
 		Inputs map[string]string `json:"inputs"`
 	}
 	if err := decode(r, &req); err != nil {

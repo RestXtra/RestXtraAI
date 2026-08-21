@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
-import { auth } from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,11 +19,12 @@ export default function LoginPage() {
 
   useEffect(() => {
     // 已登录直接进主界面（静态导出下无 middleware 代劳这层跳转）。
-    if (auth.getToken()) {
-      router.replace("/dashboard");
-      return;
-    }
-    api.authStatus()
+    api
+      .platformMy()
+      .then(() => router.replace("/dashboard"))
+      .catch(() => undefined);
+    api
+      .authStatus()
       .then(({ initialized }) => {
         if (!initialized) router.replace("/setup");
       })
@@ -37,8 +37,7 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
-      const { token } = await api.login(username.trim() || "RestXtra", password);
-      auth.setToken(token);
+      await api.login(username.trim() || "RestXtra", password);
       router.replace("/dashboard");
     } catch {
       setError("用户名或密码错误");
@@ -58,13 +57,7 @@ export default function LoginPage() {
           <div className="absolute size-60 rounded-full border border-primary-foreground/15" />
           <div className="absolute size-40 rounded-full border border-primary-foreground/20" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/logo.png"
-            alt="RestXtra AI"
-            width={160}
-            height={160}
-            className="relative"
-          />
+          <img src="/logo.png" alt="RestXtra AI" width={160} height={160} className="relative" />
         </div>
       </div>
 
@@ -72,7 +65,7 @@ export default function LoginPage() {
       <div className="flex w-full items-center justify-center bg-background p-8 lg:w-2/3">
         <div className="w-full max-w-md space-y-10 py-24 lg:py-32">
           <div className="space-y-4 text-center">
-            <h2 className="text-2xl font-medium tracking-tight">登录</h2>
+            <h2 className="font-medium text-2xl tracking-tight">登录</h2>
             <p className="mx-auto max-w-xl text-muted-foreground">欢迎回来，请输入密码以继续使用 RestXtra AI</p>
           </div>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -97,7 +90,7 @@ export default function LoginPage() {
                 autoComplete="current-password"
               />
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {error && <p className="text-destructive text-sm">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading || !password}>
               {loading ? "登录中..." : "登录"}
             </Button>

@@ -2,15 +2,17 @@
 
 import * as React from "react";
 
-import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon, SearchIcon, TerminalIcon, Trash2Icon, XIcon } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  Loader2Icon,
+  SearchIcon,
+  TerminalIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,7 +23,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import type { CommandRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -69,7 +77,7 @@ export default function ToolExecPage() {
   const [commands, setCommands] = React.useState<CommandRecord[]>([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
-  const [reloadKey, setReloadKey] = React.useState(0);
+  const [_reloadKey, setReloadKey] = React.useState(0);
 
   // Inline detail panel (Burp-style split, not a dialog)
   const [selected, setSelected] = React.useState<CommandRecord | null>(null);
@@ -84,7 +92,8 @@ export default function ToolExecPage() {
   const toggleCheck = (id: number) => {
     setChecked((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -109,7 +118,7 @@ export default function ToolExecPage() {
       setSelected(null);
       setReloadKey((k) => k + 1);
     } catch (e) {
-      toast.error("删除失败：" + String((e as Error)?.message ?? e));
+      toast.error(`删除失败：${String((e as Error)?.message ?? e)}`);
       setDeleteOpen(false);
     } finally {
       setDeleting(false);
@@ -143,7 +152,7 @@ export default function ToolExecPage() {
     return () => {
       alive = false;
     };
-  }, [page, size, queryQ, taskFilter, reloadKey]);
+  }, [page, size, queryQ, taskFilter]);
 
   const totalPages = Math.max(1, Math.ceil(total / size));
   const rangeStart = total === 0 ? 0 : page * size + 1;
@@ -161,7 +170,11 @@ export default function ToolExecPage() {
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={() => { setDeleteAll(false); setDeleteIds(Array.from(checked)); setDeleteOpen(true); }}
+                onClick={() => {
+                  setDeleteAll(false);
+                  setDeleteIds(Array.from(checked));
+                  setDeleteOpen(true);
+                }}
               >
                 <Trash2Icon className="size-3.5" /> 删除已选 ({checked.size})
               </Button>
@@ -169,7 +182,10 @@ export default function ToolExecPage() {
                 variant="outline"
                 size="sm"
                 className="text-destructive hover:text-destructive"
-                onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+                onClick={() => {
+                  setDeleteAll(true);
+                  setDeleteOpen(true);
+                }}
               >
                 <Trash2Icon className="size-3.5" /> 删除全部
               </Button>
@@ -382,14 +398,20 @@ export default function ToolExecPage() {
               {deleteAll ? (
                 <>将清空全部工具执行记录（含输入/输出），此操作不可撤销。</>
               ) : (
-                <>将永久删除 <span className="font-semibold tabular-nums">{deleteIds.length}</span> 条工具执行记录（含输入/输出），此操作不可撤销。</>
+                <>
+                  将永久删除 <span className="font-semibold tabular-nums">{deleteIds.length}</span>{" "}
+                  条工具执行记录（含输入/输出），此操作不可撤销。
+                </>
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(e) => { e.preventDefault(); confirmDelete(); }}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDelete();
+              }}
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

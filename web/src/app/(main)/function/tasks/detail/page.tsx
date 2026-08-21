@@ -1,23 +1,15 @@
 "use client";
 
 import * as React from "react";
+
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { toast } from "sonner";
-import {
-  ArrowLeftIcon,
-  Building2Icon,
-  PauseIcon,
-  PlayIcon,
-  BrainIcon,
-  PlusIcon,
-} from "lucide-react";
 
-import { SidebarTrigger } from "@/components/ui/sidebar";
-import { Separator } from "@/components/ui/separator";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ArrowLeftIcon, BrainIcon, Building2Icon, PauseIcon, PlayIcon, PlusIcon } from "lucide-react";
+import { toast } from "sonner";
+
 import { StatusBadge } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogClose,
@@ -26,28 +18,32 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
+import { Separator } from "@/components/ui/separator";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import type { Task, Company } from "@/lib/types";
+import type { Company, Task } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
-import { SessionsTab } from "./_tabs/sessions-tab";
-import { OverviewTab } from "./_tabs/overview-tab";
-import { GraphTab } from "./_tabs/graph-tab";
-import { FindingsTab } from "./_tabs/findings-tab";
-import { ReportTab } from "./_tabs/report-tab";
-import { InterceptTab } from "./_tabs/intercept-tab";
 import { AssetsTab } from "./_tabs/assets-tab";
+import { CoverageGraphTab } from "./_tabs/coverage-graph-tab";
+import { FindingsTab } from "./_tabs/findings-tab";
+import { GraphTab } from "./_tabs/graph-tab";
+import { InterceptTab } from "./_tabs/intercept-tab";
+import { OverviewTab } from "./_tabs/overview-tab";
+import { ReportTab } from "./_tabs/report-tab";
+import { SessionsTab } from "./_tabs/sessions-tab";
 
 const TABS = [
-  { value: "sessions",  label: "会话" },
-  { value: "overview",  label: "总览" },
-  { value: "graph",     label: "探索链路" },
-  { value: "findings",  label: "发现" },
-  { value: "assets",    label: "测试资产" },
+  { value: "sessions", label: "会话" },
+  { value: "overview", label: "总览" },
+  { value: "graph", label: "探索链路" },
+  { value: "findings", label: "发现" },
+  { value: "assets", label: "测试资产" },
+  { value: "coverage", label: "资产覆盖图" },
   { value: "intercept", label: "拦截审批" },
-  { value: "report",    label: "报告" },
+  { value: "report", label: "报告" },
 ];
 
 function TaskDetailInner() {
@@ -66,25 +62,31 @@ function TaskDetailInner() {
   const [savingCompanies, setSavingCompanies] = React.useState(false);
 
   React.useEffect(() => {
-    api.companies().then(setCompanies).catch(() => setCompanies([]));
+    api
+      .companies()
+      .then(setCompanies)
+      .catch(() => setCompanies([]));
   }, []);
 
   React.useEffect(() => {
     let alive = true;
     const load = () =>
-      api.interceptTask(id)
-        .then((rows) => { if (alive) setInterceptPendingCount(rows.filter((r) => r.status === "pending").length); })
+      api
+        .interceptTask(id)
+        .then((rows) => {
+          if (alive) setInterceptPendingCount(rows.filter((r) => r.status === "pending").length);
+        })
         .catch(() => {});
     load();
     const t = setInterval(load, 5000);
-    return () => { alive = false; clearInterval(t); };
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
   }, [id]);
 
   const load = React.useCallback(() => {
-    Promise.all([
-      api.tasks(),
-      api.stats(id).catch(() => null),
-    ])
+    Promise.all([api.tasks(), api.stats(id).catch(() => null)])
       .then(([r, s]) => {
         const base = r.tasks.find((t) => t.id === id) ?? null;
         const at = (s as { active_task?: Partial<Task> & { paused?: boolean } } | null)?.active_task;
@@ -101,7 +103,9 @@ function TaskDetailInner() {
       .catch(() => {})
       .finally(() => setLoaded(true));
   }, [id]);
-  React.useEffect(() => { load(); }, [load]);
+  React.useEffect(() => {
+    load();
+  }, [load]);
 
   async function togglePause() {
     const next = !paused;
@@ -110,7 +114,7 @@ function TaskDetailInner() {
       setPaused(next);
       toast.success(next ? "已暂停探索" : "已恢复探索");
     } catch (e) {
-      toast.error("操作失败：" + (e as Error).message);
+      toast.error(`操作失败：${(e as Error).message}`);
     }
   }
 
@@ -128,7 +132,7 @@ function TaskDetailInner() {
       setCompanyOpen(false);
       load();
     } catch (e) {
-      toast.error("保存失败：" + (e as Error).message);
+      toast.error(`保存失败：${(e as Error).message}`);
     } finally {
       setSavingCompanies(false);
     }
@@ -149,14 +153,10 @@ function TaskDetailInner() {
     );
   }
 
-  const engineMode = paused ? "paused" : task.engine_mode ?? "idle";
+  const engineMode = paused ? "paused" : (task.engine_mode ?? "idle");
 
   return (
-    <Tabs
-      value={tab}
-      onValueChange={setTab}
-      className="flex flex-1 flex-col gap-0"
-    >
+    <Tabs value={tab} onValueChange={setTab} className="flex flex-1 flex-col gap-0">
       {/* Top fixed area */}
       <header className="sticky top-0 z-10 flex flex-col gap-2 border-b bg-background/95 px-4 py-2.5 backdrop-blur lg:px-6">
         <div className="flex items-center gap-2">
@@ -166,12 +166,10 @@ function TaskDetailInner() {
               <ArrowLeftIcon />
             </Link>
           </Button>
-          <h1 className="max-w-md truncate text-sm font-semibold" title={task.description}>
+          <h1 className="max-w-md truncate font-semibold text-sm" title={task.description}>
             {task.description}
           </h1>
-          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
-            {task.id}
-          </code>
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-muted-foreground text-xs">{task.id}</code>
           <Separator orientation="vertical" className="mx-1 h-4" />
           {/* status pills */}
           <span className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs">
@@ -179,22 +177,18 @@ function TaskDetailInner() {
           </span>
           <StatusBadge domain="engine" value={engineMode} dot />
           <div className="ml-auto">
-            <Button
-              size="sm"
-              variant={paused ? "default" : "outline"}
-              onClick={togglePause}
-            >
+            <Button size="sm" variant={paused ? "default" : "outline"} onClick={togglePause}>
               {paused ? <PlayIcon /> : <PauseIcon />}
               {paused ? "恢复" : "暂停"}
             </Button>
           </div>
         </div>
-        <p className="truncate text-xs text-muted-foreground">{task.goal}</p>
+        <p className="truncate text-muted-foreground text-xs">{task.goal}</p>
         {/* 企业关联 */}
         <div className="flex items-center gap-1.5">
           <Building2Icon className="size-3.5 text-muted-foreground" />
           {(task.companies ?? []).length === 0 ? (
-            <span className="text-xs text-muted-foreground">未关联企业</span>
+            <span className="text-muted-foreground text-xs">未关联企业</span>
           ) : (
             <div className="flex flex-wrap gap-1">
               {(task.companies ?? []).map((c) => (
@@ -214,7 +208,7 @@ function TaskDetailInner() {
             <TabsTrigger key={t.value} value={t.value}>
               {t.label}
               {t.value === "intercept" && interceptPendingCount > 0 && (
-                <span className="ml-1.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold leading-none text-white">
+                <span className="ml-1.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 font-semibold text-[10px] text-white leading-none">
                   {interceptPendingCount > 99 ? "99+" : interceptPendingCount}
                 </span>
               )}
@@ -240,6 +234,9 @@ function TaskDetailInner() {
         <TabsContent value="assets" className="mt-0">
           <AssetsTab taskId={id} />
         </TabsContent>
+        <TabsContent value="coverage" className="mt-0">
+          <CoverageGraphTab taskId={id} />
+        </TabsContent>
         <TabsContent value="intercept" className="mt-0">
           <InterceptTab taskId={id} />
         </TabsContent>
@@ -253,9 +250,7 @@ function TaskDetailInner() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>关联企业 · {task.description}</DialogTitle>
-            <DialogDescription>
-              可多选；第一个选中的企业作为主企业。改绑会立即生效。
-            </DialogDescription>
+            <DialogDescription>可多选；第一个选中的企业作为主企业。改绑会立即生效。</DialogDescription>
           </DialogHeader>
           <div className="flex flex-wrap gap-1.5 py-2">
             {companies.map((c) => {
@@ -264,13 +259,9 @@ function TaskDetailInner() {
                 <button
                   key={c.id}
                   type="button"
-                  onClick={() =>
-                    setPickCompanies((prev) =>
-                      on ? prev.filter((x) => x !== c.id) : [...prev, c.id],
-                    )
-                  }
+                  onClick={() => setPickCompanies((prev) => (on ? prev.filter((x) => x !== c.id) : [...prev, c.id]))}
                   className={cn(
-                    "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+                    "rounded-md border px-2.5 py-1 font-medium text-xs transition-colors",
                     on
                       ? "border-primary bg-primary text-primary-foreground"
                       : "border-input text-muted-foreground hover:bg-muted",
@@ -281,9 +272,7 @@ function TaskDetailInner() {
               );
             })}
             {companies.length === 0 && (
-              <p className="text-xs text-muted-foreground">
-                暂无企业。可先在「资产」页新增企业。
-              </p>
+              <p className="text-muted-foreground text-xs">暂无企业。可先在「资产」页新增企业。</p>
             )}
           </div>
           <DialogFooter>

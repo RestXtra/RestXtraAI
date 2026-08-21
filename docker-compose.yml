@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 设置 POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-restxtra}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -15,6 +15,8 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
   restxtra:
     image: ghcr.io/RestXtra/RestXtraAI:${RESTXTRA_TAG:-latest}
@@ -29,13 +31,29 @@ services:
       RESTXTRA_LLM_MODEL: ${RESTXTRA_LLM_MODEL:-}
       RESTXTRA_LLM_BASE_URL: ${RESTXTRA_LLM_BASE_URL:-}
       RESTXTRA_LLM_PROXY: ${RESTXTRA_LLM_PROXY:-}
+      RESTXTRA_HOST_EXECUTION: ${RESTXTRA_HOST_EXECUTION:-enabled}
+      RESTXTRA_ALLOW_TOOL_SECRET_ENV: "false"
     ports:
-      - "8787:8787"
-      - "8788:8788"
+      - "${RESTXTRA_BIND_IP:-127.0.0.1}:${RESTXTRA_HTTP_PORT:-8787}:8787"
+      - "${RESTXTRA_BIND_IP:-127.0.0.1}:${RESTXTRA_PROXY_PORT:-8788}:8788"
     volumes:
       # 把数据目录（含 jwt.key、transcripts 等）绑定到项目根目录的 data/，
       # 方便在宿主机直接查看/备份，容器重建也不丢。
       - ./data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m,uid=10001,gid=10001
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/api/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
 volumes:

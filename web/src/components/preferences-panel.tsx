@@ -26,13 +26,13 @@ export function PreferencesPanel() {
   const setThemeMode = usePreferencesStore((s) => s.setThemeMode);
   const themePreset = usePreferencesStore((s) => s.themePreset);
   const setThemePreset = usePreferencesStore((s) => s.setThemePreset);
-  const contentLayout = usePreferencesStore((s) => s.contentLayout);
+  const _contentLayout = usePreferencesStore((s) => s.contentLayout);
   const setContentLayout = usePreferencesStore((s) => s.setContentLayout);
-  const navbarStyle = usePreferencesStore((s) => s.navbarStyle);
+  const _navbarStyle = usePreferencesStore((s) => s.navbarStyle);
   const setNavbarStyle = usePreferencesStore((s) => s.setNavbarStyle);
-  const variant = usePreferencesStore((s) => s.sidebarVariant);
+  const _variant = usePreferencesStore((s) => s.sidebarVariant);
   const setSidebarVariant = usePreferencesStore((s) => s.setSidebarVariant);
-  const collapsible = usePreferencesStore((s) => s.sidebarCollapsible);
+  const _collapsible = usePreferencesStore((s) => s.sidebarCollapsible);
   const setSidebarCollapsible = usePreferencesStore((s) => s.setSidebarCollapsible);
   const font = usePreferencesStore((s) => s.font);
   const setFont = usePreferencesStore((s) => s.setFont);
@@ -41,14 +41,16 @@ export function PreferencesPanel() {
     applyThemePreset(preset);
     setThemePreset(preset);
     void persistPreference("theme_preset", preset);
-    if (window.parent !== window) window.parent.postMessage({ type: "restxtra:pref", key: "theme_preset", value: preset }, "*");
+    if (window.parent !== window)
+      window.parent.postMessage({ type: "restxtra:pref", key: "theme_preset", value: preset }, "*");
   };
 
   const onThemeModeChange = (mode: ThemeMode | "") => {
     if (!mode) return;
     setThemeMode(mode);
     void persistPreference("theme_mode", mode);
-    if (window.parent !== window) window.parent.postMessage({ type: "restxtra:pref", key: "theme_mode", value: mode }, "*");
+    if (window.parent !== window)
+      window.parent.postMessage({ type: "restxtra:pref", key: "theme_mode", value: mode }, "*");
   };
 
   const onContentLayoutChange = (layout: ContentLayout | "") => {

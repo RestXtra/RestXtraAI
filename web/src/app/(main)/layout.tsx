@@ -5,7 +5,7 @@ import * as React from "react";
 
 import { AppSidebar } from "@/app/(main)/_components/sidebar/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
-import { auth } from "@/lib/auth";
+import { api } from "@/lib/api";
 import { getClientCookie } from "@/lib/cookie.client";
 import { applyContentLayout, applyNavbarStyle } from "@/lib/preferences/layout-utils";
 import { applyThemeMode, applyThemePreset } from "@/lib/preferences/theme-utils";
@@ -26,11 +26,12 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
   // protected UI (or its API calls) flashes for a logged-out visitor.
   const [authed, setAuthed] = React.useState(false);
   React.useEffect(() => {
-    if (auth.getToken()) {
-      setAuthed(true);
-    } else {
-      window.location.href = "/login";
-    }
+    api
+      .platformMy()
+      .then(() => setAuthed(true))
+      .catch(() => {
+        window.location.href = "/login";
+      });
   }, []);
 
   const [embed, setEmbed] = React.useState(false);
@@ -57,8 +58,14 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
       if (d?.type !== "restxtra:pref") return;
       if (d.key === "sidebar_variant" && d.value) setSidebarVariant(d.value as typeof variant);
       if (d.key === "sidebar_collapsible" && d.value) setSidebarCollapsible(d.value as typeof collapsible);
-      if (d.key === "theme_mode" && d.value) { applyThemeMode(d.value as "light" | "dark" | "system"); setThemeMode(d.value as "light" | "dark" | "system"); }
-      if (d.key === "theme_preset" && d.value) { applyThemePreset(d.value); setThemePreset(d.value as Parameters<typeof setThemePreset>[0]); }
+      if (d.key === "theme_mode" && d.value) {
+        applyThemeMode(d.value as "light" | "dark" | "system");
+        setThemeMode(d.value as "light" | "dark" | "system");
+      }
+      if (d.key === "theme_preset" && d.value) {
+        applyThemePreset(d.value);
+        setThemePreset(d.value as Parameters<typeof setThemePreset>[0]);
+      }
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -100,10 +107,10 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
           // The shell itself must always occupy the full space beside the
           // sidebar. Page-specific surfaces can still choose their own max
           // width, but the global centered-layout cap must not shrink them.
-          "[&>*]:min-w-0 [&>*]:w-full",
+          "[&>*]:w-full [&>*]:min-w-0",
           "peer-data-[variant=inset]:border",
           "[--dashboard-header-height:--spacing(12)]",
-          "main-flex-panel min-w-0 max-w-full basis-0 flex-1 overflow-x-hidden",
+          "main-flex-panel min-w-0 max-w-full flex-1 basis-0 overflow-x-hidden",
         )}
       >
         <MainContent>{children}</MainContent>

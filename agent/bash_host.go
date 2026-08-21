@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	actool "github.com/Autumn-27/norma/tool"
 	"github.com/Autumn-27/norma/permission"
+	actool "github.com/Autumn-27/norma/tool"
 )
 
 // 宿主 Linux bash（Windows 经 WSL 的 bash.exe 执行，带完整 Linux/kali 工具链）：
@@ -39,10 +39,35 @@ func winToWslPath(p string) string {
 	return "/mnt/" + drive + rest
 }
 
+var secretEnvName = regexp.MustCompile(`(?i)(^|_)(API_KEY|TOKEN|SECRET|PASSWORD|PASS|PRIVATE_KEY|CREDENTIALS?|DSN)$`)
+
+// ToolEnvironment returns the environment inherited by agent-launched child
+// processes. Host credentials are filtered by default so a shell or custom
+// script cannot read the server's LLM keys, database DSN, or deployment tokens.
+func ToolEnvironment(session []string) []string {
+	all := append(append([]string{}, os.Environ()...), session...)
+	if os.Getenv("RESTXTRA_ALLOW_TOOL_SECRET_ENV") == "true" {
+		return all
+	}
+	out := make([]string, 0, len(all))
+	for _, kv := range all {
+		i := strings.IndexByte(kv, '=')
+		if i <= 0 || secretEnvName.MatchString(kv[:i]) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 // wslEnv 过滤掉指向 Windows 本机（localhost/127.0.0.1）的代理与 CA 变量——
 // WSL2 NAT 用不了它们，反而触发 localhost 代理提示并污染输出。保留其余 env。
 func wslEnv(tc *actool.ToolContext) []string {
-	env := os.Environ()
+	var session []string
+	if tc != nil {
+		session = tc.Env
+	}
+	env := ToolEnvironment(session)
 	skipPrefix := []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy",
 		"SSL_CERT_FILE", "CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS", "GIT_SSL_CAINFO"}
 	isProxy := func(k string) bool {
@@ -56,20 +81,19 @@ func wslEnv(tc *actool.ToolContext) []string {
 	hasLocalRef := func(v string) bool {
 		return strings.Contains(strings.ToLower(v), "127.0.0.1") || strings.Contains(strings.ToLower(v), "localhost")
 	}
-	if tc != nil {
-		for _, kv := range tc.Env {
-			i := strings.IndexByte(kv, '=')
-			if i <= 0 {
-				continue
-			}
-			k, v := kv[:i], kv[i+1:]
-			if isProxy(k) && hasLocalRef(v) {
-				continue // 指向 Windows 本机代理：WSL 用不了，丢弃
-			}
-			env = append(env, kv)
+	out := env[:0]
+	for _, kv := range env {
+		i := strings.IndexByte(kv, '=')
+		if i <= 0 {
+			continue
 		}
+		k, v := kv[:i], kv[i+1:]
+		if isProxy(k) && hasLocalRef(v) {
+			continue // 指向 Windows 本机代理：WSL 用不了，丢弃
+		}
+		out = append(out, kv)
 	}
-	return env
+	return out
 }
 
 var hostDestructive = []*regexp.Regexp{
@@ -92,11 +116,17 @@ func HostBash() actool.CoreTool {
 			"支持 curl/nmap/sqlmap/python3 等完整工具链与管道、重定向）。" +
 			"需要【交互输入】的程序不要用 Bash（无 stdin），改用 shell_open。",
 		Schema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{"command": map[string]any{"type": "string", "description": "要执行的 bash 命令"}},
-			"required":   []any{"command"},
+			"type": "object",
+			"properties": map[string]any{
+				"command":    map[string]any{"type": "string", "description": "要执行的 bash 命令"},
+				"timeout_ms": map[string]any{"type": "integer", "minimum": 1, "maximum": 600000},
+			},
+			"required": []any{"command"},
 		},
 		Permissions: func(ctx context.Context, in json.RawMessage, pc permission.Context) permission.Decision {
+			if strings.EqualFold(os.Getenv("RESTXTRA_HOST_EXECUTION"), "disabled") {
+				return permission.Denied("宿主命令执行已由部署策略禁用")
+			}
 			var a struct {
 				Command string `json:"command"`
 			}
@@ -122,12 +152,15 @@ func HostBash() actool.CoreTool {
 			_ = json.Unmarshal(in, &to)
 			if to.TimeoutMs > 0 {
 				timeout = time.Duration(to.TimeoutMs) * time.Millisecond
+				if timeout > 10*time.Minute {
+					timeout = 10 * time.Minute
+				}
 			}
 			shell, flags := hostBashCmd()
 			useWSL := runtime.GOOS == "windows"
 			cmdLine := a.Command
 			if useWSL && tc != nil && tc.WorkingDir != "" {
-				cmdLine = "cd " + winToWslPath(tc.WorkingDir) + " && " + cmdLine
+				cmdLine = "cd '" + strings.ReplaceAll(winToWslPath(tc.WorkingDir), "'", `'"'"'`) + "' && " + cmdLine
 			}
 			var cctx context.Context
 			var cancel context.CancelFunc
@@ -138,14 +171,13 @@ func HostBash() actool.CoreTool {
 			}
 			defer cancel()
 			cmd := exec.CommandContext(cctx, shell, append(flags, cmdLine)...)
+			cmd.Env = ToolEnvironment(nil)
 			if tc != nil {
 				cmd.Dir = tc.WorkingDir
-				if len(tc.Env) > 0 {
-					if useWSL {
-						cmd.Env = wslEnv(tc)
-					} else {
-						cmd.Env = append(os.Environ(), tc.Env...)
-					}
+				if useWSL {
+					cmd.Env = wslEnv(tc)
+				} else {
+					cmd.Env = ToolEnvironment(tc.Env)
 				}
 			}
 			var buf bytes.Buffer

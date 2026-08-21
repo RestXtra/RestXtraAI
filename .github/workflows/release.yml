@@ -28,10 +28,7 @@ jobs:
         working-directory: web
       - run: npx tsc --noEmit
         working-directory: web
-      # Existing frontend lint debt is tracked separately under P3; keep the
-      # diagnostic visible without blocking backend/security releases yet.
-      - run: npm run lint
-        continue-on-error: true
+      - run: npm run check
         working-directory: web
 
   # ① 前端静态导出（一次），产物给交叉编译各平台复用

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+
 import { ChevronRightIcon, FileIcon, FolderIcon, ServerIcon } from "lucide-react";
 import { toast } from "sonner";
 
@@ -15,12 +16,12 @@ export default function WorkspacePage() {
   const [entries, setEntries] = React.useState<WorkspaceEntry[]>([]);
   const [file, setFile] = React.useState<{ path: string; content: string } | null>(null);
 
-  const load = React.useCallback(
-    (p: string) => {
-      api.workspaceList(p).then((r) => setEntries(r.entries ?? [])).catch(() => setEntries([]));
-    },
-    [],
-  );
+  const load = React.useCallback((p: string) => {
+    api
+      .workspaceList(p)
+      .then((r) => setEntries(r.entries ?? []))
+      .catch(() => setEntries([]));
+  }, []);
   React.useEffect(() => {
     load(path);
   }, [path, load]);
@@ -45,19 +46,25 @@ export default function WorkspacePage() {
     <div className="flex flex-1 flex-col gap-4">
       <div className="flex items-center gap-2">
         <ServerIcon className="size-5 text-muted-foreground" />
-        <h1 className="text-xl font-semibold tracking-tight">工作空间</h1>
+        <h1 className="font-semibold text-xl tracking-tight">工作空间</h1>
         <Badge variant="secondary">共享工作目录</Badge>
       </div>
-      <p className="text-muted-foreground text-sm">Agent 写入中间产物的共享目录（Bash 的 CWD），可浏览查看脚本/payload/抓包等产物。</p>
+      <p className="text-muted-foreground text-sm">
+        Agent 写入中间产物的共享目录（Bash 的 CWD），可浏览查看脚本/payload/抓包等产物。
+      </p>
 
       <div className="flex flex-wrap items-center gap-1 text-sm">
-        <Button size="sm" variant="ghost" onClick={() => go("")}>/</Button>
+        <Button size="sm" variant="ghost" onClick={() => go("")}>
+          /
+        </Button>
         {crumbs.map((c, i) => {
-          const p = "/" + crumbs.slice(0, i + 1).join("/");
+          const p = `/${crumbs.slice(0, i + 1).join("/")}`;
           return (
             <React.Fragment key={p}>
               <ChevronRightIcon className="size-3 text-muted-foreground" />
-              <Button size="sm" variant="ghost" onClick={() => go(p)}>{c}</Button>
+              <Button size="sm" variant="ghost" onClick={() => go(p)}>
+                {c}
+              </Button>
             </React.Fragment>
           );
         })}
@@ -67,7 +74,7 @@ export default function WorkspacePage() {
         <Card className="overflow-hidden py-0">
           <CardContent className="max-h-[65vh] overflow-auto p-2">
             {entries.length === 0 ? (
-              <div className="text-muted-foreground py-12 text-center text-sm">目录为空</div>
+              <div className="py-12 text-center text-muted-foreground text-sm">目录为空</div>
             ) : (
               entries.map((e) =>
                 e.dir ? (
@@ -75,7 +82,7 @@ export default function WorkspacePage() {
                     key={e.name}
                     type="button"
                     onClick={() => go(`${path}/${e.name}`)}
-                    className="text-foreground hover:bg-accent flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-foreground text-sm hover:bg-accent"
                   >
                     <FolderIcon className="size-4 text-amber-500" />
                     <span className="truncate">{e.name}</span>
@@ -85,7 +92,7 @@ export default function WorkspacePage() {
                     key={e.name}
                     type="button"
                     onClick={() => readFile(e.name)}
-                    className="text-muted-foreground hover:bg-accent flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground text-sm hover:bg-accent"
                   >
                     <FileIcon className="size-4 shrink-0" />
                     <span className="min-w-0 flex-1 truncate">{e.name}</span>
@@ -99,11 +106,13 @@ export default function WorkspacePage() {
         <Card className="overflow-hidden py-0">
           {file ? (
             <CardContent className="p-0">
-              <div className="bg-muted/50 truncate border-b px-3 py-2 font-mono text-xs">{file.path}</div>
-              <pre className="max-h-[60vh] overflow-auto p-3 font-mono text-xs break-all whitespace-pre-wrap">{file.content}</pre>
+              <div className="truncate border-b bg-muted/50 px-3 py-2 font-mono text-xs">{file.path}</div>
+              <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap break-all p-3 font-mono text-xs">
+                {file.content}
+              </pre>
             </CardContent>
           ) : (
-            <CardContent className="text-muted-foreground flex items-center justify-center py-16 text-sm">
+            <CardContent className="flex items-center justify-center py-16 text-muted-foreground text-sm">
               点击左侧文件查看内容
             </CardContent>
           )}

@@ -107,7 +107,7 @@ function ConversationItem({
 export function ConversationList() {
   const router = useRouter();
   const [convs, setConvs] = React.useState<Conversation[]>([]);
-  const [agents, setAgents] = React.useState<Agent[]>([]);
+  const [_agents, setAgents] = React.useState<Agent[]>([]);
   const [companies, setCompanies] = React.useState<Company[]>([]);
   const selectedId = useChatNavStore((s) => s.selectedId);
   const _bump = useChatNavStore((s) => s.bump);
@@ -229,7 +229,7 @@ export function ConversationList() {
             .filter(([key]) => key !== "0")
             .map(([companyKey, items]) => (
               <details key={companyKey} open className="mt-2 first:mt-0">
-                <summary className="flex cursor-pointer list-none items-center gap-2 border-b border-sidebar-border/50 px-2 py-1 font-medium text-[11px] text-muted-foreground">
+                <summary className="flex cursor-pointer list-none items-center gap-2 border-sidebar-border/50 border-b px-2 py-1 font-medium text-[11px] text-muted-foreground">
                   <FolderIcon className="size-3.5" />
                   <span className="min-w-0 flex-1 truncate">
                     {companies.find((x) => String(x.id) === companyKey)?.name ?? "企业项目"}
@@ -263,7 +263,7 @@ export function ConversationList() {
             ))}
           {grouped.find(([key]) => key === "0")?.[1].length ? (
             <details open className="mt-2">
-              <summary className="flex cursor-pointer list-none items-center gap-2 border-b border-sidebar-border/50 px-2 py-1 font-medium text-[11px] text-muted-foreground">
+              <summary className="flex cursor-pointer list-none items-center gap-2 border-sidebar-border/50 border-b px-2 py-1 font-medium text-[11px] text-muted-foreground">
                 <FolderIcon className="size-3.5" />
                 <span className="min-w-0 flex-1 truncate">未关联企业</span>
                 <Button
@@ -296,14 +296,14 @@ export function ConversationList() {
             </details>
           ) : null}
           {archivedConvs.length > 0 && (
-            <details className="mt-3 border-t border-sidebar-border/60 pt-2">
+            <details className="mt-3 border-sidebar-border/60 border-t pt-2">
               <summary className="cursor-pointer px-2 py-1 font-medium text-[11px] text-muted-foreground">
                 已归档 ({archivedConvs.length})
               </summary>
               <div className="mt-1 flex flex-col gap-1">
                 {archivedGrouped.map(([companyKey, items]) => (
                   <details key={companyKey} className="rounded-md" open>
-                    <summary className="flex cursor-pointer list-none items-center gap-2 border-b border-sidebar-border/40 px-2 py-1 font-medium text-[11px] text-muted-foreground">
+                    <summary className="flex cursor-pointer list-none items-center gap-2 border-sidebar-border/40 border-b px-2 py-1 font-medium text-[11px] text-muted-foreground">
                       <FolderIcon className="size-3.5" />
                       <span className="min-w-0 flex-1 truncate">
                         {companyKey === "0"

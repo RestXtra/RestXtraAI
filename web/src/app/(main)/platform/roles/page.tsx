@@ -2,9 +2,20 @@
 
 import * as React from "react";
 
-import { toast } from "sonner";
 import { PlusIcon, ShieldCheckIcon, Trash2Icon } from "lucide-react";
+import { toast } from "sonner";
 
+import { PermissionGate } from "@/components/permission-gate";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -16,37 +27,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { PermissionGate } from "@/components/permission-gate";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { api } from "@/lib/api";
 import type { PermissionPoint, PlatformRole } from "@/lib/types";
-import { useCurrentUser } from "@/hooks/use-current-user";
 
 // groupKey extracts the catalog group from a permission key ("platform.user.read" → "platform").
 function groupKey(key: string): string {
@@ -87,7 +74,8 @@ export default function PlatformRolesPage() {
   const toggleCheck = (id: number) => {
     setChecked((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -141,7 +129,7 @@ export default function PlatformRolesPage() {
     for (const p of catalog) {
       const g = groupKey(p.key);
       if (!m.has(g)) m.set(g, []);
-      m.get(g)!.push(p);
+      m.get(g)?.push(p);
     }
     return [...m.entries()];
   }, [catalog]);
@@ -198,20 +186,29 @@ export default function PlatformRolesPage() {
       <div className="space-y-6 p-4 md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">平台角色</h1>
-            <p className="text-sm text-muted-foreground">RBAC 角色与权限点绑定；系统角色不可删除。</p>
+            <h1 className="font-semibold text-2xl tracking-tight">平台角色</h1>
+            <p className="text-muted-foreground text-sm">RBAC 角色与权限点绑定；系统角色不可删除。</p>
           </div>
           {canWrite && (
             <div className="flex items-center gap-2">
               {checked.size > 0 && (
                 <>
-                  <Button variant="destructive" onClick={() => { setDeleteAll(false); setDeleteOpen(true); }}>
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      setDeleteAll(false);
+                      setDeleteOpen(true);
+                    }}
+                  >
                     <Trash2Icon className="size-4" /> 删除已选 ({checked.size})
                   </Button>
                   <Button
                     variant="outline"
                     className="text-destructive hover:text-destructive"
-                    onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+                    onClick={() => {
+                      setDeleteAll(true);
+                      setDeleteOpen(true);
+                    }}
                   >
                     <Trash2Icon className="size-4" /> 删除全部
                   </Button>
@@ -247,11 +244,15 @@ export default function PlatformRolesPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">加载中…</TableCell>
+                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                    加载中…
+                  </TableCell>
                 </TableRow>
               ) : roles.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">暂无角色</TableCell>
+                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                    暂无角色
+                  </TableCell>
                 </TableRow>
               ) : (
                 roles.map((r) => (
@@ -267,7 +268,11 @@ export default function PlatformRolesPage() {
                     </TableCell>
                     <TableCell className="font-medium">
                       {r.name}
-                      {r.is_system && <Badge variant="secondary" className="ml-2">系统</Badge>}
+                      {r.is_system && (
+                        <Badge variant="secondary" className="ml-2">
+                          系统
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell className="max-w-xs truncate text-muted-foreground">{r.description || "-"}</TableCell>
                     <TableCell>
@@ -313,7 +318,11 @@ export default function PlatformRolesPage() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="rd">说明</Label>
-                <Input id="rd" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+                <Input
+                  id="rd"
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>资源范围</Label>
@@ -330,14 +339,23 @@ export default function PlatformRolesPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setCreateOpen(false)}>取消</Button>
-              <Button onClick={createRole} disabled={!form.name.trim()}>创建</Button>
+              <Button variant="outline" onClick={() => setCreateOpen(false)}>
+                取消
+              </Button>
+              <Button onClick={createRole} disabled={!form.name.trim()}>
+                创建
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
         {/* 权限编辑器 */}
-        <Dialog open={!!permRole} onOpenChange={(o) => { if (!o) setPermRole(null); }}>
+        <Dialog
+          open={!!permRole}
+          onOpenChange={(o) => {
+            if (!o) setPermRole(null);
+          }}
+        >
           <DialogContent className="sm:max-w-xl">
             <DialogHeader>
               <DialogTitle>角色权限 · {permRole?.name}</DialogTitle>
@@ -346,7 +364,7 @@ export default function PlatformRolesPage() {
             <div className="max-h-[50vh] space-y-5 overflow-y-auto pr-1">
               {grouped.map(([group, perms]) => (
                 <div key={group}>
-                  <div className="mb-2 text-sm font-medium">{GROUP_LABEL[group] ?? group}</div>
+                  <div className="mb-2 font-medium text-sm">{GROUP_LABEL[group] ?? group}</div>
                   <div className="grid grid-cols-1 gap-1.5">
                     {perms.map((p) => (
                       <label
@@ -360,7 +378,7 @@ export default function PlatformRolesPage() {
                           }
                         />
                         <span className="text-sm">
-                          <code className="text-xs text-muted-foreground">{p.key}</code>
+                          <code className="text-muted-foreground text-xs">{p.key}</code>
                           <span className="ml-2">{p.description}</span>
                         </span>
                       </label>
@@ -370,7 +388,9 @@ export default function PlatformRolesPage() {
               ))}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setPermRole(null)}>取消</Button>
+              <Button variant="outline" onClick={() => setPermRole(null)}>
+                取消
+              </Button>
               <Button onClick={savePerms}>保存权限</Button>
             </DialogFooter>
           </DialogContent>
@@ -385,14 +405,20 @@ export default function PlatformRolesPage() {
                 {deleteAll ? (
                   <>将删除全部可删除的角色（系统角色自动跳过），此操作不可撤销。</>
                 ) : (
-                  <>将删除 <span className="font-semibold tabular-nums">{checked.size}</span> 个角色（系统角色自动跳过），此操作不可撤销。</>
+                  <>
+                    将删除 <span className="font-semibold tabular-nums">{checked.size}</span>{" "}
+                    个角色（系统角色自动跳过），此操作不可撤销。
+                  </>
                 )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
               <AlertDialogAction
-                onClick={(e) => { e.preventDefault(); confirmBatchDelete(); }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  confirmBatchDelete();
+                }}
                 disabled={deleting}
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >

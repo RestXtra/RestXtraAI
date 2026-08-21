@@ -365,6 +365,60 @@ func (s *ExplorationStore) Edges(limit int) ([]Edge, error) {
 	return out, rows.Err()
 }
 
+// FindingLineage returns the finding node and every exploration node that can
+// reach it. The result is the smallest task subgraph needed by the finding
+// detail page; unrelated branches are deliberately excluded.
+func (s *ExplorationStore) FindingLineage(nodeID int64) ([]*Node, []Edge, error) {
+	nodeRows, err := s.db.Query(`
+WITH RECURSIVE ancestors(id) AS (
+    SELECT $2::bigint
+  UNION
+    SELECT e.src_id
+    FROM exploration_edges e
+    JOIN ancestors a ON e.dst_id = a.id
+    WHERE e.exploration_id = $1
+)
+SELECT `+nodeCols+`
+FROM exploration_nodes
+WHERE exploration_id = $1 AND id IN (SELECT id FROM ancestors)
+ORDER BY id`, s.expID, nodeID)
+	if err != nil {
+		return nil, nil, err
+	}
+	nodes, err := scanNodes(nodeRows)
+	if err != nil || len(nodes) == 0 {
+		return nodes, nil, err
+	}
+
+	edgeRows, err := s.db.Query(`
+WITH RECURSIVE ancestors(id) AS (
+    SELECT $2::bigint
+  UNION
+    SELECT e.src_id
+    FROM exploration_edges e
+    JOIN ancestors a ON e.dst_id = a.id
+    WHERE e.exploration_id = $1
+)
+SELECT src_id, rel, dst_id
+FROM exploration_edges
+WHERE exploration_id = $1
+  AND src_id IN (SELECT id FROM ancestors)
+  AND dst_id IN (SELECT id FROM ancestors)`, s.expID, nodeID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer edgeRows.Close()
+	edges := make([]Edge, 0)
+	for edgeRows.Next() {
+		var edge Edge
+		if err := edgeRows.Scan(&edge.From, &edge.Rel, &edge.To); err != nil {
+			return nil, nil, err
+		}
+		edges = append(edges, edge)
+	}
+	return nodes, edges, edgeRows.Err()
+}
+
 // FindingIntents maps each finding id to the intent that produced it (the
 // intent --yields--> finding edge; report_finding links it). Findings with no
 // producing intent are absent. Precise (JOIN, no edge-scan limit).
@@ -408,6 +462,7 @@ ORDER BY priority DESC, id ASC LIMIT $2`, s.expID, limit)
 //   - fact/finding/goal/hint → 已满足（事实在图上即算数）；
 //   - intent → 仅当该父意图已 done 且产出了至少一个事实/发现（有 yields 边）才算满足；
 //     open/running/blocked/exhausted 的父意图 → 不满足（下游串行链不能抢跑）。
+//
 // 无父节点 → 满足（顶层意图可直接认领）。
 func (s *ExplorationStore) IntentReady(id int64) (bool, error) {
 	rows, err := s.db.Query(`
@@ -674,7 +729,7 @@ FROM activity a
        JOIN task_companies tc ON tc.task_id = t.id AND tc.company_id = $1
 `
 	}
-	q += ` ORDER BY a.id DESC LIMIT $` + fmt.Sprintf("%d", 1+boolArg(companyID>0))
+	q += ` ORDER BY a.id DESC LIMIT $` + fmt.Sprintf("%d", 1+boolArg(companyID > 0))
 	args := []any{limit}
 	if companyID > 0 {
 		args = append([]any{companyID}, args...)

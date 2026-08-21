@@ -5,7 +5,14 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { auth, type CurrentUser } from "@/lib/auth";
 
-const FALLBACK: CurrentUser = { id: "1", name: "RestXtra AI", username: "admin", email: "", avatar: "", role: "operator" };
+const FALLBACK: CurrentUser = {
+  id: "1",
+  name: "RestXtra AI",
+  username: "admin",
+  email: "",
+  avatar: "",
+  role: "operator",
+};
 
 // useCurrentUser returns the signed-in user, enriched with RBAC roles and
 // permissions from GET /api/platform/my (admin flag included). Falls back to the
@@ -25,7 +32,7 @@ export function useCurrentUser(): CurrentUser {
           username: p.user.username,
           email: "",
           avatar: "",
-          role: p.admin ? "admin" : p.roles[0] ?? "viewer",
+          role: p.admin ? "admin" : (p.roles[0] ?? "viewer"),
           roles: p.roles,
           permissions: p.permissions,
           admin: p.admin,

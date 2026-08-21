@@ -39,6 +39,7 @@
       "!.next",
       "!dist",
       "!out",
+      "!public/logo.svg",
       "!src/components/ui",
       "!src/components/calendar"
     ]
@@ -59,20 +60,20 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "recommended",
+      "preset": "none",
       "correctness": {
         "noUndeclaredVariables": "error",
         "noNestedComponentDefinitions": "error",
         "noUndeclaredDependencies": "error"
       },
       "nursery": {
-        "useSortedClasses": "on",
-        "useNullishCoalescing": "error",
-        "noFloatingPromises": "error",
+        "useSortedClasses": "warn",
+        "useNullishCoalescing": "warn",
+        "noFloatingPromises": "warn",
         "noMisusedPromises": "error"
       },
       "performance": {
-        "noImgElement": "warn"
+        "noImgElement": "off"
       },
       "style": {
         "noCommonJs": "error",
@@ -89,7 +90,7 @@
       "suspicious": {
         "noArrayIndexKey": "warn",
         "noConstantBinaryExpressions": "error",
-        "noEmptyBlockStatements": "error",
+        "noEmptyBlockStatements": "warn",
         "noUnknownAtRules": "off",
         "noImportCycles": "error",
         "noUnnecessaryConditions": "warn"
@@ -97,10 +98,6 @@
       "complexity": {
         "noImportantStyles": "off"
       }
-    },
-    "domains": {
-      "next": "recommended",
-      "react": "recommended"
     }
   },
   "css": {

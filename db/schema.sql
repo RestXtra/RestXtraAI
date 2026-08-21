@@ -511,10 +511,16 @@ CREATE TABLE IF NOT EXISTS findings (
     evidence    TEXT NOT NULL DEFAULT '',
     worker      TEXT NOT NULL DEFAULT '',
     asset_ids   JSONB NOT NULL DEFAULT '[]',
+    status      TEXT NOT NULL DEFAULT 'pending',
+    report      TEXT NOT NULL DEFAULT '',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS report TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_findings_task ON findings(task_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_findings_time ON findings(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_findings_status_time ON findings(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_findings_severity_time ON findings(severity, created_at DESC);
 
 -- =====================================================================
 -- M. 后端日志持久化

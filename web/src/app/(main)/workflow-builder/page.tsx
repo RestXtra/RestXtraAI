@@ -134,7 +134,7 @@ function WorkflowNode({ id, data, selected }: NodeProps<RFNode<NodeData>>) {
             type="button"
             onClick={() => rf.deleteElements({ nodes: [{ id }] })}
             aria-label="删除节点"
-            className="text-muted-foreground hover:text-destructive rounded p-0.5"
+            className="rounded p-0.5 text-muted-foreground hover:text-destructive"
           >
             <XIcon className="size-3" />
           </button>
@@ -195,7 +195,7 @@ function WorkflowNode({ id, data, selected }: NodeProps<RFNode<NodeData>>) {
                   </SelectItem>
                 ))}
                 {agents.length === 0 && (
-                  <div className="text-muted-foreground px-2 py-1 text-xs">智能体管理中暂无自定义 Agent</div>
+                  <div className="px-2 py-1 text-muted-foreground text-xs">智能体管理中暂无自定义 Agent</div>
                 )}
               </SelectContent>
             </Select>
@@ -245,7 +245,9 @@ function topoLayout(nds: RFNode<NodeData>[], eds: RFEdge[]): RFNode<NodeData>[] 
   }
   for (const n of nds) if (!order.includes(n.id)) order.push(n.id);
   const cols = 3;
-  const positions = new Map(order.map((id, i) => [id, { x: 80 + (i % cols) * 320, y: 60 + Math.floor(i / cols) * 240 }]));
+  const positions = new Map(
+    order.map((id, i) => [id, { x: 80 + (i % cols) * 320, y: 60 + Math.floor(i / cols) * 240 }]),
+  );
   return nds.map((n) => ({ ...n, position: positions.get(n.id) ?? n.position }));
 }
 
@@ -339,7 +341,9 @@ function BuilderCanvas() {
         }));
         const eds = d.edges.map((e) => ({ id: `e-${e.source}-${e.target}`, source: e.source, target: e.target }));
         // 载入的节点若挤在一起（旧草稿/位置丢失），自动展开。
-        setNodes(cramped(nds as RFNode<NodeData>[]) ? topoLayout(nds as RFNode<NodeData>[], eds) : (nds as RFNode<NodeData>[]));
+        setNodes(
+          cramped(nds as RFNode<NodeData>[]) ? topoLayout(nds as RFNode<NodeData>[], eds) : (nds as RFNode<NodeData>[]),
+        );
         setEdges(eds);
         setHints(d.hints);
         nextId.current = d.nodes.length + 1;
@@ -352,7 +356,7 @@ function BuilderCanvas() {
       setLoaded(true);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [toNodeData, setNodes, setEdges]);
 
   const onConnect = React.useCallback(
     (c: Connection) => {
@@ -378,10 +382,7 @@ function BuilderCanvas() {
       const id = `wf-${nextId.current++}`;
       // 新节点放在画布视口中心附近，避免与现有节点堆叠。
       const center = { x: 140, y: 80 + nodes.length * 120 };
-      setNodes((nds) => [
-        ...nds,
-        { id, type: "wf", position: center, data: defaultNode(kind, 0, 0) },
-      ]);
+      setNodes((nds) => [...nds, { id, type: "wf", position: center, data: defaultNode(kind, 0, 0) }]);
     },
     [nodes, setNodes],
   );
@@ -536,7 +537,7 @@ function BuilderCanvas() {
         <Card className="relative min-h-0 overflow-hidden py-0">
           {loaded && nodes.length === 0 && (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-              <div className="text-muted-foreground flex flex-col items-center gap-1 text-sm">
+              <div className="flex flex-col items-center gap-1 text-muted-foreground text-sm">
                 <WorkflowIcon className="size-8 opacity-40" />
                 <span>空画布 —— 点击上方「+开始 / +工具 / +Agent…」添加节点，拖动连线编排流程</span>
               </div>

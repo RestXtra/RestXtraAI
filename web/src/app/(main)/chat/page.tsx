@@ -83,7 +83,7 @@ function Composer({
         <div className="mx-auto flex max-w-[840px] items-end rounded-[29px] border border-border/60 bg-background pr-1.5 shadow-sm backdrop-blur-lg transition-colors focus-within:border-transparent focus-within:ring-0 dark:bg-card/40">
           {leftSlot}
           <Textarea
-            className="max-h-[200px] min-h-10 flex-1 resize-none border-0 bg-transparent p-3 text-base shadow-none outline-none ring-0 focus:border-0 focus:outline-none focus:ring-0 focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0 placeholder:truncate placeholder:text-muted-foreground md:p-4 md:pl-6"
+            className="max-h-[200px] min-h-10 flex-1 resize-none border-0 bg-transparent p-3 text-base shadow-none outline-none ring-0 placeholder:truncate placeholder:text-muted-foreground focus:border-0 focus:outline-none focus:ring-0 focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0 md:p-4 md:pl-6"
             rows={1}
             placeholder={placeholder}
             value={value}

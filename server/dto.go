@@ -29,23 +29,23 @@ func rawString(raw json.RawMessage) string {
 
 // ---- Task (frontend "Task") ---- created_at as RFC3339, plus a derived status.
 type TaskDTO struct {
-	ID            string        `json:"id"`
-	ExplorationID int64         `json:"exploration_id"`
-	Description   string        `json:"description"`
-	Goal          string        `json:"goal"`
-	Status        string        `json:"status"` // created | running | paused | done | failed
-	CreatedAt     string        `json:"created_at"`
-	CreatedUnix   int64         `json:"created_unix"`       // created_at as unix seconds (for run-duration calc)
-	CompletedAt   string        `json:"completed_at"`       // RFC3339 finish time (done/failed); "" if unfinished
-	CompletedUnix int64         `json:"completed_unix"`     // completed_at as unix seconds (0 if unfinished)
-	LastActivity  int64         `json:"last_activity_unix"` // unix seconds of the last activity (0 if none)
-	Paused        bool          `json:"paused"`
-	Tokens        TokenTotalDTO `json:"tokens"` // whole-task token consumption
-	GoalsTotal    int           `json:"goals_total"`
-	GoalsMet      int           `json:"goals_met"`
-	LLMProfileID  *int64        `json:"llm_profile_id,omitempty"` // LLM profile used for this task; nil = default
-	Companies     []db.CompanyRef `json:"companies,omitempty"`    // 企业归属（多企业）
-	CompanyID     int64         `json:"company_id,omitempty"`     // 主企业
+	ID            string          `json:"id"`
+	ExplorationID int64           `json:"exploration_id"`
+	Description   string          `json:"description"`
+	Goal          string          `json:"goal"`
+	Status        string          `json:"status"` // created | running | paused | done | failed
+	CreatedAt     string          `json:"created_at"`
+	CreatedUnix   int64           `json:"created_unix"`       // created_at as unix seconds (for run-duration calc)
+	CompletedAt   string          `json:"completed_at"`       // RFC3339 finish time (done/failed); "" if unfinished
+	CompletedUnix int64           `json:"completed_unix"`     // completed_at as unix seconds (0 if unfinished)
+	LastActivity  int64           `json:"last_activity_unix"` // unix seconds of the last activity (0 if none)
+	Paused        bool            `json:"paused"`
+	Tokens        TokenTotalDTO   `json:"tokens"` // whole-task token consumption
+	GoalsTotal    int             `json:"goals_total"`
+	GoalsMet      int             `json:"goals_met"`
+	LLMProfileID  *int64          `json:"llm_profile_id,omitempty"` // LLM profile used for this task; nil = default
+	Companies     []db.CompanyRef `json:"companies,omitempty"`      // 企业归属（多企业）
+	CompanyID     int64           `json:"company_id,omitempty"`     // 主企业
 }
 
 // TokenTotalDTO is a whole-task (all agents) token aggregate.
@@ -175,16 +175,18 @@ func edgeDTOs(in []db.Edge) []EdgeDTO {
 // ---- Finding (frontend "Finding") ----
 
 type FindingDTO struct {
-	ID              string `json:"id"`
-	VulnClass       string `json:"vulnclass"`
-	Severity        string `json:"severity"`
-	Summary         string `json:"summary"`
-	Evidence        string `json:"evidence"`
-	IntentID        string `json:"intent_id,omitempty"`
-	ParamID         string `json:"param_id,omitempty"`
-	TaskID          string `json:"task_id,omitempty"`
-	TaskDescription string `json:"task_description,omitempty"`
-	TS              string `json:"ts"`
+	ID              string  `json:"id"`
+	VulnClass       string  `json:"vulnclass"`
+	Severity        string  `json:"severity"`
+	Summary         string  `json:"summary"`
+	Evidence        string  `json:"evidence"`
+	Status          string  `json:"status"`
+	Report          string  `json:"report,omitempty"`
+	IntentID        string  `json:"intent_id,omitempty"`
+	ParamID         string  `json:"param_id,omitempty"`
+	TaskID          string  `json:"task_id,omitempty"`
+	TaskDescription string  `json:"task_description,omitempty"`
+	TS              string  `json:"ts"`
 	CompanyIDs      []int64 `json:"company_ids,omitempty"` // 派生：任务企业 + 资产企业
 }
 
@@ -206,6 +208,7 @@ func findingDTO(n *db.Node) FindingDTO {
 		Severity:  p.Severity,
 		Summary:   p.Summary,
 		Evidence:  rawString(p.Evidence),
+		Status:    db.FindingConfirmed,
 		TS:        rfc3339(n.CreatedAt),
 	}
 }
@@ -232,6 +235,8 @@ func findingFromDB(f *db.DBFinding) FindingDTO {
 		Severity:   f.Severity,
 		Summary:    f.Summary,
 		Evidence:   f.Evidence,
+		Status:     f.Status,
+		Report:     f.Report,
 		TS:         rfc3339(f.CreatedAt),
 		CompanyIDs: f.CompanyIDs,
 	}

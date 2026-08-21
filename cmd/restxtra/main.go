@@ -85,7 +85,10 @@ func main() {
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Handler(),
+		ReadTimeout:       30 * time.Second,
 		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	go func() {

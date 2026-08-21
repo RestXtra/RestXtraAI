@@ -2,19 +2,10 @@
 
 import * as React from "react";
 
+import { KeyRoundIcon, PlusIcon, ShieldIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
-import { PlusIcon, KeyRoundIcon, ShieldIcon, Trash2Icon } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { PermissionGate } from "@/components/permission-gate";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,29 +16,25 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { PermissionGate } from "@/components/permission-gate";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { api } from "@/lib/api";
 import type { PlatformRole, PlatformUser } from "@/lib/types";
-import { useCurrentUser } from "@/hooks/use-current-user";
 
 function fmtTime(ts: string) {
   if (!ts) return "-";
@@ -77,7 +64,8 @@ export default function PlatformUsersPage() {
   const toggleCheck = (id: number) => {
     setChecked((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -194,20 +182,29 @@ export default function PlatformUsersPage() {
       <div className="space-y-6 p-4 md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">成员管理</h1>
-            <p className="text-sm text-muted-foreground">平台登录账户与角色分配（RBAC）。</p>
+            <h1 className="font-semibold text-2xl tracking-tight">成员管理</h1>
+            <p className="text-muted-foreground text-sm">平台登录账户与角色分配（RBAC）。</p>
           </div>
           {me.admin && (
             <div className="flex items-center gap-2">
               {checked.size > 0 && (
                 <>
-                  <Button variant="destructive" onClick={() => { setDeleteAll(false); setDeleteOpen(true); }}>
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      setDeleteAll(false);
+                      setDeleteOpen(true);
+                    }}
+                  >
                     <Trash2Icon className="size-4" /> 删除已选 ({checked.size})
                   </Button>
                   <Button
                     variant="outline"
                     className="text-destructive hover:text-destructive"
-                    onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+                    onClick={() => {
+                      setDeleteAll(true);
+                      setDeleteOpen(true);
+                    }}
                   >
                     <Trash2Icon className="size-4" /> 删除全部
                   </Button>
@@ -269,59 +266,68 @@ export default function PlatformUsersPage() {
                         )}
                       </TableCell>
                       <TableCell className="font-medium">
-                      {u.username}
-                      {u.is_builtin && <Badge variant="secondary" className="ml-2">内置</Badge>}
-                    </TableCell>
-                    <TableCell>{u.display_name || "-"}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {u.roles.length === 0 && <span className="text-muted-foreground text-sm">-</span>}
-                        {u.roles.map((r) => (
-                          <Badge key={r} variant={isSystem(r) ? "default" : "outline"}>
-                            {roleName(r)}
+                        {u.username}
+                        {u.is_builtin && (
+                          <Badge variant="secondary" className="ml-2">
+                            内置
                           </Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {me.admin ? (
-                        <Switch
-                          checked={u.enabled}
-                          disabled={u.is_builtin}
-                          onCheckedChange={(v) => toggleEnabled(u, v)}
-                          aria-label={`${u.username} 启用状态`}
-                        />
-                      ) : (
-                        <Badge variant={u.enabled ? "success" : "secondary"}>{u.enabled ? "启用" : "禁用"}</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{fmtTime(u.created_at)}</TableCell>
-                    <TableCell className="text-right">
-                      {me.admin && (
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setEditUser(u);
-                              setForm({ username: u.username, display_name: u.display_name, password: "", roles: u.roles });
-                              setEditOpen(true);
-                            }}
-                          >
-                            <ShieldIcon className="size-4" /> 角色
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => setResetUser(u)}>
-                            <KeyRoundIcon className="size-4" /> 重置密码
-                          </Button>
-                          {!u.is_builtin && me.username !== u.username && (
-                            <Button variant="ghost" size="sm" onClick={() => removeUser(u)}>
-                              <Trash2Icon className="size-4" />
-                            </Button>
-                          )}
+                        )}
+                      </TableCell>
+                      <TableCell>{u.display_name || "-"}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {u.roles.length === 0 && <span className="text-muted-foreground text-sm">-</span>}
+                          {u.roles.map((r) => (
+                            <Badge key={r} variant={isSystem(r) ? "default" : "outline"}>
+                              {roleName(r)}
+                            </Badge>
+                          ))}
                         </div>
-                      )}
-                    </TableCell>
-                  </TableRow>
+                      </TableCell>
+                      <TableCell>
+                        {me.admin ? (
+                          <Switch
+                            checked={u.enabled}
+                            disabled={u.is_builtin}
+                            onCheckedChange={(v) => toggleEnabled(u, v)}
+                            aria-label={`${u.username} 启用状态`}
+                          />
+                        ) : (
+                          <Badge variant={u.enabled ? "success" : "secondary"}>{u.enabled ? "启用" : "禁用"}</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{fmtTime(u.created_at)}</TableCell>
+                      <TableCell className="text-right">
+                        {me.admin && (
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setEditUser(u);
+                                setForm({
+                                  username: u.username,
+                                  display_name: u.display_name,
+                                  password: "",
+                                  roles: u.roles,
+                                });
+                                setEditOpen(true);
+                              }}
+                            >
+                              <ShieldIcon className="size-4" /> 角色
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setResetUser(u)}>
+                              <KeyRoundIcon className="size-4" /> 重置密码
+                            </Button>
+                            {!u.is_builtin && me.username !== u.username && (
+                              <Button variant="ghost" size="sm" onClick={() => removeUser(u)}>
+                                <Trash2Icon className="size-4" />
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
                   );
                 })
               )}
@@ -343,31 +349,41 @@ export default function PlatformUsersPage() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="nd">显示名（可选）</Label>
-                <Input id="nd" value={form.display_name} onChange={(e) => setForm({ ...form, display_name: e.target.value })} />
+                <Input
+                  id="nd"
+                  value={form.display_name}
+                  onChange={(e) => setForm({ ...form, display_name: e.target.value })}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="np">初始密码（至少 8 位）</Label>
-                <Input id="np" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+                <Input
+                  id="np"
+                  type="password"
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>角色</Label>
-                <Select
-                  value={form.roles[0] ?? ""}
-                  onValueChange={(v) => setForm({ ...form, roles: v ? [v] : [] })}
-                >
+                <Select value={form.roles[0] ?? ""} onValueChange={(v) => setForm({ ...form, roles: v ? [v] : [] })}>
                   <SelectTrigger>
                     <SelectValue placeholder="选择角色" />
                   </SelectTrigger>
                   <SelectContent>
                     {roles.map((r) => (
-                      <SelectItem key={r.id} value={r.name}>{r.name}</SelectItem>
+                      <SelectItem key={r.id} value={r.name}>
+                        {r.name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setCreateOpen(false)}>取消</Button>
+              <Button variant="outline" onClick={() => setCreateOpen(false)}>
+                取消
+              </Button>
               <Button onClick={createUser} disabled={!form.username || form.password.length < 8}>
                 创建
               </Button>
@@ -384,29 +400,35 @@ export default function PlatformUsersPage() {
             </DialogHeader>
             <div className="space-y-1.5">
               <Label>角色</Label>
-              <Select
-                value={form.roles[0] ?? ""}
-                onValueChange={(v) => setForm({ ...form, roles: v ? [v] : [] })}
-              >
+              <Select value={form.roles[0] ?? ""} onValueChange={(v) => setForm({ ...form, roles: v ? [v] : [] })}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择角色" />
                 </SelectTrigger>
                 <SelectContent>
                   {roles.map((r) => (
-                    <SelectItem key={r.id} value={r.name}>{r.name}</SelectItem>
+                    <SelectItem key={r.id} value={r.name}>
+                      {r.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setEditOpen(false)}>取消</Button>
+              <Button variant="outline" onClick={() => setEditOpen(false)}>
+                取消
+              </Button>
               <Button onClick={saveRoles}>保存</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
         {/* 重置密码 */}
-        <Dialog open={!!resetUser} onOpenChange={(o) => { if (!o) setResetUser(null); }}>
+        <Dialog
+          open={!!resetUser}
+          onOpenChange={(o) => {
+            if (!o) setResetUser(null);
+          }}
+        >
           <DialogContent>
             <DialogHeader>
               <DialogTitle>重置密码 · {resetUser?.username}</DialogTitle>
@@ -417,8 +439,12 @@ export default function PlatformUsersPage() {
               <Input id="rp" type="password" value={resetPwd} onChange={(e) => setResetPwd(e.target.value)} />
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setResetUser(null)}>取消</Button>
-              <Button onClick={resetPassword} disabled={resetPwd.length < 8}>重置</Button>
+              <Button variant="outline" onClick={() => setResetUser(null)}>
+                取消
+              </Button>
+              <Button onClick={resetPassword} disabled={resetPwd.length < 8}>
+                重置
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -432,14 +458,20 @@ export default function PlatformUsersPage() {
                 {deleteAll ? (
                   <>将删除全部可删除的成员（内置管理员与当前账户自动跳过），此操作不可撤销。</>
                 ) : (
-                  <>将删除 <span className="font-semibold tabular-nums">{checked.size}</span> 名成员（内置管理员与当前账户自动跳过），此操作不可撤销。</>
+                  <>
+                    将删除 <span className="font-semibold tabular-nums">{checked.size}</span>{" "}
+                    名成员（内置管理员与当前账户自动跳过），此操作不可撤销。
+                  </>
                 )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
               <AlertDialogAction
-                onClick={(e) => { e.preventDefault(); confirmBatchDelete(); }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  confirmBatchDelete();
+                }}
                 disabled={deleting}
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >

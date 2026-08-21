@@ -4,16 +4,10 @@ import * as React from "react";
 
 import { FileDownIcon, Loader2Icon } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { PermissionGate } from "@/components/permission-gate";
 import { Markdown } from "@/components/markdown";
+import { PermissionGate } from "@/components/permission-gate";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import type { Task } from "@/lib/types";
 
@@ -25,7 +19,10 @@ export default function ReportPage() {
   const [loading, setLoading] = React.useState(false);
 
   React.useEffect(() => {
-    api.tasks().then(({ tasks }) => setTasks(tasks)).catch(() => {});
+    api
+      .tasks()
+      .then(({ tasks }) => setTasks(tasks))
+      .catch(() => {});
   }, []);
 
   async function generate() {
@@ -56,8 +53,8 @@ export default function ReportPage() {
       <div className="space-y-6 p-4 md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">报告编写</h1>
-            <p className="text-sm text-muted-foreground">基于任务确认发现的确定性报告（证据门控，Markdown）。</p>
+            <h1 className="font-semibold text-2xl tracking-tight">报告编写</h1>
+            <p className="text-muted-foreground text-sm">基于任务确认发现的确定性报告（证据门控，Markdown）。</p>
           </div>
           <div className="flex items-center gap-2">
             <Select value={taskId} onValueChange={setTaskId}>
@@ -66,7 +63,9 @@ export default function ReportPage() {
               </SelectTrigger>
               <SelectContent>
                 {tasks.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>{t.description || t.id}</SelectItem>
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.description || t.id}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -75,7 +74,9 @@ export default function ReportPage() {
               生成报告
             </Button>
             {report && (
-              <Button variant="outline" onClick={download}>下载 .md</Button>
+              <Button variant="outline" onClick={download}>
+                下载 .md
+              </Button>
             )}
           </div>
         </div>
@@ -84,7 +85,7 @@ export default function ReportPage() {
           {report ? (
             <Markdown text={report} />
           ) : (
-            <p className="py-12 text-center text-sm text-muted-foreground">
+            <p className="py-12 text-center text-muted-foreground text-sm">
               选择任务后点击「生成报告」。报告汇总该任务的确认漏洞、资产分布与目标描述。
             </p>
           )}

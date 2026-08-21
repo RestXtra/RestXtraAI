@@ -112,6 +112,25 @@ export interface TaskAssetView {
   items: TaskAssetItem[];
 }
 
+export interface CoverageGraphNode {
+  id: string;
+  type: string;
+  label: string;
+  parent_id?: string;
+  status: "discovered" | "verified" | "vulnerable";
+  tested: boolean;
+  findings: number;
+}
+
+export interface CoverageGraphData {
+  nodes: CoverageGraphNode[];
+  edges: { source: string; target: string }[];
+  total: number;
+  tested: number;
+  vulnerable: number;
+  untested: number;
+}
+
 // ---- New unified asset model (new backend) ----
 export type NewAssetType = "root_domain" | "ip" | "subdomain" | "app" | "service" | "endpoint";
 
@@ -190,6 +209,15 @@ export interface TaskNode {
 
 // ---- Findings ----
 export type Severity = "high" | "medium" | "low";
+export type FindingStatus =
+  | "pending"
+  | "in_progress"
+  | "confirmed"
+  | "resolved"
+  | "false_positive"
+  | "ignored"
+  | "duplicate"
+  | "risk_accepted";
 
 export interface Finding {
   id: string;
@@ -197,12 +225,21 @@ export interface Finding {
   severity: Severity;
   summary: string;
   evidence: string;
+  status: FindingStatus;
+  report?: string;
   intent_id?: string;
   param_id?: string;
   task_id?: string;
   task_description?: string;
   ts: string;
   company_ids?: number[]; // 派生：任务企业 + 资产企业
+}
+
+export interface FindingsPage {
+  items: Finding[];
+  total: number;
+  page: number;
+  limit: number;
 }
 
 // ---- Activity / sessions ----

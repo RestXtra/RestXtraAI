@@ -1,22 +1,10 @@
 "use client";
 
 import * as React from "react";
+
 import { Loader2Icon, PlusIcon, TerminalIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,9 +15,22 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
@@ -78,7 +79,12 @@ function ConnForm({ onSaved }: { onSaved: () => void }) {
           <div className="grid grid-cols-2 gap-2">
             <div className="grid gap-2">
               <Label htmlFor="ws-name">名称</Label>
-              <Input id="ws-name" placeholder="例如：目标-A-php" value={name} onChange={(e) => setName(e.target.value)} />
+              <Input
+                id="ws-name"
+                placeholder="例如：目标-A-php"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
             </div>
             <div className="grid gap-2">
               <Label>类型</Label>
@@ -98,7 +104,13 @@ function ConnForm({ onSaved }: { onSaved: () => void }) {
           </div>
           <div className="grid gap-2">
             <Label htmlFor="ws-url">URL</Label>
-            <Input id="ws-url" className="font-mono" placeholder="https://target/shell.php" value={url} onChange={(e) => setUrl(e.target.value)} />
+            <Input
+              id="ws-url"
+              className="font-mono"
+              placeholder="https://target/shell.php"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+            />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="ws-pwd">连接密码（可选）</Label>
@@ -134,7 +146,8 @@ export default function WebshellPage() {
   const toggleCheck = (id: string) => {
     setChecked((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -156,7 +169,10 @@ export default function WebshellPage() {
   };
 
   const load = React.useCallback(() => {
-    api.webshells().then(setConns).catch(() => setConns([]));
+    api
+      .webshells()
+      .then(setConns)
+      .catch(() => setConns([]));
   }, []);
   React.useEffect(() => {
     load();
@@ -189,18 +205,28 @@ export default function WebshellPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <TerminalIcon className="size-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold tracking-tight">WebShell</h1>
+          <h1 className="font-semibold text-xl tracking-tight">WebShell</h1>
           <Badge variant="secondary">{conns.length}</Badge>
           {checked.size > 0 && (
             <>
-              <Button variant="destructive" size="sm" onClick={() => { setDeleteAll(false); setDeleteOpen(true); }}>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  setDeleteAll(false);
+                  setDeleteOpen(true);
+                }}
+              >
                 <Trash2Icon className="size-3.5" /> 删除已选 ({checked.size})
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 className="text-destructive hover:text-destructive"
-                onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+                onClick={() => {
+                  setDeleteAll(true);
+                  setDeleteOpen(true);
+                }}
               >
                 <Trash2Icon className="size-3.5" /> 删除全部
               </Button>
@@ -209,7 +235,9 @@ export default function WebshellPage() {
         </div>
         <ConnForm onSaved={load} />
       </div>
-      <p className="text-muted-foreground text-sm">登记目标上的 webshell 连接，测试连通性。执行命令需人工在目标上配合（连接管理）。</p>
+      <p className="text-muted-foreground text-sm">
+        登记目标上的 webshell 连接，测试连通性。执行命令需人工在目标上配合（连接管理）。
+      </p>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         {conns.length === 0 && (
@@ -235,10 +263,12 @@ export default function WebshellPage() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="truncate font-medium">{c.name}</span>
-                        <Badge variant="outline" className="uppercase">{c.type}</Badge>
+                        <Badge variant="outline" className="uppercase">
+                          {c.type}
+                        </Badge>
                         {c.enabled && <Switch size="sm" checked disabled />}
                       </div>
-                      <code className="mt-0.5 block truncate font-mono text-xs text-muted-foreground">{c.url}</code>
+                      <code className="mt-0.5 block truncate font-mono text-muted-foreground text-xs">{c.url}</code>
                     </div>
                   </div>
                   <Button size="icon" variant="outline" aria-label="删除" onClick={() => remove(c)}>
@@ -277,14 +307,20 @@ export default function WebshellPage() {
               {deleteAll ? (
                 <>将清空全部 WebShell 连接记录，此操作不可撤销。</>
               ) : (
-                <>将永久删除 <span className="font-semibold tabular-nums">{checked.size}</span> 条 WebShell 连接记录，此操作不可撤销。</>
+                <>
+                  将永久删除 <span className="font-semibold tabular-nums">{checked.size}</span> 条 WebShell
+                  连接记录，此操作不可撤销。
+                </>
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(e) => { e.preventDefault(); confirmBatchDelete(); }}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmBatchDelete();
+              }}
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

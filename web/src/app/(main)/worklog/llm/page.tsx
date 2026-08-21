@@ -5,13 +5,6 @@ import * as React from "react";
 import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon, RadioIcon, SearchIcon, Trash2Icon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,7 +15,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import type { LLMRecordDetail, LLMRecordItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -84,12 +84,13 @@ export default function LLMRecordsPage() {
   const [deleteAll, setDeleteAll] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
-  const [reloadKey, setReloadKey] = React.useState(0);
+  const [_reloadKey, setReloadKey] = React.useState(0);
 
   const toggleCheck = (id: number) => {
     setChecked((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -107,9 +108,7 @@ export default function LLMRecordsPage() {
   const confirmDelete = async () => {
     setDeleting(true);
     try {
-      const res = deleteAll
-        ? await api.clearLLMRecords()
-        : await api.deleteLLMRecords(deleteIds);
+      const res = deleteAll ? await api.clearLLMRecords() : await api.deleteLLMRecords(deleteIds);
       const n = res.removed ?? res.deleted ?? 0;
       toast.success(`已删除 ${n} 条 LLM 记录`);
       setChecked(new Set());
@@ -117,7 +116,7 @@ export default function LLMRecordsPage() {
       setSelected(null);
       setReloadKey((k) => k + 1);
     } catch (e) {
-      toast.error("删除失败：" + String((e as Error)?.message ?? e));
+      toast.error(`删除失败：${String((e as Error)?.message ?? e)}`);
       setDeleteOpen(false);
     } finally {
       setDeleting(false);
@@ -178,7 +177,7 @@ export default function LLMRecordsPage() {
     return () => {
       alive = false;
     };
-  }, [page, size, sessionQ, model, reloadKey]);
+  }, [page, size, sessionQ, model]);
 
   // Lazy-load full request/response when a row is selected.
   React.useEffect(() => {
@@ -219,7 +218,11 @@ export default function LLMRecordsPage() {
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={() => { setDeleteAll(false); setDeleteIds(Array.from(checked)); setDeleteOpen(true); }}
+                onClick={() => {
+                  setDeleteAll(false);
+                  setDeleteIds(Array.from(checked));
+                  setDeleteOpen(true);
+                }}
               >
                 <Trash2Icon className="size-3.5" /> 删除已选 ({checked.size})
               </Button>
@@ -227,7 +230,10 @@ export default function LLMRecordsPage() {
                 variant="outline"
                 size="sm"
                 className="text-destructive hover:text-destructive"
-                onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+                onClick={() => {
+                  setDeleteAll(true);
+                  setDeleteOpen(true);
+                }}
               >
                 <Trash2Icon className="size-3.5" /> 删除全部
               </Button>
@@ -485,14 +491,20 @@ export default function LLMRecordsPage() {
               {deleteAll ? (
                 <>将清空全部 LLM 调用记录（含请求/响应），此操作不可撤销。</>
               ) : (
-                <>将永久删除 <span className="font-semibold tabular-nums">{deleteIds.length}</span> 条 LLM 调用记录（含请求/响应），此操作不可撤销。</>
+                <>
+                  将永久删除 <span className="font-semibold tabular-nums">{deleteIds.length}</span> 条 LLM
+                  调用记录（含请求/响应），此操作不可撤销。
+                </>
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(e) => { e.preventDefault(); confirmDelete(); }}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDelete();
+              }}
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

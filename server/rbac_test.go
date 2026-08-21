@@ -36,14 +36,14 @@ func TestCORSOriginPolicy(t *testing.T) {
 	}
 }
 
-func TestExtractTokenQueryOnlyForSSE(t *testing.T) {
+func TestExtractTokenRejectsQueryTokens(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/api/tasks?token=secret", nil)
 	if got := extractToken(r); got != "" {
 		t.Fatalf("query token accepted on non-SSE route: %q", got)
 	}
 	r = httptest.NewRequest(http.MethodGet, "/api/logs/stream?token=secret", nil)
-	if got := extractToken(r); got != "secret" {
-		t.Fatalf("SSE query token = %q, want secret", got)
+	if got := extractToken(r); got != "" {
+		t.Fatalf("query token accepted on SSE route: %q", got)
 	}
 }
 

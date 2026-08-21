@@ -1,22 +1,10 @@
 "use client";
 
 import * as React from "react";
+
 import { Loader2Icon, PlusIcon, ShieldCheckIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,9 +15,22 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
@@ -69,9 +70,7 @@ function EgressFormDialog({ onSaved }: { onSaved: () => void }) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>添加出口范围规则</DialogTitle>
-          <DialogDescription>
-            登记沙箱容器允许/拒绝访问的 CIDR 或域名（出口授权 scope）。
-          </DialogDescription>
+          <DialogDescription>登记沙箱容器允许/拒绝访问的 CIDR 或域名（出口授权 scope）。</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
           <div className="grid grid-cols-2 gap-2">
@@ -112,7 +111,12 @@ function EgressFormDialog({ onSaved }: { onSaved: () => void }) {
           </div>
           <div className="grid gap-2">
             <Label htmlFor="e-note">备注（可选）</Label>
-            <Input id="e-note" placeholder="例如：内网靶场网段" value={note} onChange={(e) => setNote(e.target.value)} />
+            <Input
+              id="e-note"
+              placeholder="例如：内网靶场网段"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
           </div>
         </div>
         <DialogFooter>
@@ -139,7 +143,8 @@ export default function SandboxEgressPage() {
   const toggleCheck = (id: string) => {
     setChecked((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -172,7 +177,11 @@ export default function SandboxEgressPage() {
 
   const load = React.useCallback(() => {
     setLoading(true);
-    api.sandboxEgress().then(setRules).catch(() => setRules([])).finally(() => setLoading(false));
+    api
+      .sandboxEgress()
+      .then(setRules)
+      .catch(() => setRules([]))
+      .finally(() => setLoading(false));
   }, []);
   React.useEffect(() => {
     load();
@@ -180,7 +189,14 @@ export default function SandboxEgressPage() {
 
   const toggle = async (r: SandboxEgress, enabled: boolean) => {
     try {
-      await api.saveSandboxEgress({ id: Number(r.id), kind: r.kind, value: r.value, action: r.action, note: r.note, enabled });
+      await api.saveSandboxEgress({
+        id: Number(r.id),
+        kind: r.kind,
+        value: r.value,
+        action: r.action,
+        note: r.note,
+        enabled,
+      });
       load();
     } catch (e) {
       toast.error(`更新失败：${(e as Error).message}`);
@@ -202,18 +218,28 @@ export default function SandboxEgressPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <ShieldCheckIcon className="size-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold tracking-tight">出口范围</h1>
+          <h1 className="font-semibold text-xl tracking-tight">出口范围</h1>
           <Badge variant="secondary">{rules.length}</Badge>
           {checked.size > 0 && (
             <>
-              <Button variant="destructive" size="sm" onClick={() => { setDeleteAll(false); setDeleteOpen(true); }}>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  setDeleteAll(false);
+                  setDeleteOpen(true);
+                }}
+              >
                 <Trash2Icon className="size-3.5" /> 删除已选 ({checked.size})
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 className="text-destructive hover:text-destructive"
-                onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+                onClick={() => {
+                  setDeleteAll(true);
+                  setDeleteOpen(true);
+                }}
               >
                 <Trash2Icon className="size-3.5" /> 删除全部
               </Button>
@@ -233,7 +259,7 @@ export default function SandboxEgressPage() {
               <Loader2Icon className="mx-auto size-5 animate-spin text-muted-foreground" />
             </div>
           ) : rules.length === 0 ? (
-            <div className="text-muted-foreground py-12 text-center text-sm">暂无出口规则，点击「添加规则」。</div>
+            <div className="py-12 text-center text-muted-foreground text-sm">暂无出口规则，点击「添加规则」。</div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-muted/50 text-muted-foreground text-xs">
@@ -276,7 +302,7 @@ export default function SandboxEgressPage() {
                         <Badge variant="destructive">拒绝</Badge>
                       )}
                     </td>
-                    <td className="text-muted-foreground px-3 py-2 text-xs">{r.note || "—"}</td>
+                    <td className="px-3 py-2 text-muted-foreground text-xs">{r.note || "—"}</td>
                     <td className="px-3 py-2">
                       <Switch size="sm" checked={r.enabled} onCheckedChange={(v) => toggle(r, v)} />
                     </td>
@@ -301,14 +327,20 @@ export default function SandboxEgressPage() {
               {deleteAll ? (
                 <>将清空全部出口范围规则，此操作不可撤销。</>
               ) : (
-                <>将永久删除 <span className="font-semibold tabular-nums">{checked.size}</span> 条出口范围规则，此操作不可撤销。</>
+                <>
+                  将永久删除 <span className="font-semibold tabular-nums">{checked.size}</span>{" "}
+                  条出口范围规则，此操作不可撤销。
+                </>
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(e) => { e.preventDefault(); confirmBatchDelete(); }}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmBatchDelete();
+              }}
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

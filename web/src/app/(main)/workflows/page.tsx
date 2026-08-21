@@ -1,7 +1,9 @@
 "use client";
 
 import * as React from "react";
+
 import Link from "next/link";
+
 import { ChevronDownIcon, GitBranchIcon, Loader2Icon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
@@ -32,7 +34,10 @@ export default function WorkflowsPage() {
   const [busy, setBusy] = React.useState<string | null>(null);
 
   const load = React.useCallback(() => {
-    api.workflows().then(setItems).catch(() => setItems([]));
+    api
+      .workflows()
+      .then(setItems)
+      .catch(() => setItems([]));
   }, []);
   React.useEffect(() => {
     load();
@@ -75,7 +80,7 @@ export default function WorkflowsPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <GitBranchIcon className="size-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold tracking-tight">工作流</h1>
+          <h1 className="font-semibold text-xl tracking-tight">工作流</h1>
           <Badge variant="secondary">{items.length}</Badge>
         </div>
         <Button size="sm" asChild>
@@ -105,14 +110,18 @@ export default function WorkflowsPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="truncate font-medium">#{w.id} {w.name}</span>
+                      <span className="truncate font-medium">
+                        #{w.id} {w.name}
+                      </span>
                       {w.enabled ? (
-                        <Badge variant="secondary" className="text-emerald-600">启用</Badge>
+                        <Badge variant="secondary" className="text-emerald-600">
+                          启用
+                        </Badge>
                       ) : (
                         <Badge variant="outline">停用</Badge>
                       )}
                     </div>
-                    {w.description && <p className="text-muted-foreground mt-0.5 truncate text-xs">{w.description}</p>}
+                    {w.description && <p className="mt-0.5 truncate text-muted-foreground text-xs">{w.description}</p>}
                   </div>
                   <Button size="icon" variant="outline" aria-label="删除工作流" onClick={() => remove(w)}>
                     <Trash2Icon className="text-destructive" />
@@ -141,16 +150,22 @@ export default function WorkflowsPage() {
                 {open && (
                   <div className="grid gap-1.5 border-t pt-2">
                     {!rs ? (
-                      <div className="text-muted-foreground py-2 text-center text-xs">加载中…</div>
+                      <div className="py-2 text-center text-muted-foreground text-xs">加载中…</div>
                     ) : rs.length === 0 ? (
-                      <div className="text-muted-foreground py-2 text-center text-xs">暂无运行记录</div>
+                      <div className="py-2 text-center text-muted-foreground text-xs">暂无运行记录</div>
                     ) : (
                       rs.map((r) => (
                         <div key={r.id} className="flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
-                          <Badge variant={r.status === "completed" ? "secondary" : r.status === "failed" ? "destructive" : "outline"}>
+                          <Badge
+                            variant={
+                              r.status === "completed" ? "secondary" : r.status === "failed" ? "destructive" : "outline"
+                            }
+                          >
                             {r.status}
                           </Badge>
-                          <span className="text-muted-foreground min-w-0 flex-1 truncate">#{r.id} {runSummary(r)}</span>
+                          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                            #{r.id} {runSummary(r)}
+                          </span>
                         </div>
                       ))
                     )}

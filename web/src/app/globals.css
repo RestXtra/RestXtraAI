@@ -159,14 +159,18 @@ These serve as the fallback; there is no separate default.css file. */
   background: #d9eee1;
   border-radius: 0.5rem;
 }
-.dark [data-sidebar="menu-button"][data-active="true"] { background: #273b32; }
+.dark [data-sidebar="menu-button"][data-active="true"] {
+  background: #273b32;
+}
 
 :root[data-theme-preset="default"] .conversation-active,
 :root:not([data-theme-preset]) .conversation-active {
   background: #d9eee1;
   border-radius: 0.5rem;
 }
-.dark .conversation-active { background: #273b32; }
+.dark .conversation-active {
+  background: #273b32;
+}
 
 .main-flex-panel {
   width: 0;
@@ -199,7 +203,10 @@ These serve as the fallback; there is no separate default.css file. */
 }
 
 /* Hide the Next.js development badge; it is not part of the product UI. */
-#next-logo, nextjs-portal { display: none !important; }
+#next-logo,
+nextjs-portal {
+  display: none !important;
+}
 
 .chat-surface {
   background: color-mix(in srgb, var(--background) 94%, var(--sidebar) 6%);

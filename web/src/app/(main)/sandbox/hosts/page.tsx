@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { BoxesIcon, Loader2Icon, PlusIcon, ServerIcon, Trash2Icon } from "lucide-react";
+
+import { Loader2Icon, PlusIcon, ServerIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -20,11 +21,35 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { SandboxHost } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 type PingState = { ok: boolean; version?: string; api_version?: string; os?: string; arch?: string; error?: string };
+
+function HostStatusBadge({ status }: { status?: PingState }) {
+  if (!status) return null;
+  if (status.ok) {
+    return (
+      <Badge variant="secondary" className="text-emerald-600">
+        在线
+      </Badge>
+    );
+  }
+  return <Badge variant="destructive">离线</Badge>;
+}
+
+function HostStatusText({ busy, status }: { busy: boolean; status?: PingState }) {
+  if (busy) return <Loader2Icon className="size-3.5 animate-spin" />;
+  if (!status) return <>未检测</>;
+  if (status.ok)
+    return (
+      <>
+        Docker {status.version} · {status.os}/{status.arch}
+      </>
+    );
+  return <span className="text-destructive">{status.error}</span>;
+}
 
 function HostFormDialog({ onSaved }: { onSaved: () => void }) {
   const [open, setOpen] = React.useState(false);
@@ -76,7 +101,9 @@ function HostFormDialog({ onSaved }: { onSaved: () => void }) {
               value={addr}
               onChange={(e) => setAddr(e.target.value)}
             />
-            <p className="text-muted-foreground text-xs">未启用 TLS 的远程 daemon 需在 dockerd 加 -H tcp://0.0.0.0:2375。</p>
+            <p className="text-muted-foreground text-xs">
+              未启用 TLS 的远程 daemon 需在 dockerd 加 -H tcp://0.0.0.0:2375。
+            </p>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="h-desc">描述（可选）</Label>
@@ -100,7 +127,10 @@ export default function SandboxHostsPage() {
   const [busy, setBusy] = React.useState<Record<string, boolean>>({});
 
   const load = React.useCallback(() => {
-    api.sandboxHosts().then(setHosts).catch(() => setHosts([]));
+    api
+      .sandboxHosts()
+      .then(setHosts)
+      .catch(() => setHosts([]));
   }, []);
   React.useEffect(() => {
     load();
@@ -108,7 +138,7 @@ export default function SandboxHostsPage() {
     return () => clearInterval(i);
   }, [load]);
 
-  const pingHost = async (h: SandboxHost) => {
+  const pingHost = React.useCallback(async (h: SandboxHost) => {
     setBusy((b) => ({ ...b, [h.id]: true }));
     try {
       const r = await api.pingSandboxHost(h.id);
@@ -118,12 +148,11 @@ export default function SandboxHostsPage() {
     } finally {
       setBusy((b) => ({ ...b, [h.id]: false }));
     }
-  };
+  }, []);
   // 进入页面自动 ping 一次
   React.useEffect(() => {
-    hosts.forEach((h) => void pingHost(h));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    for (const host of hosts) void pingHost(host);
+  }, [hosts, pingHost]);
 
   const remove = async (h: SandboxHost) => {
     try {
@@ -140,7 +169,7 @@ export default function SandboxHostsPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <ServerIcon className="size-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold tracking-tight">沙箱主机</h1>
+          <h1 className="font-semibold text-xl tracking-tight">沙箱主机</h1>
           <Badge variant="secondary">{hosts.length}</Badge>
         </div>
         <HostFormDialog onSaved={load} />
@@ -166,15 +195,9 @@ export default function SandboxHostsPage() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="truncate font-medium">{h.name}</span>
-                      {p?.ok ? (
-                        <Badge variant="secondary" className="text-emerald-600">
-                          在线
-                        </Badge>
-                      ) : p && !p.ok ? (
-                        <Badge variant="destructive">离线</Badge>
-                      ) : null}
+                      <HostStatusBadge status={p} />
                     </div>
-                    <code className="mt-1 block truncate font-mono text-xs text-muted-foreground">{h.addr}</code>
+                    <code className="mt-1 block truncate font-mono text-muted-foreground text-xs">{h.addr}</code>
                   </div>
                   <Button size="icon" variant="outline" aria-label="删除主机" onClick={() => remove(h)}>
                     <Trash2Icon className="text-destructive" />
@@ -183,15 +206,7 @@ export default function SandboxHostsPage() {
                 {h.description && <p className="text-muted-foreground text-xs">{h.description}</p>}
                 <div className="flex items-center justify-between gap-2 border-t pt-2">
                   <span className="text-muted-foreground text-xs">
-                    {busy[h.id] ? (
-                      <Loader2Icon className="size-3.5 animate-spin" />
-                    ) : p?.ok ? (
-                      `Docker ${p.version} · ${p.os}/${p.arch}`
-                    ) : p && !p.ok ? (
-                      <span className="text-destructive">{p.error}</span>
-                    ) : (
-                      "未检测"
-                    )}
+                    <HostStatusText busy={Boolean(busy[h.id])} status={p} />
                   </span>
                   <Button size="sm" variant="outline" disabled={busy[h.id]} onClick={() => pingHost(h)}>
                     {busy[h.id] ? <Loader2Icon className="animate-spin" /> : "测试连接"}

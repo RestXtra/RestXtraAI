@@ -2,47 +2,36 @@
 "use no memo";
 
 import * as React from "react";
+
 import {
   Background,
   BackgroundVariant,
   Controls,
-  type Edge as RFEdge,
   Handle,
   MarkerType,
   MiniMap,
-  type Node as RFNode,
   type NodeProps,
   Panel,
   Position,
   ReactFlow,
   ReactFlowProvider,
+  type Edge as RFEdge,
+  type Node as RFNode,
   useEdgesState,
   useNodesState,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import {
-  Bug,
-  Compass,
-  Flag,
-  FlaskConical,
-  Lightbulb,
-  type LucideIcon,
-  Target,
-} from "lucide-react";
 
-import { cn } from "@/lib/utils";
-import { Card, CardContent } from "@/components/ui/card";
+import { Bug, Compass, Flag, FlaskConical, Lightbulb, type LucideIcon, Target } from "lucide-react";
+
 import { StatusBadge } from "@/components/status-badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { toneClasses, type Tone } from "@/lib/status";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api } from "@/lib/api";
+import { type Tone, toneClasses } from "@/lib/status";
 import type { Edge, ExploreKind, TaskNode } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 const relLabel: Record<string, string> = {
   spawns: "派生",
@@ -179,10 +168,7 @@ function pushMap(m: Map<string, string[]>, k: string, v: string) {
 //   2) 最长路径分层：谁在链路上更靠后，列就越靠右；
 //   3) 重心排序：每层按相邻层邻居的平均位置重排，让有连线的节点对齐、减少交叉；
 //   4) 每层整体垂直居中。
-function computeLayout(
-  nodes: TaskNode[],
-  edges: Edge[],
-): Map<string, { x: number; y: number }> {
+function computeLayout(nodes: TaskNode[], edges: Edge[]): Map<string, { x: number; y: number }> {
   const order = nodes.map((n) => n.id);
   const idset = new Set(order);
   const valid = edges.filter((e) => idset.has(e.src) && idset.has(e.dst));
@@ -208,7 +194,8 @@ function computeLayout(
       }
       const v = nbrs[top.i++];
       const s = seen.get(v) ?? 0;
-      if (s === 1) back.add(key(top.u, v)); // 回边
+      if (s === 1)
+        back.add(key(top.u, v)); // 回边
       else if (s === 0) {
         seen.set(v, 1);
         stack.push({ u: v, i: 0 });
@@ -306,19 +293,14 @@ function ExploreNode({ data, selected }: NodeProps<ExploreRFNode>) {
         <Handle
           type="target"
           position={Position.Left}
-          className="!size-2 !border-2 !border-neutral-300 !bg-white opacity-0 transition-opacity group-hover:opacity-100 dark:!border-neutral-600 dark:!bg-neutral-800"
+          className="!size-2 !border-2 !border-neutral-300 !bg-white dark:!border-neutral-600 dark:!bg-neutral-800 opacity-0 transition-opacity group-hover:opacity-100"
         />
         {/* 头部：实心图标块 + 类型标题 + 状态点 / 优先级 */}
         <div className="flex items-center gap-2 px-3 pt-3 pb-1.5">
-          <span
-            className={cn(
-              "flex size-6 shrink-0 items-center justify-center rounded-lg shadow-sm",
-              meta.iconBg,
-            )}
-          >
+          <span className={cn("flex size-6 shrink-0 items-center justify-center rounded-lg shadow-sm", meta.iconBg)}>
             <Icon className="size-3.5 text-white" />
           </span>
-          <span className="grow truncate text-[13px] font-semibold text-neutral-700 dark:text-neutral-100">
+          <span className="grow truncate font-semibold text-[13px] text-neutral-700 dark:text-neutral-100">
             {meta.label}
           </span>
           {isLive && (
@@ -330,7 +312,7 @@ function ExploreNode({ data, selected }: NodeProps<ExploreRFNode>) {
           {showPriority && (
             <span
               className={cn(
-                "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
+                "shrink-0 rounded-md px-1.5 py-0.5 font-semibold text-[10px] tabular-nums",
                 toneClasses[prioTone(n.priority)],
               )}
             >
@@ -339,7 +321,7 @@ function ExploreNode({ data, selected }: NodeProps<ExploreRFNode>) {
           )}
         </div>
         {/* 摘要 */}
-        <div className="line-clamp-3 px-3 pb-2 text-[13px] leading-snug text-neutral-500 dark:text-neutral-400">
+        <div className="line-clamp-3 px-3 pb-2 text-[13px] text-neutral-500 leading-snug dark:text-neutral-400">
           {nodeSummary(n) || meta.label}
         </div>
         {/* 底部：状态徽章 + 来源/ID */}
@@ -352,18 +334,14 @@ function ExploreNode({ data, selected }: NodeProps<ExploreRFNode>) {
               className="px-1.5 py-0 text-[10px]"
             />
           ) : (
-            <span className="text-[10px] text-neutral-400 dark:text-neutral-500">
-              {meta.label}
-            </span>
+            <span className="text-[10px] text-neutral-400 dark:text-neutral-500">{meta.label}</span>
           )}
-          <span className="shrink-0 font-mono text-[10px] text-neutral-400 dark:text-neutral-500">
-            #{n.id}
-          </span>
+          <span className="shrink-0 font-mono text-[10px] text-neutral-400 dark:text-neutral-500">#{n.id}</span>
         </div>
         <Handle
           type="source"
           position={Position.Right}
-          className="!size-2 !border-2 !border-neutral-300 !bg-white opacity-0 transition-opacity group-hover:opacity-100 dark:!border-neutral-600 dark:!bg-neutral-800"
+          className="!size-2 !border-2 !border-neutral-300 !bg-white dark:!border-neutral-600 dark:!bg-neutral-800 opacity-0 transition-opacity group-hover:opacity-100"
         />
       </div>
     </div>
@@ -392,20 +370,14 @@ const nodeTypes = { explore: ExploreNode, attack: AttackNode };
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-start gap-3 py-1.5 text-sm">
-      <span className="text-muted-foreground w-14 shrink-0">{label}</span>
-      <span className="text-foreground min-w-0 flex-1 break-words">{children}</span>
+      <span className="w-14 shrink-0 text-muted-foreground">{label}</span>
+      <span className="min-w-0 flex-1 break-words text-foreground">{children}</span>
     </div>
   );
 }
 
 // 点击节点后弹出的抽屉：上半展示可读摘要，下半展示节点原始 JSON。
-function NodeDetailSheet({
-  node,
-  onOpenChange,
-}: {
-  node: TaskNode | null;
-  onOpenChange: (open: boolean) => void;
-}) {
+function NodeDetailSheet({ node, onOpenChange }: { node: TaskNode | null; onOpenChange: (open: boolean) => void }) {
   const [copied, setCopied] = React.useState(false);
   const meta = node ? (typeMeta[viewKind(node)] ?? typeMeta.intent) : null;
   const Icon = meta?.icon;
@@ -420,25 +392,19 @@ function NodeDetailSheet({
 
   return (
     <Sheet open={node !== null} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className="flex w-full flex-col gap-0 p-0 data-[side=right]:sm:max-w-md"
-      >
+      <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 data-[side=right]:sm:max-w-md">
         {node && meta && Icon && (
           <>
             <SheetHeader className="border-b p-4">
               <div className="flex items-center gap-2.5 pr-8">
                 <span
-                  className={cn(
-                    "flex size-8 shrink-0 items-center justify-center rounded-lg shadow-sm",
-                    meta.iconBg,
-                  )}
+                  className={cn("flex size-8 shrink-0 items-center justify-center rounded-lg shadow-sm", meta.iconBg)}
                 >
                   <Icon className="size-4 text-white" />
                 </span>
                 <div className="min-w-0">
                   <SheetTitle className="leading-tight">{meta.label}</SheetTitle>
-                  <span className="text-muted-foreground font-mono text-xs">{node.id}</span>
+                  <span className="font-mono text-muted-foreground text-xs">{node.id}</span>
                 </div>
               </div>
             </SheetHeader>
@@ -446,7 +412,7 @@ function NodeDetailSheet({
             <ScrollArea className="min-h-0 flex-1">
               <div className="flex w-full min-w-0 flex-col gap-4 p-4">
                 <section>
-                  <h4 className="text-muted-foreground mb-1 text-xs font-medium">属性</h4>
+                  <h4 className="mb-1 font-medium text-muted-foreground text-xs">属性</h4>
                   <DetailRow label="类型">{meta.label}</DetailRow>
                   <DetailRow label="状态">
                     {node.type === "goal" || node.type === "intent" ? (
@@ -471,16 +437,16 @@ function NodeDetailSheet({
 
                 <section className="border-t pt-3">
                   <div className="mb-1.5 flex items-center justify-between">
-                    <h4 className="text-muted-foreground text-xs font-medium">原始数据</h4>
+                    <h4 className="font-medium text-muted-foreground text-xs">原始数据</h4>
                     <button
                       type="button"
                       onClick={copy}
-                      className="text-muted-foreground hover:text-foreground text-xs transition-colors"
+                      className="text-muted-foreground text-xs transition-colors hover:text-foreground"
                     >
                       {copied ? "已复制" : "复制"}
                     </button>
                   </div>
-                  <pre className="bg-muted/50 text-foreground max-w-full overflow-hidden rounded-md border p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">
+                  <pre className="max-w-full overflow-hidden whitespace-pre-wrap break-all rounded-md border bg-muted/50 p-3 font-mono text-foreground text-xs leading-relaxed">
                     {raw}
                   </pre>
                 </section>
@@ -512,7 +478,9 @@ function GraphInner({ taskId }: { taskId: string }) {
         setAcMeta({ summary: c.summary, risk: c.risk_score });
         const x = 60;
         const y = 60;
-        const pos = new Map(c.nodes.map((n) => [n.id, { x: x + ((n.id - 1) % 3) * 240, y: y + Math.floor((n.id - 1) / 3) * 180 }]));
+        const pos = new Map(
+          c.nodes.map((n) => [n.id, { x: x + ((n.id - 1) % 3) * 240, y: y + Math.floor((n.id - 1) / 3) * 180 }]),
+        );
         setAcNodes(
           c.nodes.map((n) => ({
             id: String(n.id),
@@ -615,7 +583,7 @@ function GraphInner({ taskId }: { taskId: string }) {
 
   const toggle = (
     <Panel position="top-right">
-      <div className="bg-card/95 flex items-center gap-1 rounded-lg border p-1 text-xs shadow-sm backdrop-blur">
+      <div className="flex items-center gap-1 rounded-lg border bg-card/95 p-1 text-xs shadow-sm backdrop-blur">
         {(
           [
             { k: "explore", label: "探索图" },
@@ -658,10 +626,20 @@ function GraphInner({ taskId }: { taskId: string }) {
             size={1}
             className="text-neutral-400/50 dark:text-neutral-700/60"
           />
-          <Controls showInteractive={false} className="!rounded-lg !border !shadow-sm [&>button]:!border-border [&>button]:!bg-card [&>button:hover]:!bg-accent [&_svg]:!fill-foreground" />
-          <MiniMap pannable zoomable className="!bg-card !rounded-lg !border !shadow-sm" maskColor="rgb(148 163 184 / 0.18)" nodeStrokeWidth={0} nodeBorderRadius={4} />
+          <Controls
+            showInteractive={false}
+            className="!rounded-lg !border !shadow-sm [&>button]:!border-border [&>button]:!bg-card [&>button:hover]:!bg-accent [&_svg]:!fill-foreground"
+          />
+          <MiniMap
+            pannable
+            zoomable
+            className="!bg-card !rounded-lg !border !shadow-sm"
+            maskColor="rgb(148 163 184 / 0.18)"
+            nodeStrokeWidth={0}
+            nodeBorderRadius={4}
+          />
           <Panel position="top-left">
-            <div className="bg-card/95 flex max-w-xs flex-col gap-2 rounded-lg border p-3 text-xs shadow-sm backdrop-blur">
+            <div className="flex max-w-xs flex-col gap-2 rounded-lg border bg-card/95 p-3 text-xs shadow-sm backdrop-blur">
               {acLoading ? (
                 <span className="text-muted-foreground">正在生成攻击链…</span>
               ) : acMeta ? (
@@ -724,14 +702,14 @@ function GraphInner({ taskId }: { taskId: string }) {
             nodeBorderRadius={4}
           />
           <Panel position="top-left">
-            <div className="bg-card/95 flex flex-col gap-2.5 rounded-lg border p-3 text-xs shadow-sm backdrop-blur">
+            <div className="flex flex-col gap-2.5 rounded-lg border bg-card/95 p-3 text-xs shadow-sm backdrop-blur">
               {isEmpty && <span className="text-muted-foreground">暂无探索数据</span>}
               <div className="flex flex-wrap gap-x-3 gap-y-1.5">
                 {(["begin", "goal", "intent", "fact", "finding", "hint"] as ExploreKind[]).map((k) => {
                   const m = typeMeta[k];
                   const Icon = m.icon;
                   return (
-                    <span key={k} className="text-foreground inline-flex items-center gap-1.5">
+                    <span key={k} className="inline-flex items-center gap-1.5 text-foreground">
                       <span className={cn("flex size-4 items-center justify-center rounded", m.iconBg)}>
                         <Icon className="size-2.5 text-white" />
                       </span>
@@ -740,7 +718,7 @@ function GraphInner({ taskId }: { taskId: string }) {
                   );
                 })}
               </div>
-              <div className="border-border/60 text-muted-foreground flex flex-wrap gap-x-3 gap-y-1.5 border-t pt-2">
+              <div className="flex flex-wrap gap-x-3 gap-y-1.5 border-border/60 border-t pt-2 text-muted-foreground">
                 {Object.entries(relLabel).map(([k, v]) => (
                   <span key={k} className="inline-flex items-center gap-1.5">
                     <span className="h-0.5 w-4 rounded-full" style={{ backgroundColor: relColor[k] }} />

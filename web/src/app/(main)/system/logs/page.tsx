@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+
+import { Trash2Icon } from "lucide-react";
+import { toast } from "sonner";
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,22 +15,58 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { sseUrl } from "@/lib/api";
-import { api } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { api, sseUrl } from "@/lib/api";
 import { MOCK } from "@/lib/mock/enabled";
 import type { LogLine } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
-import { Trash2Icon } from "lucide-react";
 
 // Mock demo：无后端 SSE，塞几行示例日志。
 const MOCK_LOGS: LogLine[] = [
-  { seq: 1, ts: "2026-07-26T03:55:00Z", level: "info", tag: "engine", text: "RestXtra v0.1.0 backend listening on :8787 (workers=3)" },
-  { seq: 2, ts: "2026-07-26T03:55:01Z", level: "info", tag: "config", text: "LLM configured from DB: anthropic / claude-opus-4-8" },
-  { seq: 3, ts: "2026-07-26T03:56:10Z", level: "info", tag: "planner", text: "task t-acme-web: 第 3 轮规划，生成意图 i-4" },
-  { seq: 4, ts: "2026-07-26T03:57:00Z", level: "warn", tag: "guard", text: "block bash: 目标越界 out.evil.example 不在 scope 内" },
-  { seq: 5, ts: "2026-07-26T03:57:30Z", level: "info", tag: "work#1", text: "report_finding: Default Credentials (high) 已落库" },
-  { seq: 6, ts: "2026-07-26T03:58:20Z", level: "error", tag: "work#3", text: "intercept: mysqldump 命中破坏性规则，等待人工审批" },
+  {
+    seq: 1,
+    ts: "2026-07-26T03:55:00Z",
+    level: "info",
+    tag: "engine",
+    text: "RestXtra v0.1.0 backend listening on :8787 (workers=3)",
+  },
+  {
+    seq: 2,
+    ts: "2026-07-26T03:55:01Z",
+    level: "info",
+    tag: "config",
+    text: "LLM configured from DB: anthropic / claude-opus-4-8",
+  },
+  {
+    seq: 3,
+    ts: "2026-07-26T03:56:10Z",
+    level: "info",
+    tag: "planner",
+    text: "task t-acme-web: 第 3 轮规划，生成意图 i-4",
+  },
+  {
+    seq: 4,
+    ts: "2026-07-26T03:57:00Z",
+    level: "warn",
+    tag: "guard",
+    text: "block bash: 目标越界 out.evil.example 不在 scope 内",
+  },
+  {
+    seq: 5,
+    ts: "2026-07-26T03:57:30Z",
+    level: "info",
+    tag: "work#1",
+    text: "report_finding: Default Credentials (high) 已落库",
+  },
+  {
+    seq: 6,
+    ts: "2026-07-26T03:58:20Z",
+    level: "error",
+    tag: "work#3",
+    text: "intercept: mysqldump 命中破坏性规则，等待人工审批",
+  },
 ];
 
 const levelTone: Record<LogLine["level"], string> = {
@@ -45,7 +82,7 @@ const levelDot: Record<LogLine["level"], string> = {
 
 function fmtTime(ts: string) {
   const d = new Date(ts);
-  return isNaN(d.getTime()) ? "" : d.toLocaleTimeString("zh-CN", { hour12: false });
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString("zh-CN", { hour12: false });
 }
 
 export default function LogsPage() {
@@ -69,7 +106,8 @@ export default function LogsPage() {
   const toggleCheck = (dbId: number) => {
     setChecked((prev) => {
       const next = new Set(prev);
-      if (next.has(dbId)) next.delete(dbId); else next.add(dbId);
+      if (next.has(dbId)) next.delete(dbId);
+      else next.add(dbId);
       return next;
     });
   };
@@ -83,7 +121,7 @@ export default function LogsPage() {
       setChecked(new Set());
       setLines((prev) => prev.filter((l) => !(l.db_id && checked.has(l.db_id))));
     } catch (e) {
-      toast.error("删除失败：" + String((e as Error)?.message ?? e));
+      toast.error(`删除失败：${String((e as Error)?.message ?? e)}`);
     } finally {
       setDeleting(false);
     }
@@ -98,7 +136,7 @@ export default function LogsPage() {
       setLines([]);
       setDeleteAllOpen(false);
     } catch (e) {
-      toast.error("清空失败：" + String((e as Error)?.message ?? e));
+      toast.error(`清空失败：${String((e as Error)?.message ?? e)}`);
       setDeleteAllOpen(false);
     } finally {
       setDeletingAll(false);
@@ -121,7 +159,7 @@ export default function LogsPage() {
       setLines(MOCK_LOGS);
       return;
     }
-    const es = new EventSource(sseUrl("/api/logs/stream?since=0"));
+    const es = new EventSource(sseUrl("/api/logs/stream?since=0"), { withCredentials: true });
     es.onmessage = (e) => {
       if (pausedRef.current) return;
       try {
@@ -146,7 +184,7 @@ export default function LogsPage() {
       const params = minDbId > 0 ? `?before=${minDbId}&limit=200` : `?limit=200`;
       const res = await fetch(`/api/logs/history${params}`);
       if (!res.ok) return;
-      const data = await res.json() as { items: LogLine[]; has_more: boolean };
+      const data = (await res.json()) as { items: LogLine[]; has_more: boolean };
       if (data.items?.length) {
         // Assign synthetic seq numbers below current minimum to keep dedup working.
         setLines((prev) => {
@@ -184,7 +222,7 @@ export default function LogsPage() {
 
   React.useEffect(() => {
     if (stick.current && !paused) bottom.current?.scrollIntoView();
-  }, [filtered, paused]);
+  }, [paused]);
 
   const counts = React.useMemo(() => {
     let warn = 0,
@@ -199,7 +237,7 @@ export default function LogsPage() {
   return (
     <div className="flex flex-1 flex-col gap-3">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">系统日志</h1>
+        <h1 className="font-semibold text-xl tracking-tight">系统日志</h1>
         <p className="text-muted-foreground text-sm">后端实时日志流(planner / worker / 数据库 / 流量 …)</p>
       </div>
       <div className="flex flex-1 flex-col gap-3">
@@ -249,9 +287,8 @@ export default function LogsPage() {
               </Button>
             </>
           )}
-          <span className="ml-auto text-xs text-muted-foreground">
-            {counts.total} 行 ·{" "}
-            <span className="text-amber-600 dark:text-amber-400">{counts.warn} 警告</span> ·{" "}
+          <span className="ml-auto text-muted-foreground text-xs">
+            {counts.total} 行 · <span className="text-amber-600 dark:text-amber-400">{counts.warn} 警告</span> ·{" "}
             <span className="text-red-600 dark:text-red-400">{counts.error} 错误</span>
           </span>
         </div>
@@ -281,9 +318,7 @@ export default function LogsPage() {
           ) : (
             filtered.map((l) => {
               const body =
-                l.tag && l.text.startsWith("[" + l.tag + "]")
-                  ? l.text.slice(l.tag.length + 2).trimStart()
-                  : l.text;
+                l.tag && l.text.startsWith(`[${l.tag}]`) ? l.text.slice(l.tag.length + 2).trimStart() : l.text;
               return (
                 <div key={l.seq} className="flex items-start gap-2 px-1 py-0.5 hover:bg-muted/40">
                   {l.db_id ? (
@@ -297,7 +332,7 @@ export default function LogsPage() {
                     <span className="w-3.5 shrink-0" />
                   )}
                   <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", levelDot[l.level])} />
-                  <span className="shrink-0 tabular-nums text-muted-foreground">{fmtTime(l.ts)}</span>
+                  <span className="shrink-0 text-muted-foreground tabular-nums">{fmtTime(l.ts)}</span>
                   {l.tag && (
                     <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-foreground/70">{l.tag}</span>
                   )}
@@ -315,13 +350,17 @@ export default function LogsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>确认清空全部日志</AlertDialogTitle>
             <AlertDialogDescription>
-              将清空后端全部日志（约 <span className="tabular-nums">{counts.total}</span> 行，含数据库中的历史日志），此操作不可撤销。
+              将清空后端全部日志（约 <span className="tabular-nums">{counts.total}</span>{" "}
+              行，含数据库中的历史日志），此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deletingAll}>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(e) => { e.preventDefault(); confirmDeleteAll(); }}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDeleteAll();
+              }}
               disabled={deletingAll}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

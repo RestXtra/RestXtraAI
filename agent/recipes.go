@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	actool "github.com/Autumn-27/norma/tool"
 	"github.com/Autumn-27/norma/permission"
+	actool "github.com/Autumn-27/norma/tool"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,13 +22,13 @@ var recipesFS embed.FS
 
 // ToolRecipe 是一个 YAML 工具配方。
 type ToolRecipe struct {
-	Name             string         `yaml:"name"`
-	Command          string         `yaml:"command"`
-	Description      string         `yaml:"description"`
-	ShortDescription string         `yaml:"short_description"`
-	Enabled          *bool          `yaml:"enabled"` // 未声明默认启用；显式 false 关闭
-	Parameters       []RecipeParam  `yaml:"parameters"`
-	AdditionalArgs   []string       `yaml:"additional_args"`
+	Name             string        `yaml:"name"`
+	Command          string        `yaml:"command"`
+	Description      string        `yaml:"description"`
+	ShortDescription string        `yaml:"short_description"`
+	Enabled          *bool         `yaml:"enabled"` // 未声明默认启用；显式 false 关闭
+	Parameters       []RecipeParam `yaml:"parameters"`
+	AdditionalArgs   []string      `yaml:"additional_args"`
 }
 
 // RecipeParam 描述一个命令行参数。
@@ -161,7 +161,7 @@ func buildRecipeTool(r ToolRecipe) actool.CoreTool {
 				return actool.Errorf(err.Error()), nil
 			}
 			bashIn, _ := json.Marshal(map[string]any{"command": cmd})
-			return actool.NewBash().Call(ctx, bashIn, tc)
+			return HostBash().Call(ctx, bashIn, tc)
 		},
 	})
 }

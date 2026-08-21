@@ -554,6 +554,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/status", s.authStatus)
 	mux.HandleFunc("POST /api/auth/init", s.authInit)
 	mux.HandleFunc("POST /api/auth/login", s.authLogin)
+	mux.HandleFunc("POST /api/auth/logout", s.authLogout)
 	mux.HandleFunc("POST /api/auth/change-password", s.authChangePassword)
 
 	mux.HandleFunc("GET /api/health", s.health)
@@ -570,6 +571,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/tasks", s.createTask)
 	mux.HandleFunc("GET /api/tasks/{id}", s.getTask)
 	mux.HandleFunc("GET /api/tasks/{id}/attack-chain", s.taskAttackChain)
+	mux.HandleFunc("GET /api/tasks/{id}/coverage-graph", s.taskCoverageGraph)
 	mux.HandleFunc("POST /api/tasks/{id}/control", s.control)
 	mux.HandleFunc("POST /api/active", s.setActive)
 
@@ -593,6 +595,10 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/exploration/frontier", s.frontier)
 	mux.HandleFunc("GET /api/exploration/findings", s.findings)
+	mux.HandleFunc("GET /api/exploration/findings/stats", s.findingStats)
+	mux.HandleFunc("GET /api/exploration/findings/{id}", s.findingDetail)
+	mux.HandleFunc("PATCH /api/exploration/findings/{id}", s.patchFinding)
+	mux.HandleFunc("GET /api/exploration/findings/{id}/lineage", s.findingLineage)
 	mux.HandleFunc("GET /api/exploration/intents", s.intents)
 	mux.HandleFunc("GET /api/exploration/graph", s.explorationGraph)
 	mux.HandleFunc("GET /api/exploration/activity", s.activity)
@@ -1423,7 +1429,35 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 	taskParam := r.URL.Query().Get("task")
 	companyID := int64(atoiDefault(r.URL.Query().Get("company_id"), 0))
 	if taskParam == "" {
-		fs, _ := s.m.pg.ListFindings(500, companyID)
+		pageParam := r.URL.Query().Get("page")
+		limitParam := r.URL.Query().Get("limit")
+		if pageParam != "" || limitParam != "" {
+			filter := db.FindingFilter{
+				Severity: r.URL.Query().Get("severity"), VulnClass: r.URL.Query().Get("vulnclass"),
+				Status: r.URL.Query().Get("status"), TaskID: r.URL.Query().Get("task_id"),
+				CompanyID: companyID, Sort: r.URL.Query().Get("sort"),
+			}
+			page := atoiDefault(pageParam, 1)
+			limit := atoiDefault(limitParam, 20)
+			fs, total, err := s.m.pg.ListFindingsPage(filter, page, limit)
+			if err != nil {
+				log.Printf("[findings] list page: %v", err)
+				writeErr(w, http.StatusInternalServerError, "加载漏洞发现失败")
+				return
+			}
+			items := make([]FindingDTO, 0, len(fs))
+			for _, finding := range fs {
+				items = append(items, findingFromDB(finding))
+			}
+			writeJSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "limit": limit})
+			return
+		}
+		fs, err := s.m.pg.ListFindings(500, companyID)
+		if err != nil {
+			log.Printf("[findings] list global: %v", err)
+			writeErr(w, http.StatusInternalServerError, "加载漏洞发现失败")
+			return
+		}
 		out := make([]FindingDTO, 0, len(fs))
 		for _, f := range fs {
 			out = append(out, findingFromDB(f))
@@ -1436,8 +1470,148 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, []any{})
 		return
 	}
-	f, _ := t.Store.ListByKind(db.KindFinding, 200)
-	writeJSON(w, 200, findingDTOsForTask(t, f))
+	findings, _, err := s.m.pg.ListFindingsPage(db.FindingFilter{TaskID: taskParam, Sort: "severity"}, 1, 200)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "加载任务漏洞失败")
+		return
+	}
+	out := make([]FindingDTO, 0, len(findings))
+	for _, finding := range findings {
+		out = append(out, findingFromDB(finding))
+	}
+	writeJSON(w, 200, out)
+}
+
+// taskCoverageGraph returns the task-scoped asset graph used by the coverage
+// tab. It is deliberately a compact aggregate; detailed Finding evidence stays
+// behind the Finding detail page.
+func (s *Server) taskCoverageGraph(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeErr(w, http.StatusBadRequest, "无效的任务 ID")
+		return
+	}
+	if s.m.ResolveTask(strconv.FormatInt(id, 10)) == nil {
+		writeErr(w, http.StatusNotFound, "任务不存在")
+		return
+	}
+	graph, err := s.m.pg.Assets().CoverageGraph(id)
+	if err != nil {
+		log.Printf("[coverage] task %d: %v", id, err)
+		writeErr(w, http.StatusInternalServerError, "加载资产覆盖图失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, graph)
+}
+
+func (s *Server) findingDetail(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeErr(w, http.StatusBadRequest, "无效的漏洞 ID")
+		return
+	}
+	finding, err := s.m.pg.GetFinding(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "加载漏洞详情失败")
+		return
+	}
+	if finding == nil {
+		writeErr(w, http.StatusNotFound, "漏洞不存在")
+		return
+	}
+	writeJSON(w, 200, findingFromDB(finding))
+}
+
+func (s *Server) findingStats(w http.ResponseWriter, r *http.Request) {
+	companyID := int64(atoiDefault(r.URL.Query().Get("company_id"), 0))
+	stats, err := s.m.pg.FindingStats(companyID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "加载漏洞统计失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeErr(w, http.StatusBadRequest, "无效的漏洞 ID")
+		return
+	}
+	var body struct {
+		Status *string `json:"status"`
+		Report *string `json:"report"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	if body.Status == nil && body.Report == nil {
+		writeErr(w, http.StatusBadRequest, "没有可更新的字段")
+		return
+	}
+	if body.Status != nil {
+		if !db.ValidFindingStatus(*body.Status) {
+			writeErr(w, http.StatusBadRequest, "无效的处理状态")
+			return
+		}
+		if affected, err := s.m.pg.SetFindingStatus(id, *body.Status); err != nil {
+			writeErr(w, http.StatusInternalServerError, "更新处理状态失败")
+			return
+		} else if affected == 0 {
+			writeErr(w, http.StatusNotFound, "漏洞不存在")
+			return
+		}
+	}
+	if body.Report != nil {
+		if affected, err := s.m.pg.SetFindingReport(id, *body.Report); err != nil {
+			writeErr(w, http.StatusInternalServerError, "更新详细报告失败")
+			return
+		} else if affected == 0 {
+			writeErr(w, http.StatusNotFound, "漏洞不存在")
+			return
+		}
+	}
+	finding, err := s.m.pg.GetFinding(id)
+	if err != nil || finding == nil {
+		writeErr(w, http.StatusInternalServerError, "重新加载漏洞失败")
+		return
+	}
+	s.recordAudit(r, "finding", "update", "success", fmt.Sprintf("更新漏洞 #%d", id))
+	writeJSON(w, 200, findingFromDB(finding))
+}
+
+func (s *Server) findingLineage(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeErr(w, http.StatusBadRequest, "无效的漏洞 ID")
+		return
+	}
+	finding, err := s.m.pg.GetFinding(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "加载漏洞链路失败")
+		return
+	}
+	empty := map[string]any{"nodes": []any{}, "edges": []any{}}
+	if finding == nil {
+		writeErr(w, http.StatusNotFound, "漏洞不存在")
+		return
+	}
+	if finding.TaskID == nil || finding.NodeID == nil {
+		writeJSON(w, 200, empty)
+		return
+	}
+	task := s.m.ResolveTask(i64s(*finding.TaskID))
+	if task == nil {
+		writeJSON(w, 200, empty)
+		return
+	}
+	nodes, edges, err := task.Store.FindingLineage(*finding.NodeID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "加载漏洞链路失败")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"nodes": taskNodeDTOs(nodes), "edges": edgeDTOs(edges)})
 }
 
 func (s *Server) intents(w http.ResponseWriter, r *http.Request) {
@@ -2192,6 +2366,7 @@ func cors(next http.Handler) http.Handler {
 		origin := r.Header.Get("Origin")
 		if origin != "" && corsOriginAllowed(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Add("Vary", "Origin")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")

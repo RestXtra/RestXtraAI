@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
-import { auth } from "@/lib/auth";
 
 export default function SetupPage() {
   const router = useRouter();
@@ -19,7 +18,8 @@ export default function SetupPage() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    api.authStatus()
+    api
+      .authStatus()
       .then(({ initialized }) => {
         if (initialized) router.replace("/login");
       })
@@ -40,8 +40,7 @@ export default function SetupPage() {
     setLoading(true);
     setError("");
     try {
-      const { token } = await api.initPassword(password);
-      auth.setToken(token);
+      await api.initPassword(password);
       router.replace("/function/tasks");
     } catch (err) {
       setError(err instanceof Error ? err.message : "初始化失败");
@@ -61,13 +60,7 @@ export default function SetupPage() {
           <div className="absolute size-60 rounded-full border border-primary-foreground/15" />
           <div className="absolute size-40 rounded-full border border-primary-foreground/20" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/logo.png"
-            alt="RestXtra AI"
-            width={160}
-            height={160}
-            className="relative"
-          />
+          <img src="/logo.png" alt="RestXtra AI" width={160} height={160} className="relative" />
         </div>
       </div>
 
@@ -75,8 +68,10 @@ export default function SetupPage() {
       <div className="flex w-full items-center justify-center bg-background p-8 lg:w-2/3">
         <div className="w-full max-w-md space-y-10 py-24 lg:py-32">
           <div className="space-y-4 text-center">
-            <h2 className="text-2xl font-medium tracking-tight">初始化密码</h2>
-            <p className="mx-auto max-w-xl text-muted-foreground">首次使用 RestXtra AI，请为账户设置一个登录密码（至少 8 位）</p>
+            <h2 className="font-medium text-2xl tracking-tight">初始化密码</h2>
+            <p className="mx-auto max-w-xl text-muted-foreground">
+              首次使用 RestXtra AI，请为账户设置一个登录密码（至少 8 位）
+            </p>
           </div>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="space-y-1.5">
@@ -102,7 +97,7 @@ export default function SetupPage() {
                 autoComplete="new-password"
               />
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {error && <p className="text-destructive text-sm">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading || !password || !confirm}>
               {loading ? "保存中..." : "设置密码并登录"}
             </Button>

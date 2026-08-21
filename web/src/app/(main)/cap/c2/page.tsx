@@ -1,22 +1,10 @@
 "use client";
 
 import * as React from "react";
+
 import { PlusIcon, Trash2Icon, WebhookIcon } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,7 +15,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -73,7 +74,12 @@ function ListenerForm({ onSaved }: { onSaved: () => void }) {
         <div className="grid gap-3 py-2">
           <div className="grid gap-2">
             <Label htmlFor="c2-name">名称</Label>
-            <Input id="c2-name" placeholder="例如：内网HTTP-C2" value={name} onChange={(e) => setName(e.target.value)} />
+            <Input
+              id="c2-name"
+              placeholder="例如：内网HTTP-C2"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </div>
           <div className="grid grid-cols-3 gap-2">
             <div className="grid gap-2">
@@ -124,7 +130,8 @@ export default function C2Page() {
   const toggleListener = (id: string) => {
     setCheckedListeners((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -132,7 +139,8 @@ export default function C2Page() {
   const toggleSession = (id: string) => {
     setCheckedSessions((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -165,13 +173,16 @@ export default function C2Page() {
   };
 
   const load = React.useCallback(() => {
-    api.c2().then((r) => {
-      setListeners(r.listeners ?? []);
-      setSessions(r.sessions ?? []);
-    }).catch(() => {
-      setListeners([]);
-      setSessions([]);
-    });
+    api
+      .c2()
+      .then((r) => {
+        setListeners(r.listeners ?? []);
+        setSessions(r.sessions ?? []);
+      })
+      .catch(() => {
+        setListeners([]);
+        setSessions([]);
+      });
   }, []);
   React.useEffect(() => {
     load();
@@ -205,18 +216,28 @@ export default function C2Page() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <WebhookIcon className="size-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold tracking-tight">C2</h1>
+          <h1 className="font-semibold text-xl tracking-tight">C2</h1>
           <Badge variant="secondary">{sessions.length} 会话</Badge>
           {checkedListeners.size + checkedSessions.size > 0 && (
             <>
-              <Button variant="destructive" size="sm" onClick={() => { setDeleteAll(false); setDeleteOpen(true); }}>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  setDeleteAll(false);
+                  setDeleteOpen(true);
+                }}
+              >
                 <Trash2Icon className="size-3.5" /> 删除已选 ({checkedListeners.size + checkedSessions.size})
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 className="text-destructive hover:text-destructive"
-                onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+                onClick={() => {
+                  setDeleteAll(true);
+                  setDeleteOpen(true);
+                }}
               >
                 <Trash2Icon className="size-3.5" /> 删除全部
               </Button>
@@ -246,10 +267,20 @@ export default function C2Page() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-medium">{l.name}</span>
-                    <Badge variant="outline" className="uppercase">{l.protocol}</Badge>
-                    {l.enabled ? <Badge variant="secondary" className="text-emerald-600">运行</Badge> : <Badge variant="outline">停止</Badge>}
+                    <Badge variant="outline" className="uppercase">
+                      {l.protocol}
+                    </Badge>
+                    {l.enabled ? (
+                      <Badge variant="secondary" className="text-emerald-600">
+                        运行
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline">停止</Badge>
+                    )}
                   </div>
-                  <code className="text-muted-foreground mt-0.5 block font-mono text-xs">{l.host}:{l.port}</code>
+                  <code className="mt-0.5 block font-mono text-muted-foreground text-xs">
+                    {l.host}:{l.port}
+                  </code>
                 </div>
               </div>
               <Button size="icon" variant="outline" aria-label="删除监听器" onClick={() => removeListener(l)}>
@@ -261,12 +292,13 @@ export default function C2Page() {
       </div>
 
       <div>
-        <h2 className="text-muted-foreground mb-2 text-sm font-medium">Beacon 会话</h2>
+        <h2 className="mb-2 font-medium text-muted-foreground text-sm">Beacon 会话</h2>
         <Card className="overflow-hidden py-0">
           <CardContent className="p-0">
             {sessions.length === 0 ? (
-              <div className="text-muted-foreground py-12 text-center text-sm">
-                暂无会话。beacon 心跳：<code className="font-mono">POST /api/c2/ingest</code>{' {"session_id, host"} '}
+              <div className="py-12 text-center text-muted-foreground text-sm">
+                暂无会话。beacon 心跳：<code className="font-mono">POST /api/c2/ingest</code>
+                {' {"session_id, host"} '}
               </div>
             ) : (
               <table className="w-full text-sm">
@@ -308,17 +340,23 @@ export default function C2Page() {
                       <td className="px-3 py-2 font-mono text-xs">{s.host || "—"}</td>
                       <td className="px-3 py-2">
                         {s.status === "active" ? (
-                          <Badge variant="secondary" className="text-emerald-600">活跃</Badge>
+                          <Badge variant="secondary" className="text-emerald-600">
+                            活跃
+                          </Badge>
                         ) : (
                           <Badge variant="outline">{s.status}</Badge>
                         )}
                       </td>
-                      <td className="text-muted-foreground px-3 py-2 text-xs">{fmt(s.last_seen)}</td>
+                      <td className="px-3 py-2 text-muted-foreground text-xs">{fmt(s.last_seen)}</td>
                       <td className="px-3 py-2 text-right">
                         {s.status === "active" ? (
-                          <Button size="sm" variant="outline" onClick={() => setStatus(s, "lost")}>标记丢失</Button>
+                          <Button size="sm" variant="outline" onClick={() => setStatus(s, "lost")}>
+                            标记丢失
+                          </Button>
                         ) : (
-                          <Button size="sm" variant="outline" onClick={() => setStatus(s, "active")}>恢复</Button>
+                          <Button size="sm" variant="outline" onClick={() => setStatus(s, "active")}>
+                            恢复
+                          </Button>
                         )}
                       </td>
                     </tr>
@@ -338,15 +376,20 @@ export default function C2Page() {
               {deleteAll ? (
                 <>将清空全部 C2 监听器与会话，此操作不可撤销。</>
               ) : (
-                <>将删除 <span className="font-semibold tabular-nums">{checkedListeners.size}</span> 个监听器、
-                <span className="font-semibold tabular-nums"> {checkedSessions.size}</span> 个会话，此操作不可撤销。</>
+                <>
+                  将删除 <span className="font-semibold tabular-nums">{checkedListeners.size}</span> 个监听器、
+                  <span className="font-semibold tabular-nums"> {checkedSessions.size}</span> 个会话，此操作不可撤销。
+                </>
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(e) => { e.preventDefault(); confirmBatchDelete(); }}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmBatchDelete();
+              }}
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

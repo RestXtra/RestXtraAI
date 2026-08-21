@@ -30,17 +30,14 @@ export function SettingsSectionClient({ section }: { section: string }) {
   }, []);
 
   return (
-    <div
-      data-content-padding="false"
-      className="flex min-h-0 flex-1 flex-col bg-transparent"
-    >
+    <div data-content-padding="false" className="flex min-h-0 flex-1 flex-col bg-transparent">
       <div className="codex-shell-header flex items-center gap-2 border-b px-4 py-3 lg:px-6">
         <h1 className="font-semibold text-xl tracking-tight">设置</h1>
         {active && <span className="text-muted-foreground text-sm">{active.label}</span>}
       </div>
       <div className="flex min-h-0 flex-1">
         {/* 左侧分节栏（学 kanna SettingsPage registry） */}
-        <nav className="w-52 shrink-0 overflow-y-auto border-r border-sidebar-border/70 bg-transparent p-2 text-sidebar-foreground">
+        <nav className="w-52 shrink-0 overflow-y-auto border-sidebar-border/70 border-r bg-transparent p-2 text-sidebar-foreground">
           <div className="flex flex-col gap-0.5">
             {sections.map((s) => {
               const Icon = s.icon;
@@ -79,16 +76,22 @@ export function SettingsSectionClient({ section }: { section: string }) {
               onLoad={(event) => {
                 setLoading(false);
                 const root = document.documentElement;
-                event.currentTarget.contentWindow?.postMessage({
-                  type: "restxtra:pref",
-                  key: "theme_mode",
-                  value: root.getAttribute("data-theme-mode") ?? (root.classList.contains("dark") ? "dark" : "light"),
-                }, "*");
-                event.currentTarget.contentWindow?.postMessage({
-                  type: "restxtra:pref",
-                  key: "theme_preset",
-                  value: root.getAttribute("data-theme-preset") ?? "default",
-                }, "*");
+                event.currentTarget.contentWindow?.postMessage(
+                  {
+                    type: "restxtra:pref",
+                    key: "theme_mode",
+                    value: root.getAttribute("data-theme-mode") ?? (root.classList.contains("dark") ? "dark" : "light"),
+                  },
+                  "*",
+                );
+                event.currentTarget.contentWindow?.postMessage(
+                  {
+                    type: "restxtra:pref",
+                    key: "theme_preset",
+                    value: root.getAttribute("data-theme-preset") ?? "default",
+                  },
+                  "*",
+                );
               }}
               className="h-full w-full border-0 bg-transparent"
               title={active.label}

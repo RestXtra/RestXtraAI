@@ -15,6 +15,7 @@ web/.next/
 web/tsconfig.tsbuildinfo
 web/next-env.d.ts
 *.local
+/benchmarks/results/
 
 # development tools
 .playwright-mcp/

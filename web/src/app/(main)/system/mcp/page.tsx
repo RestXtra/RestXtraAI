@@ -1,27 +1,22 @@
 "use client";
 
 import * as React from "react";
-import { toast } from "sonner";
-import { PlusIcon, RefreshCwIcon, ServerIcon, Trash2Icon } from "lucide-react";
 
+import { PlusIcon, RefreshCwIcon, ServerIcon, Trash2Icon } from "lucide-react";
+import { toast } from "sonner";
+
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@/components/ui/sheet";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import type { MCPServer, MCPTool, Agent } from "@/lib/types";
+import type { Agent, MCPServer, MCPTool } from "@/lib/types";
 
 type Transport = "stdio" | "http";
 type FormState = {
@@ -56,7 +51,10 @@ export default function MCPPage() {
   const [refreshing, setRefreshing] = React.useState(false);
 
   const load = React.useCallback(() => {
-    api.agents().then(setAgents).catch(() => {});
+    api
+      .agents()
+      .then(setAgents)
+      .catch(() => {});
     api
       .mcpServers()
       .then((ss) => {
@@ -168,7 +166,7 @@ export default function MCPPage() {
       if (!editing) setOpen(false);
       load();
     } catch (e) {
-      toast.error("保存失败：" + (e as Error).message);
+      toast.error(`保存失败：${(e as Error).message}`);
     } finally {
       setSaving(false);
     }
@@ -183,7 +181,7 @@ export default function MCPPage() {
       toast.success(`发现 ${t.length} 个工具`);
       load();
     } catch (e) {
-      toast.error("刷新失败：" + (e as Error).message);
+      toast.error(`刷新失败：${(e as Error).message}`);
     } finally {
       setRefreshing(false);
     }
@@ -196,7 +194,7 @@ export default function MCPPage() {
       setOpen(false);
       load();
     } catch (e) {
-      toast.error("删除失败：" + (e as Error).message);
+      toast.error(`删除失败：${(e as Error).message}`);
     }
   }
 
@@ -205,7 +203,7 @@ export default function MCPPage() {
       await api.saveMcpServer({ ...s, enabled: !s.enabled });
       load();
     } catch (e) {
-      toast.error("操作失败：" + (e as Error).message);
+      toast.error(`操作失败：${(e as Error).message}`);
     }
   }
 
@@ -216,7 +214,7 @@ export default function MCPPage() {
       toast.success(`${on ? "取消" : "授予"}「${agentName}」可见`);
       load();
     } catch (e) {
-      toast.error("操作失败：" + (e as Error).message);
+      toast.error(`操作失败：${(e as Error).message}`);
     }
   }
 
@@ -295,9 +293,7 @@ export default function MCPPage() {
           <Textarea
             id="m-env"
             className="font-mono"
-            placeholder={
-              form.transport === "http" ? "Authorization=Bearer xxxx" : "API_KEY=xxxx\nFOO=bar"
-            }
+            placeholder={form.transport === "http" ? "Authorization=Bearer xxxx" : "API_KEY=xxxx\nFOO=bar"}
             value={form.env}
             onChange={(e) => setF({ env: e.target.value })}
           />
@@ -325,9 +321,7 @@ export default function MCPPage() {
               <div key={t.name} className="py-2.5">
                 <code className="font-mono text-sm">{t.name}</code>
                 {t.description && (
-                  <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
-                    {t.description}
-                  </p>
+                  <p className="mt-0.5 text-muted-foreground text-xs leading-relaxed">{t.description}</p>
                 )}
               </div>
             ))}
@@ -340,7 +334,7 @@ export default function MCPPage() {
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">MCP</h1>
+        <h1 className="font-semibold text-xl tracking-tight">MCP</h1>
         <p className="text-muted-foreground text-sm">外部 MCP 工具服务器 · 按 Agent 授权可见</p>
       </div>
 
@@ -348,7 +342,7 @@ export default function MCPPage() {
         <button
           type="button"
           onClick={openAdd}
-          className="text-foreground/70 border-foreground/70 hover:bg-muted/60 hover:shadow-sm flex min-h-[116px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed transition"
+          className="flex min-h-[116px] flex-col items-center justify-center gap-2 rounded-xl border border-foreground/70 border-dashed text-foreground/70 transition hover:bg-muted/60 hover:shadow-sm"
         >
           <PlusIcon className="size-6" />
           <span className="text-sm">添加 MCP</span>
@@ -358,27 +352,18 @@ export default function MCPPage() {
           <Card
             key={s.id}
             onClick={() => openEdit(s)}
-            className="hover:border-primary/60 cursor-pointer gap-3 transition hover:shadow-sm"
+            className="cursor-pointer gap-3 transition hover:border-primary/60 hover:shadow-sm"
           >
             <CardHeader>
               <div className="flex items-center gap-2">
-                <ServerIcon className="text-muted-foreground size-4 shrink-0" />
+                <ServerIcon className="size-4 shrink-0 text-muted-foreground" />
                 <CardTitle className="truncate text-base">{s.name}</CardTitle>
                 <Badge variant="outline" className="uppercase">
                   {s.transport}
                 </Badge>
                 <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                  <Switch
-                    checked={s.enabled}
-                    onCheckedChange={() => toggleEnabled(s)}
-                    aria-label="启用"
-                  />
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    aria-label="删除"
-                    onClick={() => removeServer(s)}
-                  >
+                  <Switch checked={s.enabled} onCheckedChange={() => toggleEnabled(s)} aria-label="启用" />
+                  <Button size="icon" variant="outline" aria-label="删除" onClick={() => removeServer(s)}>
                     <Trash2Icon className="text-destructive" />
                   </Button>
                 </div>
@@ -408,15 +393,10 @@ export default function MCPPage() {
       </div>
 
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent
-          side="right"
-          className="w-full data-[side=right]:sm:max-w-lg"
-        >
+        <SheetContent side="right" className="w-full data-[side=right]:sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>{editing ? editing.name : "添加 MCP 服务器"}</SheetTitle>
-            <SheetDescription>
-              stdio（本地起进程）或 http（远程 Streamable HTTP）
-            </SheetDescription>
+            <SheetDescription>stdio（本地起进程）或 http（远程 Streamable HTTP）</SheetDescription>
           </SheetHeader>
 
           {editing ? (
@@ -427,9 +407,7 @@ export default function MCPPage() {
             >
               <TabsList>
                 <TabsTrigger value="config">配置</TabsTrigger>
-                <TabsTrigger value="tools">
-                  工具列表{tools.length ? `（${tools.length}）` : ""}
-                </TabsTrigger>
+                <TabsTrigger value="tools">工具列表{tools.length ? `（${tools.length}）` : ""}</TabsTrigger>
               </TabsList>
               <TabsContent value="config" className="min-h-0 flex-1 overflow-y-auto">
                 {renderForm()}

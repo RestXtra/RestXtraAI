@@ -1,36 +1,18 @@
 "use client";
 
 import * as React from "react";
+
 import {
-  RadioTowerIcon,
-  SearchIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  XIcon,
   Loader2Icon,
+  RadioTowerIcon,
+  SearchIcon,
   Trash2Icon,
+  XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,10 +23,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
-import type { TrafficExchange, TrafficResp, TrafficDetail } from "@/lib/types";
+import type { TrafficDetail, TrafficExchange, TrafficResp } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 function fmtTime(ts: string) {
   return new Date(ts).toLocaleString("zh-CN", {
@@ -60,7 +48,7 @@ function fmtBytes(n: number) {
   if (n <= 0) return "0 B";
   const units = ["B", "KB", "MB"];
   const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1);
-  const v = n / Math.pow(1024, i);
+  const v = n / 1024 ** i;
   return `${i === 0 ? v : v.toFixed(1)} ${units[i]}`;
 }
 
@@ -101,7 +89,8 @@ export default function TrafficPage() {
   const toggleCheck = (id: string) => {
     setChecked((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -125,7 +114,7 @@ export default function TrafficPage() {
       setDeleteOpen(false);
       loadTraffic();
     } catch (e) {
-      toast.error("删除失败：" + String((e as Error)?.message ?? e));
+      toast.error(`删除失败：${String((e as Error)?.message ?? e)}`);
       setDeleteOpen(false);
     } finally {
       setDeleting(false);
@@ -145,7 +134,7 @@ export default function TrafficPage() {
   // Any filter/size change resets to the first page.
   React.useEffect(() => {
     setPage(0);
-  }, [hostQ, queryQ, method, size]);
+  }, []);
 
   // Load the current page. Auto-refresh only on page 0 (newest) so paging back
   // through history isn't yanked out from under the user.
@@ -208,15 +197,13 @@ export default function TrafficPage() {
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">流量</h1>
-          <p className="text-muted-foreground text-sm">
-            全局录制代理 · 所有 HTTP 往来
-          </p>
+          <h1 className="font-semibold text-xl tracking-tight">流量</h1>
+          <p className="text-muted-foreground text-sm">全局录制代理 · 所有 HTTP 往来</p>
         </div>
         <div className="flex items-center gap-4 text-sm">
           <span
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium",
+              "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-medium text-xs",
               traffic?.enabled
                 ? "border-emerald-500/20 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
                 : "border-transparent bg-muted text-muted-foreground",
@@ -225,12 +212,8 @@ export default function TrafficPage() {
             <RadioTowerIcon className="size-3.5" />
             {traffic?.enabled ? "录制中" : "已停用"}
           </span>
-          {traffic?.proxy && (
-            <span className="font-mono text-xs text-muted-foreground">
-              {traffic.proxy}
-            </span>
-          )}
-          <span className="text-xs text-muted-foreground">
+          {traffic?.proxy && <span className="font-mono text-muted-foreground text-xs">{traffic.proxy}</span>}
+          <span className="text-muted-foreground text-xs">
             共 <span className="tabular-nums">{traffic?.count ?? 0}</span> 条
           </span>
           {checked.size > 0 && (
@@ -238,7 +221,11 @@ export default function TrafficPage() {
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={() => { setDeleteAll(false); setDeleteIds(Array.from(checked)); setDeleteOpen(true); }}
+                onClick={() => {
+                  setDeleteAll(false);
+                  setDeleteIds(Array.from(checked));
+                  setDeleteOpen(true);
+                }}
               >
                 <Trash2Icon className="size-3.5" /> 删除已选 ({checked.size})
               </Button>
@@ -246,7 +233,10 @@ export default function TrafficPage() {
                 variant="outline"
                 size="sm"
                 className="text-destructive hover:text-destructive"
-                onClick={() => { setDeleteAll(true); setDeleteOpen(true); }}
+                onClick={() => {
+                  setDeleteAll(true);
+                  setDeleteOpen(true);
+                }}
               >
                 <Trash2Icon className="size-3.5" /> 删除全部
               </Button>
@@ -258,12 +248,7 @@ export default function TrafficPage() {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative w-48">
-          <Input
-            placeholder="host…"
-            value={host}
-            onChange={(e) => setHost(e.target.value)}
-            className="h-8"
-          />
+          <Input placeholder="host…" value={host} onChange={(e) => setHost(e.target.value)} className="h-8" />
         </div>
         <div className="relative max-w-sm flex-1">
           <SearchIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -300,7 +285,7 @@ export default function TrafficPage() {
           </SelectContent>
         </Select>
 
-        <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="ml-auto flex items-center gap-2 text-muted-foreground text-xs">
           <span className="tabular-nums">
             {rangeStart}–{rangeEnd} / {total}
           </span>
@@ -355,10 +340,7 @@ export default function TrafficPage() {
                 {exchanges.map((e) => (
                   <TableRow
                     key={e.id}
-                    className={cn(
-                      "cursor-pointer",
-                      selected?.id === e.id && "bg-accent hover:bg-accent",
-                    )}
+                    className={cn("cursor-pointer", selected?.id === e.id && "bg-accent hover:bg-accent")}
                     onClick={() => setSelected(e)}
                   >
                     <TableCell className="w-8 pr-0" onClick={(ev) => ev.stopPropagation()}>
@@ -368,9 +350,7 @@ export default function TrafficPage() {
                         aria-label="选择"
                       />
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground tabular-nums">
-                      {fmtTime(e.ts)}
-                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs tabular-nums">{fmtTime(e.ts)}</TableCell>
                     <TableCell className="font-mono text-xs">{e.host}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="font-mono text-xs">
@@ -378,34 +358,20 @@ export default function TrafficPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="max-w-0">
-                      <span className="block truncate font-mono text-xs">
-                        {e.url}
-                      </span>
+                      <span className="block truncate font-mono text-xs">{e.url}</span>
                     </TableCell>
                     <TableCell>
-                      <span
-                        className={cn(
-                          "font-mono text-xs font-semibold tabular-nums",
-                          statusTone(e.status),
-                        )}
-                      >
+                      <span className={cn("font-mono font-semibold text-xs tabular-nums", statusTone(e.status))}>
                         {e.status}
                       </span>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {e.content_type}
-                    </TableCell>
-                    <TableCell className="text-right text-xs tabular-nums">
-                      {fmtBytes(e.resp_len)}
-                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs">{e.content_type}</TableCell>
+                    <TableCell className="text-right text-xs tabular-nums">{fmtBytes(e.resp_len)}</TableCell>
                   </TableRow>
                 ))}
                 {exchanges.length === 0 && (
                   <TableRow>
-                    <TableCell
-                      colSpan={8}
-                      className="py-12 text-center text-sm text-muted-foreground"
-                    >
+                    <TableCell colSpan={8} className="py-12 text-center text-muted-foreground text-sm">
                       {traffic === null ? "加载中…" : "没有匹配的流量。"}
                     </TableCell>
                   </TableRow>
@@ -426,20 +392,10 @@ export default function TrafficPage() {
                 {selected.host}
                 {selected.url}
               </span>
-              <span
-                className={cn(
-                  "ml-auto font-mono text-xs font-semibold tabular-nums",
-                  statusTone(selected.status),
-                )}
-              >
+              <span className={cn("ml-auto font-mono font-semibold text-xs tabular-nums", statusTone(selected.status))}>
                 {selected.status}
               </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7 shrink-0"
-                onClick={() => setSelected(null)}
-              >
+              <Button variant="ghost" size="icon" className="size-7 shrink-0" onClick={() => setSelected(null)}>
                 <XIcon />
               </Button>
             </div>
@@ -451,19 +407,15 @@ export default function TrafficPage() {
                 ] as const
               ).map(([label, body]) => (
                 <div key={label} className="flex min-h-0 min-w-0 flex-col">
-                  <div className="border-b px-3 py-1 text-[11px] font-medium text-muted-foreground">
-                    {label}
-                  </div>
+                  <div className="border-b px-3 py-1 font-medium text-[11px] text-muted-foreground">{label}</div>
                   <div className="min-h-0 flex-1 overflow-auto">
                     {detailLoading ? (
-                      <div className="flex items-center gap-2 p-3 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-2 p-3 text-muted-foreground text-xs">
                         <Loader2Icon className="size-3.5 animate-spin" />
                         加载报文…
                       </div>
                     ) : (
-                      <pre className="p-3 font-mono text-xs break-all whitespace-pre-wrap">
-                        {body || "（空）"}
-                      </pre>
+                      <pre className="whitespace-pre-wrap break-all p-3 font-mono text-xs">{body || "（空）"}</pre>
                     )}
                   </div>
                 </div>
@@ -479,16 +431,25 @@ export default function TrafficPage() {
             <AlertDialogTitle>确认删除</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteAll ? (
-                <>将清空 <span className="font-semibold tabular-nums">{traffic?.count ?? 0}</span> 条全部流量记录（含对应报文），此操作不可撤销。</>
+                <>
+                  将清空 <span className="font-semibold tabular-nums">{traffic?.count ?? 0}</span>{" "}
+                  条全部流量记录（含对应报文），此操作不可撤销。
+                </>
               ) : (
-                <>将永久删除 <span className="font-semibold tabular-nums">{deleteIds.length}</span> 条流量记录（含对应报文），此操作不可撤销。</>
+                <>
+                  将永久删除 <span className="font-semibold tabular-nums">{deleteIds.length}</span>{" "}
+                  条流量记录（含对应报文），此操作不可撤销。
+                </>
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(e) => { e.preventDefault(); confirmDelete(); }}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDelete();
+              }}
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

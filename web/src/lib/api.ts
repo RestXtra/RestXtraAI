@@ -3,8 +3,8 @@
 // a few fields the backend serializes differently (e.g. created_at as a unix int)
 // are passed through and formatted at the call site.
 
+import { del, get, patch, post, put, request } from "@/lib/api-client";
 import { MOCK } from "@/lib/mock/enabled";
-import { mockHandle } from "@/lib/mock/handler";
 import type {
   Activity,
   Agent,
@@ -23,10 +23,13 @@ import type {
   CompanyStat,
   Conversation,
   ConvTokenSummary,
+  CoverageGraphData,
   DailyTokenBucket,
   DockerImage,
   Edge,
   Finding,
+  FindingStatus,
+  FindingsPage,
   InterceptApprovalRow,
   InterceptPending,
   InterceptRule,
@@ -75,53 +78,12 @@ import type {
   WorkspaceEntry,
 } from "@/lib/types";
 
-function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("restxtra_token");
-}
-
-async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  if (MOCK) return mockHandle<T>(init?.method ?? "GET", path, init?.body ?? null);
-  const token = getToken();
-  const r = await fetch(`/api${path}`, {
-    ...init,
-    headers: {
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers as Record<string, string> | undefined),
-    },
-  });
-  if (r.status === 401) {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("restxtra_token");
-      document.cookie = "restxtra_token=; path=/; max-age=0";
-      window.location.href = "/login";
-    }
-    throw new Error("未授权");
-  }
-  if (!r.ok) {
-    // 尝试提取后端错误 body（writeErr 返回 {"error": "..."}），避免只看到状态码。
-    let detail = "";
-    try {
-      const j = (await r.json()) as { error?: string } | null;
-      if (j?.error) detail = `: ${j.error}`;
-    } catch {
-      /* ignore non-json error body */
-    }
-    throw new Error(`${init?.method ?? "GET"} ${path}: ${r.status}${detail}`);
-  }
-  if (r.status === 204) return undefined as T;
-  return r.json();
-}
-
 // sseUrl builds a URL for Server-Sent Events streams. SSE must NOT go through the
 // Next.js dev `/api` rewrite: that proxy buffers the streamed response, so event
 // frames never reach the browser (the EventSource opens but receives 0 messages).
 // We therefore connect straight to the Go backend, whose CORS is open. Override
 // with NEXT_PUBLIC_SSE_BASE; set it to "" to force same-origin (e.g. behind a
 // production reverse proxy that flushes SSE correctly).
-// Token is appended as ?token= because SSE bypasses the Next.js proxy and the
-// browser does not send cookies cross-port.
 // mockReport returns a canned Markdown report for the demo.
 function mockReport(_task?: string): string {
   return `# RestXtra 渗透测试报告 — Acme Corp
@@ -149,19 +111,8 @@ export function sseUrl(path: string): string {
   const base =
     process.env.NEXT_PUBLIC_SSE_BASE ??
     (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8787` : "");
-  const token = getToken();
-  const sep = path.includes("?") ? "&" : "?";
-  return token ? `${base}${path}${sep}token=${encodeURIComponent(token)}` : `${base}${path}`;
+  return `${base}${path}`;
 }
-
-const get = <T>(p: string) => http<T>(p);
-const post = <T>(p: string, body?: unknown) =>
-  http<T>(p, { method: "POST", body: body ? JSON.stringify(body) : undefined });
-const put = <T>(p: string, body?: unknown) =>
-  http<T>(p, { method: "PUT", body: body ? JSON.stringify(body) : undefined });
-const patch = <T>(p: string, body?: unknown) =>
-  http<T>(p, { method: "PATCH", body: body ? JSON.stringify(body) : undefined });
-const del = <T>(p: string) => http<T>(p, { method: "DELETE" });
 
 // Go serializes nil slices as JSON null — coerce to [].
 const arr = <T>(x: T[] | null | undefined): T[] => x ?? [];
@@ -172,6 +123,7 @@ export const api = {
   authStatus: () => get<{ initialized: boolean }>("/auth/status"),
   login: (username: string, password: string) => post<{ token: string }>("/auth/login", { username, password }),
   initPassword: (password: string) => post<{ token: string }>("/auth/init", { password }),
+  logout: () => post<{ ok: boolean }>("/auth/logout", {}),
   changePassword: (oldPassword: string, newPassword: string) =>
     post<{ ok: boolean }>("/auth/change-password", { old_password: oldPassword, new_password: newPassword }),
 
@@ -237,10 +189,11 @@ export const api = {
   assetCounts: (companyId?: number) =>
     get<Record<string, number>>(`/assets/counts${companyId ? `?company_id=${companyId}` : ""}`),
   deleteAssets: (ids: number[]) =>
-    http<{ deleted: number }>("/assets", { method: "DELETE", body: JSON.stringify({ ids }) }),
+    request<{ deleted: number }>("/assets", { method: "DELETE", body: JSON.stringify({ ids }) }),
   // legacy — kept for task-specific views; hits the same endpoint with task_id filter
   taskAssets: (taskId: string, type = "") =>
     get<{ count: number; assets: Asset[] }>(`/assets?task_id=${taskId}&type=${type}`).then((r) => r?.assets ?? []),
+  taskCoverageGraph: (taskId: string) => get<CoverageGraphData>(`/tasks/${encodeURIComponent(taskId)}/coverage-graph`),
 
   // ---- companies (企业 + 资产范围；归属唯一来源) ----
   companies: () => get<Company[]>("/companies").then(arr),
@@ -280,7 +233,7 @@ export const api = {
       reset: true,
     }),
   deleteCompany: (id: number, deleteAssets = false) =>
-    http<{ deleted: number; assets_deleted: number }>(`/companies/${id}`, {
+    request<{ deleted: number; assets_deleted: number }>(`/companies/${id}`, {
       method: "DELETE",
       body: JSON.stringify({ delete_assets: deleteAssets }),
     }),
@@ -294,6 +247,40 @@ export const api = {
     const qs = q.toString();
     return get<Finding[]>(`/exploration/findings${qs ? `?${qs}` : ""}`).then(arr);
   },
+  findingsPage: (query: {
+    page: number;
+    pageSize: number;
+    severity?: string;
+    status?: string;
+    vulnclass?: string;
+    taskId?: string;
+    companyId?: number;
+    sort?: "severity" | "time";
+  }) => {
+    const q = new URLSearchParams({ page: String(query.page), limit: String(query.pageSize) });
+    if (query.severity && query.severity !== "all") q.set("severity", query.severity);
+    if (query.status && query.status !== "all") q.set("status", query.status);
+    if (query.vulnclass && query.vulnclass !== "all") q.set("vulnclass", query.vulnclass);
+    if (query.taskId && query.taskId !== "all") q.set("task_id", query.taskId);
+    if (query.companyId && query.companyId > 0) q.set("company_id", String(query.companyId));
+    if (query.sort) q.set("sort", query.sort);
+    return get<FindingsPage>(`/exploration/findings?${q.toString()}`);
+  },
+  finding: (id: string) => get<Finding>(`/exploration/findings/${encodeURIComponent(id)}`),
+  findingStats: (companyId?: number) =>
+    get<{
+      total: number;
+      pending: number;
+      high: number;
+      medium: number;
+      low: number;
+      tasks: number;
+      vulnclasses: string[];
+    }>(`/exploration/findings/stats${companyId && companyId > 0 ? `?company_id=${companyId}` : ""}`),
+  updateFinding: (id: string, update: { status?: FindingStatus; report?: string }) =>
+    patch<Finding>(`/exploration/findings/${encodeURIComponent(id)}`, update),
+  findingLineage: (id: string) =>
+    get<{ nodes: TaskNode[]; edges: Edge[] }>(`/exploration/findings/${encodeURIComponent(id)}/lineage`),
   dashboardCompanies: () => get<{ companies: CompanyStat[] }>("/dashboard/companies").then((r) => arr(r.companies)),
   intents: (task?: string) => get<TaskNode[]>(`/exploration/intents${tq(task)}`).then(arr),
   tokenStats: (task?: string) =>
@@ -336,7 +323,7 @@ export const api = {
     ),
   trafficExchange: (id: string) => get<TrafficDetail>(`/traffic/exchange?id=${encodeURIComponent(id)}`),
   deleteTraffic: (ids: string[]) =>
-    http<{ deleted: number; removed?: number }>("/traffic", { method: "DELETE", body: JSON.stringify({ ids }) }),
+    request<{ deleted: number; removed?: number }>("/traffic", { method: "DELETE", body: JSON.stringify({ ids }) }),
   clearTraffic: () => post<{ removed: number; deleted?: number }>("/traffic/clear", {}),
 
   // ---- app settings (runtime toggles) ----
@@ -351,9 +338,8 @@ export const api = {
   }) => post<{ ok: boolean; error?: string; count?: number; backend?: string }>(`/settings/web-search/test`, patch),
   report: async (task?: string) => {
     if (MOCK) return mockReport(task);
-    const token = getToken();
     const r = await fetch(`/api/report${tq(task)}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: "include",
     });
     if (!r.ok) throw new Error(`report: ${r.status}`);
     return r.text();
@@ -435,7 +421,12 @@ export const api = {
   // ---- conversations (chat page) ----
   conversations: () => get<{ conversations: Conversation[] }>("/conversations").then((r) => arr(r.conversations)),
   createConversation: (agent_key: string, title = "", llm_profile_id?: number | null, company_id?: number | null) =>
-    post<Conversation>("/conversations", { agent_key, title, llm_profile_id: llm_profile_id ?? null, company_id: company_id ?? null }),
+    post<Conversation>("/conversations", {
+      agent_key,
+      title,
+      llm_profile_id: llm_profile_id ?? null,
+      company_id: company_id ?? null,
+    }),
   renameConversation: (id: number, title: string) => patch<{ ok: boolean }>(`/conversations/${id}`, { title }),
   updateConversationProfile: (id: number, llm_profile_id: number | null) =>
     patch<{ ok: boolean }>(`/conversations/${id}/profile`, { llm_profile_id }),
@@ -562,11 +553,10 @@ export const api = {
     if (MOCK) return { name: file.name.replace(/\.zip$/i, ""), files: 1 };
     const fd = new FormData();
     fd.append("file", file);
-    const token = getToken();
     const r = await fetch(`/api/skills/upload${overwrite ? "?overwrite=true" : ""}`, {
       method: "POST",
       body: fd,
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: "include",
     });
     const body = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(body?.error || `上传失败(${r.status})`);
@@ -618,21 +608,19 @@ export const api = {
   // ---- intercept tool-config (全局工具拦截范围) ----
   interceptGetToolConfig: async (): Promise<{ enabled_tools: string[] }> => {
     if (MOCK) return { enabled_tools: ["bash"] };
-    const token = getToken();
     const r = await fetch("/api/intercept/tool-config", {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: "include",
     });
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   },
   interceptSetToolConfig: async (enabledTools: string[]): Promise<void> => {
     if (MOCK) return;
-    const token = getToken();
     const r = await fetch("/api/intercept/tool-config", {
       method: "PUT",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ enabled_tools: enabledTools }),
     });
@@ -650,7 +638,7 @@ export const api = {
     patch<{ ok: boolean }>(`/platform/users/${id}`, body),
   deletePlatformUser: (id: number) => del<{ deleted: number }>(`/platform/users/${id}`),
   deletePlatformUsers: (ids: number[], all = false) =>
-    http<{ deleted: number[]; skipped?: string[] }>("/platform/users", {
+    request<{ deleted: number[]; skipped?: string[] }>("/platform/users", {
       method: "DELETE",
       body: JSON.stringify({ ids, all }),
     }),
@@ -664,7 +652,7 @@ export const api = {
     patch<{ ok: boolean }>(`/platform/roles/${id}`, body),
   deletePlatformRole: (id: number) => del<{ deleted: number }>(`/platform/roles/${id}`),
   deletePlatformRoles: (ids: number[], all = false) =>
-    http<{ deleted: number[]; skipped?: string[] }>("/platform/roles", {
+    request<{ deleted: number[]; skipped?: string[] }>("/platform/roles", {
       method: "DELETE",
       body: JSON.stringify({ ids, all }),
     }),
@@ -686,7 +674,7 @@ export const api = {
   auditStats: () => get<{ total: number }>("/audit/stats"),
   auditGC: (days = 90) => post<{ removed: number }>(`/audit/gc?days=${days}`, {}),
   deleteLogs: (ids: number[]) =>
-    http<{ deleted: number }>("/logs", { method: "DELETE", body: JSON.stringify({ ids }) }),
+    request<{ deleted: number }>("/logs", { method: "DELETE", body: JSON.stringify({ ids }) }),
   clearLogs: () => post<{ removed: number }>("/logs/clear", {}),
 
   // ---- 攻击模式库 / playbook ----
@@ -755,7 +743,7 @@ export const api = {
     return get<{ commands: CommandRecord[]; total: number }>(`/commands?${sp.toString()}`);
   },
   deleteCommands: (ids: number[], all = false) =>
-    http<{ deleted: number }>("/commands", { method: "DELETE", body: JSON.stringify({ ids, all }) }),
+    request<{ deleted: number }>("/commands", { method: "DELETE", body: JSON.stringify({ ids, all }) }),
 
   // ---- LLM 录制 ----
   llmRecords: (params?: { model?: string; session?: string; page?: number; size?: number }) => {
@@ -768,7 +756,7 @@ export const api = {
   },
   llmRecordDetail: (id: number) => get<LLMRecordDetail>(`/llm/records/${id}`),
   deleteLLMRecords: (ids: number[], all = false) =>
-    http<{ deleted: number; removed?: number }>("/llm/records", {
+    request<{ deleted: number; removed?: number }>("/llm/records", {
       method: "DELETE",
       body: JSON.stringify({ ids, all }),
     }),
@@ -810,7 +798,7 @@ export const api = {
   sandboxContainerAction: (hostId: string, cid: string, action: "start" | "stop" | "restart" | "kill" | "remove") =>
     post<{ ok: boolean }>(`/sandbox/hosts/${hostId}/containers/${encodeURIComponent(cid)}/${action}`, {}),
   removeSandboxContainers: (hostId: string, ids: string[], all = false) =>
-    http<{ deleted: string[]; failed?: string[] }>(`/sandbox/hosts/${hostId}/containers`, {
+    request<{ deleted: string[]; failed?: string[] }>(`/sandbox/hosts/${hostId}/containers`, {
       method: "DELETE",
       body: JSON.stringify({ ids, all }),
     }),
@@ -825,7 +813,7 @@ export const api = {
   }) => post<{ id: number }>("/sandbox/egress", e),
   deleteSandboxEgress: (id: string) => del<{ deleted: number }>(`/sandbox/egress/${id}`),
   deleteSandboxEgresses: (ids: string[], all = false) =>
-    http<{ deleted: number }>("/sandbox/egress", {
+    request<{ deleted: number }>("/sandbox/egress", {
       method: "DELETE",
       body: JSON.stringify({ ids: ids.map(Number), all }),
     }),
@@ -871,7 +859,10 @@ export const api = {
   saveWebshell: (w: Partial<WebshellConn>) => post<{ id: number }>("/webshell", w),
   deleteWebshell: (id: string) => del<{ deleted: number }>(`/webshell/${id}`),
   deleteWebshells: (ids: string[], all = false) =>
-    http<{ deleted: number }>("/webshell", { method: "DELETE", body: JSON.stringify({ ids: ids.map(Number), all }) }),
+    request<{ deleted: number }>("/webshell", {
+      method: "DELETE",
+      body: JSON.stringify({ ids: ids.map(Number), all }),
+    }),
   webshellTest: (w: Partial<WebshellConn>) =>
     post<{ ok: boolean; status?: number; snippet?: string; error?: string }>("/webshell/test", w),
 
@@ -880,12 +871,12 @@ export const api = {
   saveC2Listener: (l: Partial<C2Listener>) => post<{ id: number }>("/c2/listeners", l),
   deleteC2Listener: (id: string) => del<{ deleted: number }>(`/c2/listeners/${id}`),
   deleteC2Listeners: (ids: string[], all = false) =>
-    http<{ deleted: number }>("/c2/listeners", {
+    request<{ deleted: number }>("/c2/listeners", {
       method: "DELETE",
       body: JSON.stringify({ ids: ids.map(Number), all }),
     }),
   deleteC2Sessions: (ids: string[], all = false) =>
-    http<{ deleted: number }>("/c2/sessions", {
+    request<{ deleted: number }>("/c2/sessions", {
       method: "DELETE",
       body: JSON.stringify({ ids: ids.map(Number), all }),
     }),
@@ -916,7 +907,7 @@ export const api = {
   ) => post<{ id: number }>("/proxies", p),
   deleteProxy: (id: string) => del<{ deleted: number }>(`/proxies/${id}`),
   deleteProxies: (ids: string[], all = false) =>
-    http<{ deleted: number }>("/proxies", { method: "DELETE", body: JSON.stringify({ ids: ids.map(Number), all }) }),
+    request<{ deleted: number }>("/proxies", { method: "DELETE", body: JSON.stringify({ ids: ids.map(Number), all }) }),
   proxyImport: (p: { text?: string; url?: string }) =>
     post<{
       imported: number;

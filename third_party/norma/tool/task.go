@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -70,9 +71,9 @@ type Task struct {
 	OutputPath  string
 
 	// internal, guarded by Manager.mu
-	backgrounded bool          // surfaced as a background task: notify on exit
-	notified     bool          // completion already enqueued into pending
-	oversize     bool          // terminated by the size watchdog
+	backgrounded bool // surfaced as a background task: notify on exit
+	notified     bool // completion already enqueued into pending
+	oversize     bool // terminated by the size watchdog
 	cmd          *exec.Cmd
 	done         chan struct{} // closed by watch when the process exits
 }
@@ -88,15 +89,15 @@ func (t *Task) info() TaskInfo {
 
 // TaskInfo is an immutable snapshot of a task for safe reads outside the lock.
 type TaskInfo struct {
-	ID          string
-	Kind        TaskKind
-	Command     string
-	Description string
-	Status      TaskStatus
-	ExitCode    int
-	StartTime   time.Time
-	EndTime     time.Time
-	OutputPath  string
+	ID           string
+	Kind         TaskKind
+	Command      string
+	Description  string
+	Status       TaskStatus
+	ExitCode     int
+	StartTime    time.Time
+	EndTime      time.Time
+	OutputPath   string
 	Backgrounded bool
 }
 
@@ -133,15 +134,27 @@ type SpawnSpec struct {
 	Env []string
 }
 
-// withEnv returns the current process environment extended with extra
-// "KEY=VALUE" entries, or nil when extra is empty (child inherits unchanged).
+var childSecretEnvName = regexp.MustCompile(`(?i)(^|_)(API_KEY|TOKEN|SECRET|PASSWORD|PASS|PRIVATE_KEY|CREDENTIALS?|DSN)$`)
+
+// withEnv returns the filtered process environment extended with extra
+// "KEY=VALUE" entries. Secret-bearing host variables are not inherited unless
+// the deployment explicitly opts in.
 // os/exec dedups by key — case-insensitive on Windows, keeping the LAST
 // occurrence — so the appended entries override inherited ones on every OS.
 func withEnv(extra []string) []string {
-	if len(extra) == 0 {
-		return nil
+	all := append(append([]string{}, os.Environ()...), extra...)
+	if os.Getenv("RESTXTRA_ALLOW_TOOL_SECRET_ENV") == "true" {
+		return all
 	}
-	return append(os.Environ(), extra...)
+	out := make([]string, 0, len(all))
+	for _, kv := range all {
+		i := strings.IndexByte(kv, '=')
+		if i <= 0 || childSecretEnvName.MatchString(kv[:i]) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // Manager owns the background tasks of one Session.

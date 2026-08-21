@@ -12,6 +12,10 @@
 #   docker build -t restxtra:local .
 FROM python:3.12-slim-bookworm
 ARG TARGETARCH
+ARG APP_UID=10001
+ARG APP_GID=10001
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    HOME=/tmp/restxtra
 # 常用工具：ripgrep / curl / vim，加一批 recon 常备件（按需增删）。
 # Node 从 NodeSource 装 20.x：bookworm 自带的 apt nodejs 是 18，Playwright 要求 >=20。
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -31,10 +35,15 @@ RUN npm install -g @playwright/mcp@latest @playwright/cli@latest playwright@late
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # 预编译好的对应架构二进制（dist/amd64/restxtra 或 dist/arm64/restxtra）
-COPY dist/${TARGETARCH}/restxtra /app/restxtra
-RUN chmod +x /app/restxtra
+COPY --chown=${APP_UID}:${APP_GID} dist/${TARGETARCH}/restxtra /app/restxtra
+RUN groupadd --gid "${APP_GID}" restxtra \
+    && useradd --uid "${APP_UID}" --gid "${APP_GID}" --no-create-home --shell /usr/sbin/nologin restxtra \
+    && mkdir -p /app/data /tmp/restxtra \
+    && chown -R "${APP_UID}:${APP_GID}" /app /tmp/restxtra /ms-playwright \
+    && chmod 0555 /app/restxtra
 # data/（SQLite + jwt.key）持久化点
 VOLUME ["/app/data"]
 EXPOSE 8787 8788
+USER restxtra
 ENTRYPOINT ["/app/restxtra"]
 CMD ["-addr", ":8787", "-proxy", ":8788"]

@@ -20,6 +20,7 @@ import (
 
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
+	runtimeagent "github.com/RestXtra/RestXtraAI/agent"
 	"github.com/RestXtra/RestXtraAI/db"
 )
 
@@ -349,7 +350,7 @@ func (s *Server) runCommandTool(ctx context.Context, execRaw json.RawMessage, pa
 		ctx, cancel = context.WithTimeout(ctx, timeoutOr(spec.TimeoutMs, 120000))
 		defer cancel()
 	}
-	return actool.NewBash().Call(ctx, bashIn, tc)
+	return runtimeagent.HostBash().Call(ctx, bashIn, tc)
 }
 
 // ---------- script(仅 Python):临时文件 + stdin JSON + env ----------
@@ -403,8 +404,8 @@ func execPython(ctx context.Context, interp, key, code string, params map[string
 	defer cancel()
 	c := exec.CommandContext(runCtx, interp, tmp)
 	c.Dir = workDir
-	c.Env = append(os.Environ(), sessionEnv...) // 会话代理 env
-	for k, v := range params {                  // 标量参数镜像成 TOOL_<NAME>
+	c.Env = runtimeagent.ToolEnvironment(sessionEnv)
+	for k, v := range params { // 标量参数镜像成 TOOL_<NAME>
 		if sv, ok := scalarStr(v); ok {
 			c.Env = append(c.Env, "TOOL_"+strings.ToUpper(k)+"="+sv)
 		}

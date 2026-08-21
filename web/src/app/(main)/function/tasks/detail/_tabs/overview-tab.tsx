@@ -1,25 +1,14 @@
 "use client";
 
 import * as React from "react";
-import {
-  ActivityIcon,
-  AlertTriangleIcon,
-  BugIcon,
-  ClockIcon,
-  ShieldCheckIcon,
-  TargetIcon,
-} from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+
+import { ActivityIcon, AlertTriangleIcon, BugIcon, ClockIcon, ShieldCheckIcon, TargetIcon } from "lucide-react";
+
 import { StatusBadge } from "@/components/status-badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import { api } from "@/lib/api";
-import type { Task, Stats, TaskNode, Finding } from "@/lib/types";
+import type { Finding, Stats, Task, TaskNode } from "@/lib/types";
 
 function StatCard({
   label,
@@ -40,9 +29,7 @@ function StatCard({
         </CardDescription>
         <CardTitle className="text-2xl tabular-nums">{value}</CardTitle>
       </CardHeader>
-      {sub && (
-        <CardContent className="text-xs text-muted-foreground">{sub}</CardContent>
-      )}
+      {sub && <CardContent className="text-muted-foreground text-xs">{sub}</CardContent>}
     </Card>
   );
 }
@@ -58,13 +45,12 @@ export function OverviewTab({ taskId }: { taskId: string }) {
 
     const load = async () => {
       try {
-        const [tasksResp, statsResp, intentsResp, findingsResp] =
-          await Promise.all([
-            api.tasks(),
-            api.stats(taskId),
-            api.intents(taskId),
-            api.findings(taskId),
-          ]);
+        const [tasksResp, statsResp, intentsResp, findingsResp] = await Promise.all([
+          api.tasks(),
+          api.stats(taskId),
+          api.intents(taskId),
+          api.findings(taskId),
+        ]);
         if (cancelled) return;
         setTask(tasksResp.tasks.find((t) => t.id === taskId) ?? null);
         setStats(statsResp);
@@ -87,9 +73,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
   const open = intents.filter((i) => i.state === "open");
   const blocked = intents.filter((i) => i.state === "blocked");
   const taskFindings = findings.filter((f) => f.task_id === taskId);
-  const goalsPct = task?.goals_total
-    ? Math.round(((task.goals_met ?? 0) / task.goals_total) * 100)
-    : 0;
+  const goalsPct = task?.goals_total ? Math.round(((task.goals_met ?? 0) / task.goals_total) * 100) : 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -102,7 +86,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div>
-            <div className="text-xs text-muted-foreground">引擎态</div>
+            <div className="text-muted-foreground text-xs">引擎态</div>
             <StatusBadge
               domain="engine"
               value={stats?.engine_mode ?? task?.engine_mode ?? "idle"}
@@ -111,29 +95,25 @@ export function OverviewTab({ taskId }: { taskId: string }) {
             />
           </div>
           <div>
-            <div className="text-xs text-muted-foreground">运行中 Worker</div>
-            <div className="mt-1 text-lg font-semibold tabular-nums">
-              {running.length}
-            </div>
+            <div className="text-muted-foreground text-xs">运行中 Worker</div>
+            <div className="mt-1 font-semibold text-lg tabular-nums">{running.length}</div>
           </div>
           <div>
-            <div className="text-xs text-muted-foreground">最近活动</div>
+            <div className="text-muted-foreground text-xs">最近活动</div>
             <div className="mt-1 inline-flex items-center gap-1 text-sm">
               <ClockIcon className="size-3.5" />
-              {task?.last_activity
-                ? new Date(task.last_activity).toLocaleTimeString("zh-CN")
-                : "—"}
+              {task?.last_activity ? new Date(task.last_activity).toLocaleTimeString("zh-CN") : "—"}
             </div>
           </div>
           <div>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-muted-foreground text-xs">
               目标 {task?.goals_met ?? 0}/{task?.goals_total ?? 0}
             </div>
             <Progress value={goalsPct} className="mt-2" />
           </div>
           {task?.completed_unix && task.completed_unix > 0 ? (
             <div>
-              <div className="text-xs text-muted-foreground">完成时间</div>
+              <div className="text-muted-foreground text-xs">完成时间</div>
               <div className="mt-1 inline-flex items-center gap-1 text-sm">
                 <ClockIcon className="size-3.5" />
                 {new Date(task.completed_unix * 1000).toLocaleString("zh-CN")}
@@ -158,9 +138,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                 <span className="min-w-0 flex-1 truncate">{i.payload}</span>
               </div>
             ))}
-            {running.length === 0 && (
-              <p className="text-sm text-muted-foreground">暂无进行中意图</p>
-            )}
+            {running.length === 0 && <p className="text-muted-foreground text-sm">暂无进行中意图</p>}
           </CardContent>
         </Card>
 
@@ -172,28 +150,20 @@ export function OverviewTab({ taskId }: { taskId: string }) {
           </CardHeader>
           <CardContent className="grid grid-cols-2 gap-3 text-sm">
             <div>
-              <div className="text-2xl font-semibold tabular-nums text-red-600">
-                {taskFindings.length}
-              </div>
-              <div className="text-xs text-muted-foreground">确认漏洞</div>
+              <div className="font-semibold text-2xl text-red-600 tabular-nums">{taskFindings.length}</div>
+              <div className="text-muted-foreground text-xs">确认漏洞</div>
             </div>
             <div>
-              <div className="text-2xl font-semibold tabular-nums text-blue-600">
-                {running.length}
-              </div>
-              <div className="text-xs text-muted-foreground">执行中</div>
+              <div className="font-semibold text-2xl text-blue-600 tabular-nums">{running.length}</div>
+              <div className="text-muted-foreground text-xs">执行中</div>
             </div>
             <div>
-              <div className="text-2xl font-semibold tabular-nums">
-                {open.length}
-              </div>
-              <div className="text-xs text-muted-foreground">frontier 待领</div>
+              <div className="font-semibold text-2xl tabular-nums">{open.length}</div>
+              <div className="text-muted-foreground text-xs">frontier 待领</div>
             </div>
             <div>
-              <div className="text-2xl font-semibold tabular-nums text-red-600">
-                {blocked.length}
-              </div>
-              <div className="text-xs text-muted-foreground">被拦意图</div>
+              <div className="font-semibold text-2xl text-red-600 tabular-nums">{blocked.length}</div>
+              <div className="text-muted-foreground text-xs">被拦意图</div>
             </div>
           </CardContent>
         </Card>
@@ -211,33 +181,16 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                 <span className="min-w-0 flex-1 truncate">{f.summary}</span>
               </div>
             ))}
-            {taskFindings.length === 0 && (
-              <p className="text-sm text-muted-foreground">暂无发现</p>
-            )}
+            {taskFindings.length === 0 && <p className="text-muted-foreground text-sm">暂无发现</p>}
           </CardContent>
         </Card>
       </div>
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
-        <StatCard
-          label="待领意图"
-          value={open.length}
-          icon={ShieldCheckIcon}
-          sub="frontier 开放"
-        />
-        <StatCard
-          label="确认发现"
-          value={taskFindings.length}
-          icon={BugIcon}
-          sub="本任务"
-        />
-        <StatCard
-          label="意图总数"
-          value={intents.length}
-          icon={AlertTriangleIcon}
-          sub="本任务全部意图"
-        />
+        <StatCard label="待领意图" value={open.length} icon={ShieldCheckIcon} sub="frontier 开放" />
+        <StatCard label="确认发现" value={taskFindings.length} icon={BugIcon} sub="本任务" />
+        <StatCard label="意图总数" value={intents.length} icon={AlertTriangleIcon} sub="本任务全部意图" />
       </div>
     </div>
   );
