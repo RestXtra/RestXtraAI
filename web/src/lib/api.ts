@@ -65,6 +65,7 @@ import type {
   Stats,
   Task,
   TaskNode,
+  TaskRoundCosts,
   TaskWorkflow,
   TokenTotal,
   TokenUsage,
@@ -194,6 +195,7 @@ export const api = {
   taskAssets: (taskId: string, type = "") =>
     get<{ count: number; assets: Asset[] }>(`/assets?task_id=${taskId}&type=${type}`).then((r) => r?.assets ?? []),
   taskCoverageGraph: (taskId: string) => get<CoverageGraphData>(`/tasks/${encodeURIComponent(taskId)}/coverage-graph`),
+  taskRoundCosts: (taskId: string) => get<TaskRoundCosts>(`/tasks/${encodeURIComponent(taskId)}/costs`),
 
   // ---- companies (企业 + 资产范围；归属唯一来源) ----
   companies: () => get<Company[]>("/companies").then(arr),

@@ -64,6 +64,21 @@ type TokenUsage struct {
 	CacheWriteTokens int    `json:"cache_write_tokens"`
 }
 
+// AgentRoundCost is the auditable, token-based execution cost of one agent in
+// an exploration. Monetary values are intentionally absent: profiles do not
+// yet carry a versioned pricing schedule, so exposing currency would be false
+// precision. A round is one terminal kind='result' activity.
+type AgentRoundCost struct {
+	Worker           string `json:"worker"`
+	Rounds           int    `json:"rounds"`
+	ToolCalls        int    `json:"tool_calls"`
+	ToolErrors       int    `json:"tool_errors"`
+	InputTokens      int    `json:"input_tokens"`
+	OutputTokens     int    `json:"output_tokens"`
+	CacheReadTokens  int    `json:"cache_read_tokens"`
+	CacheWriteTokens int    `json:"cache_write_tokens"`
+}
+
 // DailyTokenBucket is one day's global token aggregate across all tasks.
 type DailyTokenBucket struct {
 	Day             string `json:"day"` // "YYYY-MM-DD"
@@ -670,6 +685,39 @@ func (s *ExplorationStore) TokenStatsByWorker() ([]TokenUsage, error) {
 			return nil, err
 		}
 		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// RoundCostsByWorker returns one token-cost row per active worker in a single
+// aggregate query. It deliberately uses terminal result rows for token data:
+// interim usage events are cumulative and would double-count a model turn.
+func (s *ExplorationStore) RoundCostsByWorker() ([]AgentRoundCost, error) {
+	rows, err := s.db.Query(`SELECT COALESCE(worker,''),
+		COUNT(*) FILTER (WHERE kind='result'),
+		COUNT(*) FILTER (WHERE kind='tool_use'),
+		COUNT(*) FILTER (WHERE kind='tool_result' AND is_error),
+		COALESCE(SUM(input_tokens) FILTER (WHERE kind='result'),0),
+		COALESCE(SUM(output_tokens) FILTER (WHERE kind='result'),0),
+		COALESCE(SUM(cache_read_tokens) FILTER (WHERE kind='result'),0),
+		COALESCE(SUM(cache_write_tokens) FILTER (WHERE kind='result'),0)
+	FROM activity
+	WHERE exploration_id=$1
+	GROUP BY worker
+	HAVING COUNT(*) FILTER (WHERE kind IN ('result','tool_use','tool_result')) > 0
+	ORDER BY worker`, s.expID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AgentRoundCost{}
+	for rows.Next() {
+		var c AgentRoundCost
+		if err := rows.Scan(&c.Worker, &c.Rounds, &c.ToolCalls, &c.ToolErrors,
+			&c.InputTokens, &c.OutputTokens, &c.CacheReadTokens, &c.CacheWriteTokens); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
 	}
 	return out, rows.Err()
 }

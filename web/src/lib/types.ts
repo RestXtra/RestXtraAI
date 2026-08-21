@@ -339,6 +339,25 @@ export interface TokenTotal {
   cache_write_tokens: number;
 }
 
+// Task agent cost is measured in tokens. Currency is intentionally unavailable
+// until the selected LLM profile has an auditable pricing schedule.
+export interface AgentRoundCost {
+  worker: string;
+  rounds: number;
+  tool_calls: number;
+  tool_errors: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+}
+
+export interface TaskRoundCosts {
+  unit: "tokens";
+  workers: AgentRoundCost[];
+  total: AgentRoundCost;
+}
+
 export interface Session {
   id: string;
   role: SessionRole;

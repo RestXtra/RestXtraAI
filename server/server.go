@@ -572,6 +572,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/tasks/{id}", s.getTask)
 	mux.HandleFunc("GET /api/tasks/{id}/attack-chain", s.taskAttackChain)
 	mux.HandleFunc("GET /api/tasks/{id}/coverage-graph", s.taskCoverageGraph)
+	mux.HandleFunc("GET /api/tasks/{id}/costs", s.taskRoundCosts)
 	mux.HandleFunc("POST /api/tasks/{id}/control", s.control)
 	mux.HandleFunc("POST /api/active", s.setActive)
 
@@ -1502,6 +1503,34 @@ func (s *Server) taskCoverageGraph(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, graph)
+}
+
+// taskRoundCosts returns task-scoped, token-based agent costs. Currency is not
+// reported until profiles have a versioned pricing configuration.
+func (s *Server) taskRoundCosts(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	t, ok := s.m.Task(id)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "任务不存在")
+		return
+	}
+	workers, err := t.Store.RoundCostsByWorker()
+	if err != nil {
+		log.Printf("[costs] task %s: %v", id, err)
+		writeErr(w, http.StatusInternalServerError, "加载任务回合成本失败")
+		return
+	}
+	total := db.AgentRoundCost{}
+	for _, row := range workers {
+		total.Rounds += row.Rounds
+		total.ToolCalls += row.ToolCalls
+		total.ToolErrors += row.ToolErrors
+		total.InputTokens += row.InputTokens
+		total.OutputTokens += row.OutputTokens
+		total.CacheReadTokens += row.CacheReadTokens
+		total.CacheWriteTokens += row.CacheWriteTokens
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"unit": "tokens", "workers": workers, "total": total})
 }
 
 func (s *Server) findingDetail(w http.ResponseWriter, r *http.Request) {

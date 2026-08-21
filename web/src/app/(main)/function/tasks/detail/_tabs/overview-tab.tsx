@@ -2,13 +2,21 @@
 
 import * as React from "react";
 
-import { ActivityIcon, AlertTriangleIcon, BugIcon, ClockIcon, ShieldCheckIcon, TargetIcon } from "lucide-react";
+import {
+  ActivityIcon,
+  AlertTriangleIcon,
+  BugIcon,
+  ClockIcon,
+  ShieldCheckIcon,
+  TargetIcon,
+  WrenchIcon,
+} from "lucide-react";
 
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { api } from "@/lib/api";
-import type { Finding, Stats, Task, TaskNode } from "@/lib/types";
+import type { Finding, Stats, Task, TaskNode, TaskRoundCosts } from "@/lib/types";
 
 function StatCard({
   label,
@@ -39,29 +47,32 @@ export function OverviewTab({ taskId }: { taskId: string }) {
   const [stats, setStats] = React.useState<Stats | null>(null);
   const [intents, setIntents] = React.useState<TaskNode[]>([]);
   const [findings, setFindings] = React.useState<Finding[]>([]);
+  const [costs, setCosts] = React.useState<TaskRoundCosts | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
 
     const load = async () => {
       try {
-        const [tasksResp, statsResp, intentsResp, findingsResp] = await Promise.all([
+        const [tasksResp, statsResp, intentsResp, findingsResp, costsResp] = await Promise.all([
           api.tasks(),
           api.stats(taskId),
           api.intents(taskId),
           api.findings(taskId),
+          api.taskRoundCosts(taskId),
         ]);
         if (cancelled) return;
         setTask(tasksResp.tasks.find((t) => t.id === taskId) ?? null);
         setStats(statsResp);
         setIntents(intentsResp);
         setFindings(findingsResp);
+        setCosts(costsResp);
       } catch {
         // transient errors are ignored; the next poll will retry
       }
     };
 
-    load();
+    void load();
     const timer = setInterval(load, 3000);
     return () => {
       cancelled = true;
@@ -74,6 +85,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
   const blocked = intents.filter((i) => i.state === "blocked");
   const taskFindings = findings.filter((f) => f.task_id === taskId);
   const goalsPct = task?.goals_total ? Math.round(((task.goals_met ?? 0) / task.goals_total) * 100) : 0;
+  const costWorkers = costs?.workers ?? [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -191,7 +203,40 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         <StatCard label="待领意图" value={open.length} icon={ShieldCheckIcon} sub="frontier 开放" />
         <StatCard label="确认发现" value={taskFindings.length} icon={BugIcon} sub="本任务" />
         <StatCard label="意图总数" value={intents.length} icon={AlertTriangleIcon} sub="本任务全部意图" />
+        <StatCard label="Agent 回合" value={costs?.total.rounds ?? 0} icon={ActivityIcon} sub="已完成模型回合" />
+        <StatCard
+          label="工具调用"
+          value={costs?.total.tool_calls ?? 0}
+          icon={WrenchIcon}
+          sub={costs?.total.tool_errors ? `${costs.total.tool_errors} 次错误` : "无错误调用"}
+        />
+        <StatCard
+          label="Token 成本"
+          value={(costs?.total.input_tokens ?? 0) + (costs?.total.output_tokens ?? 0)}
+          icon={ShieldCheckIcon}
+          sub="输入 + 输出 token；未估算金额"
+        />
       </div>
+
+      {costWorkers.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Agent 回合成本</CardTitle>
+            <CardDescription>以已完成回合为准，实时用量事件不重复计入。</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {costWorkers.map((worker) => (
+              <div key={worker.worker || "unknown"} className="border p-3">
+                <div className="font-medium text-sm">{worker.worker || "未命名 Agent"}</div>
+                <div className="mt-1 text-muted-foreground text-xs">
+                  {worker.rounds} 回合 · {worker.tool_calls} 工具调用 · {worker.input_tokens + worker.output_tokens}{" "}
+                  token
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
