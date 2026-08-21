@@ -16,7 +16,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { api } from "@/lib/api";
-import type { Finding, Stats, Task, TaskNode, TaskRoundCosts } from "@/lib/types";
+import type { Finding, Task, TaskNode, TaskRoundCosts } from "@/lib/types";
 
 function StatCard({
   label,
@@ -44,7 +44,7 @@ function StatCard({
 
 export function OverviewTab({ taskId }: { taskId: string }) {
   const [task, setTask] = React.useState<Task | null>(null);
-  const [stats, setStats] = React.useState<Stats | null>(null);
+  const [engineMode, setEngineMode] = React.useState<Task["engine_mode"]>("idle");
   const [intents, setIntents] = React.useState<TaskNode[]>([]);
   const [findings, setFindings] = React.useState<Finding[]>([]);
   const [costs, setCosts] = React.useState<TaskRoundCosts | null>(null);
@@ -52,31 +52,27 @@ export function OverviewTab({ taskId }: { taskId: string }) {
   React.useEffect(() => {
     let cancelled = false;
 
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
       try {
-        const [tasksResp, statsResp, intentsResp, findingsResp, costsResp] = await Promise.all([
-          api.tasks(),
-          api.stats(taskId),
-          api.intents(taskId),
-          api.findings(taskId),
-          api.taskRoundCosts(taskId),
-        ]);
+        const snapshot = await api.taskOverview(taskId);
         if (cancelled) return;
-        setTask(tasksResp.tasks.find((t) => t.id === taskId) ?? null);
-        setStats(statsResp);
-        setIntents(intentsResp);
-        setFindings(findingsResp);
-        setCosts(costsResp);
+        setTask(snapshot.task);
+        setEngineMode(snapshot.engine_mode);
+        setIntents(snapshot.intents ?? []);
+        setFindings(snapshot.findings ?? []);
+        setCosts(snapshot.costs);
       } catch {
         // transient errors are ignored; the next poll will retry
+      } finally {
+        if (!cancelled) timer = setTimeout(load, 3000);
       }
     };
 
     void load();
-    const timer = setInterval(load, 3000);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
     };
   }, [taskId]);
 
@@ -99,12 +95,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div>
             <div className="text-muted-foreground text-xs">引擎态</div>
-            <StatusBadge
-              domain="engine"
-              value={stats?.engine_mode ?? task?.engine_mode ?? "idle"}
-              dot
-              className="mt-1"
-            />
+            <StatusBadge domain="engine" value={engineMode ?? task?.engine_mode ?? "idle"} dot className="mt-1" />
           </div>
           <div>
             <div className="text-muted-foreground text-xs">运行中 Worker</div>
@@ -114,7 +105,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
             <div className="text-muted-foreground text-xs">最近活动</div>
             <div className="mt-1 inline-flex items-center gap-1 text-sm">
               <ClockIcon className="size-3.5" />
-              {task?.last_activity ? new Date(task.last_activity).toLocaleTimeString("zh-CN") : "—"}
+              {task?.last_activity_unix ? new Date(task.last_activity_unix * 1000).toLocaleTimeString("zh-CN") : "—"}
             </div>
           </div>
           <div>

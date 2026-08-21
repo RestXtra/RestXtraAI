@@ -574,6 +574,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/tasks/{id}/attack-chain", s.taskAttackChain)
 	mux.HandleFunc("GET /api/tasks/{id}/coverage-graph", s.taskCoverageGraph)
 	mux.HandleFunc("GET /api/tasks/{id}/costs", s.taskRoundCosts)
+	mux.HandleFunc("GET /api/tasks/{id}/overview", s.taskOverview)
 	mux.HandleFunc("POST /api/tasks/{id}/control", s.control)
 	mux.HandleFunc("POST /api/active", s.setActive)
 
@@ -1521,6 +1522,11 @@ func (s *Server) taskRoundCosts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "加载任务回合成本失败")
 		return
 	}
+	total := sumRoundCosts(workers)
+	writeJSON(w, http.StatusOK, map[string]any{"unit": "tokens", "workers": workers, "total": total})
+}
+
+func sumRoundCosts(workers []db.AgentRoundCost) db.AgentRoundCost {
 	total := db.AgentRoundCost{}
 	for _, row := range workers {
 		total.Rounds += row.Rounds
@@ -1531,7 +1537,90 @@ func (s *Server) taskRoundCosts(w http.ResponseWriter, r *http.Request) {
 		total.CacheReadTokens += row.CacheReadTokens
 		total.CacheWriteTokens += row.CacheWriteTokens
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"unit": "tokens", "workers": workers, "total": total})
+	return total
+}
+
+// taskOverview returns the exact task-local snapshot consumed by the overview
+// tab. It replaces five polling requests, including the expensive global task
+// list and global stats queries, with one scoped endpoint.
+func (s *Server) taskOverview(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	t, ok := s.m.Task(id)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "任务不存在")
+		return
+	}
+
+	intents, err := t.Store.ListByKind(db.KindIntent, 100000)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "加载任务意图失败")
+		return
+	}
+	findings, _, err := s.m.pg.ListFindingsPage(db.FindingFilter{TaskID: id, Sort: "severity"}, 1, 200)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "加载任务漏洞失败")
+		return
+	}
+	workers, err := t.Store.RoundCostsByWorker()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "加载任务回合成本失败")
+		return
+	}
+	goals, err := t.Store.GoalCounts()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "加载任务目标失败")
+		return
+	}
+	persistedLast, err := t.Store.LastActivity()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "加载任务活动时间失败")
+		return
+	}
+
+	inFlight := 0
+	for _, intent := range intents {
+		if intent.State == "running" {
+			inFlight++
+		}
+	}
+	last := persistedLast
+	if live := s.engine.LastActivity(id); live > last {
+		last = live
+	}
+	paused := t.Paused || s.engine.IsPaused(id)
+	running := s.engine.Ready() && s.engine.Started(id) && !paused
+	stalled := running && inFlight == 0 && last > 0 && time.Now().Unix()-last > 60
+	engineMode := "idle"
+	status := "created"
+	switch {
+	case paused:
+		engineMode, status = "paused", "paused"
+	case stalled:
+		engineMode, status = "stalled", "running"
+	case running:
+		engineMode, status = "exploring", "running"
+	}
+	if isTerminalStatus(t.Status) {
+		status = t.Status
+	}
+
+	total := sumRoundCosts(workers)
+	dto := taskDTO(t, status)
+	dto.Paused = paused
+	dto.LastActivity = last
+	dto.GoalsTotal, dto.GoalsMet = goals.Total, goals.Met
+	dto.Tokens = tokenTotalDTO(db.TokenUsage{
+		InputTokens: total.InputTokens, OutputTokens: total.OutputTokens,
+		CacheReadTokens: total.CacheReadTokens, CacheWriteTokens: total.CacheWriteTokens,
+	})
+	findingDTOs := make([]FindingDTO, 0, len(findings))
+	for _, finding := range findings {
+		findingDTOs = append(findingDTOs, findingFromDB(finding))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"task": dto, "engine_mode": engineMode, "intents": taskNodeDTOs(intents), "findings": findingDTOs,
+		"costs": map[string]any{"unit": "tokens", "workers": workers, "total": total},
+	})
 }
 
 func (s *Server) findingDetail(w http.ResponseWriter, r *http.Request) {

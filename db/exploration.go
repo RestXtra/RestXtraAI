@@ -592,6 +592,24 @@ func (s *ExplorationStore) TokenTotal() (TokenUsage, error) {
 	return u, err
 }
 
+// LastActivity returns the persisted timestamp of the latest activity for this
+// exploration. It complements the engine's in-memory heartbeat after a restart.
+func (s *ExplorationStore) LastActivity() (int64, error) {
+	var unix int64
+	err := s.db.QueryRow(`SELECT COALESCE(EXTRACT(EPOCH FROM MAX(created_at))::bigint,0)
+		FROM activity WHERE exploration_id=$1`, s.expID).Scan(&unix)
+	return unix, err
+}
+
+// GoalCounts returns the task goal progress without loading every goal node.
+func (s *ExplorationStore) GoalCounts() (GoalCounts, error) {
+	var counts GoalCounts
+	err := s.db.QueryRow(`SELECT COUNT(*), COUNT(*) FILTER (WHERE state='met')
+		FROM exploration_nodes WHERE exploration_id=$1 AND kind='goal'`, s.expID).
+		Scan(&counts.Total, &counts.Met)
+	return counts, err
+}
+
 // TokenTotalsAll returns the whole-task token total for every exploration in one
 // query (exploration_id → total), so the task list can show per-task consumption
 // without a query per row.

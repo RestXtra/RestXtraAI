@@ -1,6 +1,9 @@
 package db
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestRoundCostsByWorkerCountsTerminalUsageOnce(t *testing.T) {
 	d, err := Open(testDSN(t))
@@ -42,5 +45,38 @@ func TestRoundCostsByWorkerCountsTerminalUsageOnce(t *testing.T) {
 	}
 	if got.InputTokens != input || got.OutputTokens != output {
 		t.Fatalf("terminal usage should be counted once: %+v", got)
+	}
+}
+
+func TestOverviewAggregatesPersistGoalAndActivityState(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) - skipping", err)
+	}
+	defer d.Close()
+
+	expID, err := d.CreateExploration("overview aggregate test", "verify persisted state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = d.Exec(`DELETE FROM explorations WHERE id=$1`, expID) })
+	store := d.Exploration(expID)
+	if _, err := store.AddNode(KindGoal, map[string]any{"summary": "goal"}, 1, "met", "test", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddNode(KindGoal, map[string]any{"summary": "goal 2"}, 1, "open", "test", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendActivity(Activity{Worker: "worker", Kind: "text", Summary: "activity"}); err != nil {
+		t.Fatal(err)
+	}
+
+	goals, err := store.GoalCounts()
+	if err != nil || goals.Total != 2 || goals.Met != 1 {
+		t.Fatalf("goal counts=%+v err=%v", goals, err)
+	}
+	last, err := store.LastActivity()
+	if err != nil || last < time.Now().Add(-time.Minute).Unix() {
+		t.Fatalf("last activity=%d err=%v", last, err)
 	}
 }

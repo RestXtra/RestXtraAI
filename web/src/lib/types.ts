@@ -358,6 +358,14 @@ export interface TaskRoundCosts {
   total: AgentRoundCost;
 }
 
+export interface TaskOverview {
+  task: Task;
+  engine_mode: EngineMode;
+  intents: TaskNode[];
+  findings: Finding[];
+  costs: TaskRoundCosts;
+}
+
 export interface Session {
   id: string;
   role: SessionRole;
