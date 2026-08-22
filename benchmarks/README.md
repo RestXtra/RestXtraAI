@@ -28,7 +28,9 @@ GET /api/tasks/{task_id}/performance-baseline
 The versioned `restxtra.task-performance.v1` payload records time to first fact,
 first evidence-backed fact, first confirmed finding and completion; token/tool
 costs; duplicate/retried intents; evidence coverage; cache-read rate; and asset
-verification coverage. Keep the task inputs, target dataset version, model/profile,
+verification coverage. It also reports terminal intents that produced no fact or
+finding (`zero_yield_intents`), making no-result exploration directly comparable.
+Keep the task inputs, target dataset version, model/profile,
 skills, tool catalog, concurrency and budget identical when comparing two runs.
 
 Only snapshots with `repeatable: true` are stable baselines. Running tasks are

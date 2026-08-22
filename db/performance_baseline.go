@@ -23,6 +23,7 @@ type TaskIntentEfficiency struct {
 	Attempts         int `json:"attempts"`
 	RepeatedAttempts int `json:"repeated_attempts"`
 	DuplicateIntents int `json:"duplicate_intents"`
+	ZeroYieldIntents int `json:"zero_yield_intents"`
 }
 
 type TaskCoverageBaseline struct {
@@ -36,6 +37,7 @@ type TaskCoverageBaseline struct {
 type TaskEfficiencyRatios struct {
 	ToolErrorRate                    float64  `json:"tool_error_rate"`
 	DuplicateIntentRate              float64  `json:"duplicate_intent_rate"`
+	ZeroYieldIntentRate              float64  `json:"zero_yield_intent_rate"`
 	EvidenceCoverageRate             float64  `json:"evidence_coverage_rate"`
 	CacheReadRate                    float64  `json:"cache_read_rate"`
 	ConfirmedResultsPer1KInputTokens float64  `json:"confirmed_results_per_1k_input_tokens"`
@@ -85,6 +87,7 @@ type taskPerformanceNodeStats struct {
 	confirmedFacts, negativeResults, evidenceFacts  int
 	confirmedFindings, evidenceFindings, artifacts  int
 	intents, attempts, repeatedAttempts, duplicates int
+	zeroYieldIntents                                int
 	firstFact, firstEvidenceFact, firstFinding      sql.NullTime
 }
 
@@ -173,7 +176,7 @@ func SummarizeTaskPerformanceBaselines(items []*TaskPerformanceBaseline) TaskPer
 func (d *DB) taskPerformanceNodeStats(explorationID int64) (taskPerformanceNodeStats, error) {
 	var stats taskPerformanceNodeStats
 	err := d.QueryRow(`WITH nodes AS (
-    SELECT kind, state, payload, attempt_count, created_at
+    SELECT id, kind, state, payload, attempt_count, created_at
     FROM exploration_nodes WHERE exploration_id=$1
 ), duplicate_intents AS (
     SELECT COALESCE(SUM(n-1),0)::int AS duplicates
@@ -181,7 +184,8 @@ func (d *DB) taskPerformanceNodeStats(explorationID int64) (taskPerformanceNodeS
         SELECT COUNT(*)::int AS n
         FROM nodes
         WHERE kind='intent' AND NULLIF(BTRIM(payload->>'summary'),'') IS NOT NULL
-        GROUP BY LOWER(REGEXP_REPLACE(BTRIM(payload->>'summary'), '\s+', ' ', 'g'))
+        GROUP BY COALESCE(payload->>'dedupe_key',
+            'legacy:' || LOWER(REGEXP_REPLACE(BTRIM(payload->>'summary'), '\s+', ' ', 'g')))
         HAVING COUNT(*) > 1
     ) grouped
 )
@@ -196,6 +200,9 @@ SELECT
     COALESCE(SUM(attempt_count) FILTER (WHERE kind='intent'),0),
     COALESCE(SUM(GREATEST(attempt_count-1,0)) FILTER (WHERE kind='intent'),0),
     (SELECT duplicates FROM duplicate_intents),
+    COUNT(*) FILTER (WHERE kind='intent' AND state IN ('done','blocked','exhausted','stopped')
+        AND NOT EXISTS (SELECT 1 FROM exploration_edges e
+            WHERE e.exploration_id=$1 AND e.src_id=nodes.id AND e.rel='yields')),
     MIN(created_at) FILTER (WHERE kind='fact' AND state='confirmed'),
     MIN(created_at) FILTER (WHERE kind='fact' AND state='confirmed' AND NULLIF(BTRIM(payload->>'evidence'),'') IS NOT NULL),
     MIN(created_at) FILTER (WHERE kind='finding' AND state='confirmed')
@@ -203,6 +210,7 @@ FROM nodes`, explorationID).Scan(
 		&stats.confirmedFacts, &stats.negativeResults, &stats.evidenceFacts,
 		&stats.confirmedFindings, &stats.evidenceFindings, &stats.artifacts,
 		&stats.intents, &stats.attempts, &stats.repeatedAttempts, &stats.duplicates,
+		&stats.zeroYieldIntents,
 		&stats.firstFact, &stats.firstEvidenceFact, &stats.firstFinding,
 	)
 	return stats, err
@@ -264,12 +272,14 @@ func (d *DB) TaskPerformanceBaseline(taskID int64) (*TaskPerformanceBaseline, er
 			EvidenceBackedFacts: stats.evidenceFacts, ConfirmedFindings: stats.confirmedFindings,
 			EvidenceBackedFindings: stats.evidenceFindings, Artifacts: stats.artifacts},
 		Intents: TaskIntentEfficiency{Total: stats.intents, Attempts: stats.attempts,
-			RepeatedAttempts: stats.repeatedAttempts, DuplicateIntents: stats.duplicates},
+			RepeatedAttempts: stats.repeatedAttempts, DuplicateIntents: stats.duplicates,
+			ZeroYieldIntents: stats.zeroYieldIntents},
 		Coverage: TaskCoverageBaseline{Total: coverage.Total, Verified: coverage.Tested, Vulnerable: coverage.Vulnerable,
 			VerifiedRate: ratio(coverage.Tested, coverage.Total), VulnerableRate: ratio(coverage.Vulnerable, coverage.Total)},
 		Usage: usage,
 		Efficiency: TaskEfficiencyRatios{
 			ToolErrorRate: ratio(usage.ToolErrors, usage.ToolCalls), DuplicateIntentRate: ratio(stats.duplicates, stats.intents),
+			ZeroYieldIntentRate:  ratio(stats.zeroYieldIntents, stats.intents),
 			EvidenceCoverageRate: ratio(evidenceResults, confirmedResults), CacheReadRate: ratio(usage.CacheReadTokens, usage.InputTokens+usage.CacheReadTokens),
 			ConfirmedResultsPer1KInputTokens: 1000 * ratio(confirmedResults, usage.InputTokens),
 			InputTokensPerFinding:            nullableRatio(usage.InputTokens, stats.confirmedFindings),

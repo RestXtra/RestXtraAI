@@ -462,7 +462,7 @@ type intentItem struct {
 	Priority  int               `json:"priority"`
 }
 
-// addOneIntent 创建一条意图节点并连上游血缘，返回 id。
+// addOneIntent 原子创建一条意图节点及其资产锚点/上游血缘，返回 id。
 // 约束：意图只能锚在已确认知识上——每个 parent_id 必须是已存在的 fact/finding
 // 节点（不能挂在别的意图/目标/提示上）。顶层全新方向留空 parent_ids，兜底连 origin fact。
 // 这样"每个意图都连到 fact 节点、且是发现驱动而非凭空规划"从创建路径上被强制。
@@ -470,17 +470,7 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 	if strings.TrimSpace(it.Summary) == "" {
 		return 0, fmt.Errorf("summary 不能为空")
 	}
-	// 先校验锚点（建节点前，避免坏锚点留下孤儿意图）。
 	parents := pidList(it.ParentIDs)
-	for _, pidv := range parents {
-		n, err := t.ts.GetNode(pidv)
-		if err != nil || n == nil {
-			return 0, fmt.Errorf("parent_id %d 不存在：parent_ids 必须是已存在的【事实(fact)/发现(finding)】节点 id；顶层全新方向请留空 parent_ids", pidv)
-		}
-		if n.Kind != db.KindFact && n.Kind != db.KindFinding {
-			return 0, fmt.Errorf("parent_id %d 是 %q 节点，不能作为意图锚点：意图只能锚在已确认的【事实(fact)/发现(finding)】上，不能挂在意图/目标/提示上；顶层全新方向请留空 parent_ids", pidv, n.Kind)
-		}
-	}
 	priority := it.Priority
 	if priority == 0 {
 		priority = 5
@@ -490,28 +480,19 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 	if len(anchors) > 0 {
 		payload["asset_ids"] = anchors
 	}
-	id, err := t.ts.AddIntent(payload, priority, anchors, "planner")
+	id, created, err := t.ts.AddIntentWithLineage(payload, priority, anchors, parents, "planner")
 	if err != nil {
 		return 0, err
 	}
-	// upstream lineage: link each (validated) fact/finding parent → this intent, so
-	// "multiple facts combine into one new intent" is expressible.
-	for _, parent := range parents {
-		_ = t.ts.Link(parent, db.RelDerivedFrom, id)
-	}
-	// a top-level intent (no explicit parent) connects to the origin fact, so every
-	// intent still traces back to a fact node — at task start the only fact is the
-	// origin, and the first intents derive from it.
-	if len(parents) == 0 {
-		if origin, _ := t.ts.OriginFactID(); origin > 0 {
-			_ = t.ts.Link(origin, db.RelDerivedFrom, id)
-		}
+	if !created {
+		return 0, fmt.Errorf("重复意图已存在（id=%d）：summary、asset_ids 与 parent_ids 均相同；请复用已有结果，或仅在有新事实/新打法时修改交接", id)
 	}
 	return id, nil
 }
 
 func (t *ToolSet) addIntent() actool.CoreTool {
 	return writeTool("add_intent", "生成【探索方向】写入 frontier，并连入探索链路。意图是开放的探索方向，不是固定类型——用 summary 一句话自由描述要探索/验证/利用什么。\n"+
+		"系统会按规范化 summary + asset_ids + parent_ids 拒绝完全重复的方向；有新事实驱动的复查应传新的 parent_ids，并在 summary 写明新打法。\n"+
 		"★优先批量：一轮筛出的多个新方向放进 intents 数组一次提交（比逐条调用省往返）。返回 ids 数组，与 intents 等长同序（失败项 id=0，详情见 errors）。单条则省略 intents 直接给顶层 summary。",
 		obj(map[string]any{
 			"intents":    map[string]any{"type": "array", "description": "【优先用这个】要新增的探索方向数组，按顺序处理。每个元素字段同下方顶层字段（summary/asset_ids/parent_ids/priority）。返回 ids 与本数组等长、同序。", "items": map[string]any{"type": "object"}},

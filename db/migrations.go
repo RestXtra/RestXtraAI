@@ -152,6 +152,16 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at()`)
 			return err
 		},
 	},
+	{
+		Version: 6,
+		Name:    "atomic_intent_dedupe",
+		Apply: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_expnodes_intent_dedupe
+ON exploration_nodes(exploration_id, (payload->>'dedupe_key'))
+WHERE kind='intent' AND payload ? 'dedupe_key'`)
+			return err
+		},
+	},
 }
 
 func applyMigrations(db *sql.DB) error {

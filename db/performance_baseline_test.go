@@ -21,6 +21,7 @@ func TestTaskPerformanceBaselineMeasuresResultEfficiency(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := d.Exploration(task.ExplorationID)
+	var intentIDs []int64
 	for _, summary := range []string{"Check Login", " check   login "} {
 		id, err := store.AddIntent(map[string]any{"summary": summary}, 1, nil, "planner")
 		if err != nil {
@@ -29,9 +30,19 @@ func TestTaskPerformanceBaselineMeasuresResultEfficiency(t *testing.T) {
 		if _, err := d.Exec(`UPDATE exploration_nodes SET attempt_count=2 WHERE id=$1`, id); err != nil {
 			t.Fatal(err)
 		}
+		intentIDs = append(intentIDs, id)
 	}
-	if _, err := store.AddNode(KindFact, map[string]any{"summary": "login exists", "evidence": "GET /login -> 200"}, 5, "confirmed", "worker", nil); err != nil {
+	factID, err := store.AddNode(KindFact, map[string]any{"summary": "login exists", "evidence": "GET /login -> 200"}, 5, "confirmed", "worker", nil)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if err := store.Link(intentIDs[0], RelYields, factID); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range intentIDs {
+		if err := store.SetNodeState(id, "done"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err := store.AddNode(KindFact, map[string]any{"summary": "admin closed", "negative": true}, 5, "confirmed", "worker", nil); err != nil {
 		t.Fatal(err)
@@ -64,13 +75,14 @@ func TestTaskPerformanceBaselineMeasuresResultEfficiency(t *testing.T) {
 		got.Results.ConfirmedFindings != 1 || got.Results.EvidenceBackedFindings != 1 {
 		t.Fatalf("unexpected result yield: %+v", got.Results)
 	}
-	if got.Intents.Total != 2 || got.Intents.Attempts != 4 || got.Intents.RepeatedAttempts != 2 || got.Intents.DuplicateIntents != 1 {
+	if got.Intents.Total != 2 || got.Intents.Attempts != 4 || got.Intents.RepeatedAttempts != 2 ||
+		got.Intents.DuplicateIntents != 1 || got.Intents.ZeroYieldIntents != 1 {
 		t.Fatalf("unexpected intent metrics: %+v", got.Intents)
 	}
 	if got.Usage.InputTokens != 100 || got.Usage.ToolCalls != 1 || got.Usage.ToolErrors != 1 {
 		t.Fatalf("unexpected usage: %+v", got.Usage)
 	}
-	if got.Efficiency.ToolErrorRate != 1 || got.Efficiency.DuplicateIntentRate != 0.5 ||
+	if got.Efficiency.ToolErrorRate != 1 || got.Efficiency.DuplicateIntentRate != 0.5 || got.Efficiency.ZeroYieldIntentRate != 0.5 ||
 		got.Efficiency.InputTokensPerFinding == nil || *got.Efficiency.InputTokensPerFinding != 100 {
 		t.Fatalf("unexpected efficiency ratios: %+v", got.Efficiency)
 	}
