@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Autumn-27/norma/harness"
@@ -25,6 +26,8 @@ import (
 const (
 	modelErrorRetries      = 2               // model_error 收场后额外重试的次数
 	modelErrorRetryBackoff = 3 * time.Second // 每次重试前的退避
+	intentLeaseDuration    = 2 * time.Minute
+	intentLeaseHeartbeat   = 30 * time.Second
 )
 
 // Engine drives the event-driven exploration loop with real LLM agents
@@ -609,6 +612,7 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 			continue
 		}
 		log.Printf("[worker %s] task %s 领取意图 #%d", name, t.ID, intent.ID)
+		leaseOwner := intent.Owner
 		e.stampFirstRun(t) // 首次真正执行 → 盖 first_run_at + 算 deadline(仅带 timeout 的任务)
 		e.touch(t.ID)
 		emit := func(r db.Activity) { e.emitActivity(t, r) }
@@ -616,6 +620,33 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 		// per-work child context so the planner's kill_work can stop just this work.
 		workCtx, workCancel := context.WithCancel(ectx)
 		e.registerWork(intent.ID, workCancel)
+		// Keep the DB lease alive independently of model/tool activity. Losing the
+		// lease cancels this attempt so a stale worker cannot keep producing writes
+		// after another process has reclaimed the intent.
+		leaseStop := make(chan struct{})
+		leaseStopped := make(chan struct{})
+		var leaseLost atomic.Bool
+		go func() {
+			defer close(leaseStopped)
+			ticker := time.NewTicker(intentLeaseHeartbeat)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-leaseStop:
+					return
+				case <-workCtx.Done():
+					return
+				case <-ticker.C:
+					ok, err := t.Store.RenewIntentLease(intent.ID, leaseOwner, intentLeaseDuration)
+					if err != nil || !ok {
+						leaseLost.Store(true)
+						log.Printf("[worker %s] task %s 意图 #%d 租约续期失败，取消本次执行: ok=%v err=%v", name, t.ID, intent.ID, ok, err)
+						workCancel()
+						return
+					}
+				}
+			}
+		}()
 		e.workLastAct.Store(intent.ID, time.Now().Unix()) // P3.4 卡死检测起点
 		// wrap the guard hooks so steer_work can inject a mid-run course-correction
 		// for THIS intent (drained before the worker's next tool call).
@@ -630,7 +661,7 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 		hooks := steerHooks{inner: t.Guard.Hooks(), drain: func() (string, bool) { return e.drainSteer(iid) }}
 		wTaskID, _ := strconv.ParseInt(t.ID, 10, 64)
 		notifyFinding := func(intentID int64, summary string) { t.NotifyFinding(intentID, summary) }
-		e.incInflight(t.ID) // 计入在跑,供收尾时序 drain 等待
+		e.incInflight(t.ID)                  // 计入在跑,供收尾时序 drain 等待
 		metrics.M.Inc(&metrics.M.WorkerRuns) // P5.4
 		reason, wrote, err := worker.Execute(workCtx, name, wTaskID, e.m.assets, t.Store, intent, hooks, emit, e.m.enrich, notifyFinding)
 		// model_error 收场 → 额外重跑几次（退避后再试）。仅在意图仍属本 work、任务
@@ -654,6 +685,8 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 			metrics.M.Inc(&metrics.M.ModelErrors)
 		}
 		e.decInflight(t.ID)
+		close(leaseStop)
+		<-leaseStopped
 		// CAPTURE kill state BEFORE unregisterWork cancels workCtx. kill = this work's
 		// ctx was cancelled (planner kill_work) while the TASK ctx kept running; a
 		// pause cancels the task ctx (ectx) instead. Checking workCtx.Err() AFTER
@@ -661,16 +694,21 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 		// work would be wrongly marked stopped.
 		killed := workCtx.Err() != nil && ectx.Err() == nil
 		e.unregisterWork(intent.ID)
+		if leaseLost.Load() {
+			log.Printf("[worker %s] task %s 意图 #%d 已失去租约，丢弃状态写回", name, t.ID, intent.ID)
+			e.touch(t.ID)
+			continue
+		}
 		// if a pause cancelled this run mid-flight, return the intent to the frontier
 		// so it is re-claimed (and re-run from scratch) on resume — not marked done.
 		if ectx.Err() != nil && e.IsPaused(t.ID) {
-			_ = t.Store.SetIntentState(intent.ID, "open")
+			e.finishIntentLease(t, intent.ID, name, leaseOwner, "open")
 			continue
 		}
 		// 任务超时收尾的硬兜底 cancel(非 pause、非 kill)取消了本 run → 归为 exhausted(已收尾),
 		// 不要误标 blocked。此时 worker 通常已在 settlement 阶段把结果写回。
 		if ectx.Err() != nil && e.isSettling(t.ID) {
-			_ = t.Store.SetIntentState(intent.ID, "exhausted")
+			e.finishIntentLease(t, intent.ID, name, leaseOwner, "exhausted")
 			log.Printf("[worker %s] task %s 意图 #%d 因任务超时收尾结束(exhausted)，写回 %s", name, t.ID, intent.ID, wrote)
 			e.touch(t.ID)
 			continue
@@ -678,7 +716,7 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 		// 任务已判完成(done via 常规路径)→ 上面 cancelExec 取消了本 run。意图结果已无意义,
 		// 标 stopped(不是 blocked),别污染已完成任务的意图状态。
 		if ectx.Err() != nil && isTerminalStatus(e.m.TaskStatus(t.ID)) {
-			_ = t.Store.SetIntentState(intent.ID, "stopped")
+			e.finishIntentLease(t, intent.ID, name, leaseOwner, "stopped")
 			log.Printf("[worker %s] task %s 意图 #%d 因任务已完成而取消(stopped)", name, t.ID, intent.ID)
 			e.touch(t.ID)
 			continue
@@ -689,15 +727,15 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 		if killed {
 			switch e.consumeStuck(intent.ID) {
 			case "requeue":
-				_ = t.Store.SetIntentState(intent.ID, "open")
+				e.finishIntentLease(t, intent.ID, name, leaseOwner, "open")
 				log.Printf("[worker %s] task %s 意图 #%d 卡死被取消，重新开放(requeue)", name, t.ID, intent.ID)
 				metrics.M.Inc(&metrics.M.StuckRequeues) // P5.4
 			case "blocked":
-				_ = t.Store.SetIntentState(intent.ID, "blocked")
+				e.finishIntentLease(t, intent.ID, name, leaseOwner, "blocked")
 				log.Printf("[worker %s] task %s 意图 #%d 卡死重试超限，标记 blocked 放弃", name, t.ID, intent.ID)
 				metrics.M.Inc(&metrics.M.StuckBlocked) // P5.4
 			default:
-				_ = t.Store.SetIntentState(intent.ID, "stopped")
+				e.finishIntentLease(t, intent.ID, name, leaseOwner, "stopped")
 				log.Printf("[worker %s] task %s 意图 #%d 被终止(stopped)", name, t.ID, intent.ID)
 			}
 			e.touch(t.ID)
@@ -720,7 +758,9 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 			state = "exhausted"
 			log.Printf("[worker %s] intent %d 运行超时(exhausted)，收尾后写回 %s", name, intent.ID, wrote)
 		}
-		_ = t.Store.SetIntentState(intent.ID, state)
+		if !e.finishIntentLease(t, intent.ID, name, leaseOwner, state) {
+			continue
+		}
 		log.Printf("[worker %s] task %s 意图 #%d 结束: %s (写回 %s)", name, t.ID, intent.ID, state, wrote)
 		// P4.2 stall guard：连续零产出计数，达到阈值记警告（方向可能全是死路）。
 		if wrote.Total() == 0 {
@@ -745,17 +785,23 @@ func sleepCtx(ctx context.Context, d time.Duration) (done bool) {
 }
 
 func (e *Engine) claimNext(t *Task, name string) *db.Node {
-	fr, _ := t.Store.Frontier(20)
-	for _, in := range fr {
-		// P3.1 依赖门控认领：前置依赖未满足（串行链父意图还没产 fact）的意图不认领，
-		// 避免下游 worker 抢跑空转。ready 判断出错时按"可认领"处理，不阻塞任务。
-		if ready, err := t.Store.IntentReady(in.ID); err == nil && !ready {
-			metrics.M.Inc(&metrics.M.IntentReadySkip) // P5.4
-			continue
-		}
-		if ok, _ := t.Store.ClaimIntent(in.ID, name); ok {
-			return in
-		}
+	owner := name + "/" + uuid.NewString()
+	in, err := t.Store.ClaimNextIntentLease(owner, name, intentLeaseDuration)
+	if err != nil {
+		log.Printf("[worker %s] task %s 领取 intent 租约失败: %v", name, t.ID, err)
 	}
-	return nil
+	return in
+}
+
+func (e *Engine) finishIntentLease(t *Task, intentID int64, worker, owner, state string) bool {
+	ok, err := t.Store.FinishIntentLease(intentID, owner, state)
+	if err != nil {
+		log.Printf("[worker %s] task %s 意图 #%d 写回状态 %s 失败: %v", worker, t.ID, intentID, state, err)
+		return false
+	}
+	if !ok {
+		log.Printf("[worker %s] task %s 意图 #%d 租约已失效，拒绝写回状态 %s", worker, t.ID, intentID, state)
+		return false
+	}
+	return true
 }

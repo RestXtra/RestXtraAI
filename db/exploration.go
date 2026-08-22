@@ -25,15 +25,18 @@ func utf8Clean(s string) string {
 
 // Node is a typed reasoning node (= old task_nodes). kind ∈ goal|intent|finding|hint.
 type Node struct {
-	ID        int64           `json:"id"`
-	Kind      string          `json:"kind"`
-	Payload   json.RawMessage `json:"payload"`
-	Priority  int             `json:"priority"`
-	State     string          `json:"state"`
-	Origin    string          `json:"origin,omitempty"`
-	Owner     string          `json:"owner,omitempty"`
-	Anchors   []int64         `json:"anchors,omitempty"`
-	CreatedAt time.Time       `json:"created_at"`
+	ID             int64           `json:"id"`
+	Kind           string          `json:"kind"`
+	Payload        json.RawMessage `json:"payload"`
+	Priority       int             `json:"priority"`
+	State          string          `json:"state"`
+	Origin         string          `json:"origin,omitempty"`
+	Owner          string          `json:"owner,omitempty"`
+	LeaseExpiresAt *time.Time      `json:"lease_expires_at,omitempty"`
+	AttemptCount   int             `json:"attempt_count"`
+	LastLeaseAt    *time.Time      `json:"last_lease_at,omitempty"`
+	Anchors        []int64         `json:"anchors,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
 }
 
 // Activity is one worker execution step (= old task_activity).
@@ -272,14 +275,13 @@ func (s *ExplorationStore) SetNodeState(id int64, state string) error {
 	return err
 }
 
-// SetIntentState updates an intent node's state (done/blocked/exhausted/open).
-// ResetRunningIntents returns any intent left in 'running' back to 'open' so it
-// is re-claimed. Called on startup: a 'running' intent with no live worker (a
-// backend restart or crashed worker goroutine left it stuck) would otherwise spin
-// forever in the UI. Workers re-run an intent from scratch, so reopening is safe.
-func (s *ExplorationStore) ResetRunningIntents() (int64, error) {
-	res, err := s.db.Exec(`UPDATE exploration_nodes SET state='open', completed_at=NULL
-WHERE exploration_id=$1 AND kind='intent' AND state='running'`, s.expID)
+// RequeueExpiredIntentLeases makes crash recovery explicit without disturbing
+// work still owned by another live server instance.
+func (s *ExplorationStore) RequeueExpiredIntentLeases() (int64, error) {
+	res, err := s.db.Exec(`UPDATE exploration_nodes
+SET state='open', owner=NULL, lease_expires_at=NULL, completed_at=NULL
+WHERE exploration_id=$1 AND kind='intent' AND state='running'
+  AND (lease_expires_at IS NULL OR lease_expires_at < now())`, s.expID)
 	if err != nil {
 		return 0, err
 	}
@@ -290,22 +292,12 @@ WHERE exploration_id=$1 AND kind='intent' AND state='running'`, s.expID)
 	return n, nil
 }
 
-func (s *ExplorationStore) SetIntentState(id int64, state string) error {
-	// terminal states stamp completed_at; reopening (back to open/running) clears it.
-	terminal := state == "done" || state == "blocked" || state == "exhausted" || state == "stopped"
-	_, err := s.db.Exec(`UPDATE exploration_nodes
-SET state=$1, completed_at = CASE WHEN $4 THEN now() ELSE NULL END
-WHERE id=$2 AND exploration_id=$3 AND kind='intent'`, state, id, s.expID, terminal)
-	s.BumpVersion() // P2.6
-	return err
-}
-
-const nodeCols = `id, kind, payload, priority, state, COALESCE(origin,''), COALESCE(owner,''), created_at`
+const nodeCols = `id, kind, payload, priority, state, COALESCE(origin,''), COALESCE(owner,''), lease_expires_at, attempt_count, last_lease_at, created_at`
 
 func scanNode(sc interface{ Scan(...any) error }) (*Node, error) {
 	var n Node
 	var payload []byte
-	if err := sc.Scan(&n.ID, &n.Kind, &payload, &n.Priority, &n.State, &n.Origin, &n.Owner, &n.CreatedAt); err != nil {
+	if err := sc.Scan(&n.ID, &n.Kind, &payload, &n.Priority, &n.State, &n.Origin, &n.Owner, &n.LeaseExpiresAt, &n.AttemptCount, &n.LastLeaseAt, &n.CreatedAt); err != nil {
 		return nil, err
 	}
 	n.Payload = json.RawMessage(payload)
@@ -542,35 +534,117 @@ WHERE src_id=$1 AND exploration_id=$2 AND rel='yields'`, p.id, s.expID).Scan(&n)
 	return true, nil
 }
 
-// ClaimIntent atomically moves an open intent to running. Returns true if claimed.
-func (s *ExplorationStore) ClaimIntent(id int64, owner string) (bool, error) {
+// ClaimNextIntentLease atomically selects and leases the highest-priority ready
+// intent. Expired work can be reclaimed; dependency checks and row locking live
+// in the same statement so concurrent workers cannot race a stale frontier.
+func (s *ExplorationStore) ClaimNextIntentLease(owner, agent string, lease time.Duration) (*Node, error) {
+	if lease <= 0 {
+		lease = 2 * time.Minute
+	}
+	if agent == "" {
+		agent = owner
+	}
 	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	var n Node
+	var raw []byte
+	var reclaimed bool
+	err = tx.QueryRow(`
+WITH candidate AS (
+    SELECT n.id, n.state AS previous_state
+    FROM exploration_nodes n
+    WHERE n.exploration_id=$1 AND n.kind='intent'
+      AND (n.state='open' OR (n.state='running' AND n.lease_expires_at < now()))
+      AND NOT EXISTS (
+          SELECT 1
+          FROM exploration_edges dep
+          JOIN exploration_nodes parent ON parent.id=dep.src_id AND parent.exploration_id=dep.exploration_id
+          WHERE dep.exploration_id=n.exploration_id AND dep.dst_id=n.id
+            AND dep.rel IN ('derived_from','spawns') AND parent.kind='intent'
+            AND (parent.state <> 'done' OR NOT EXISTS (
+                SELECT 1 FROM exploration_edges produced
+                WHERE produced.exploration_id=n.exploration_id
+                  AND produced.src_id=parent.id AND produced.rel='yields'
+            ))
+      )
+    ORDER BY n.priority DESC, n.id ASC
+    FOR UPDATE OF n SKIP LOCKED
+    LIMIT 1
+), claimed AS (
+    UPDATE exploration_nodes n
+    SET state='running', owner=$2, attempt_count=n.attempt_count+1,
+        last_lease_at=now(), lease_expires_at=now()+($3 * interval '1 second'),
+        completed_at=NULL
+    FROM candidate c WHERE n.id=c.id
+    RETURNING n.id, n.kind, n.payload, n.priority, n.state,
+              COALESCE(n.origin,''), COALESCE(n.owner,''), n.lease_expires_at,
+              n.attempt_count, n.last_lease_at, n.created_at,
+              (c.previous_state='running') AS reclaimed
+)
+SELECT * FROM claimed`, s.expID, owner, lease.Seconds()).Scan(
+		&n.ID, &n.Kind, &raw, &n.Priority, &n.State, &n.Origin, &n.Owner,
+		&n.LeaseExpiresAt, &n.AttemptCount, &n.LastLeaseAt, &n.CreatedAt, &reclaimed)
+	if err == sql.ErrNoRows {
+		_ = tx.Rollback()
+		return nil, nil
+	}
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	n.Payload = json.RawMessage(raw)
+	payload, _ := json.Marshal(map[string]any{
+		"intent_id": n.ID, "owner": owner, "attempt": n.AttemptCount,
+		"lease_expires_at": n.LeaseExpiresAt, "reclaimed": reclaimed,
+	})
+	if _, err := appendCanonicalEvent(tx, eventScope{explorationID: &s.expID}, Activity{
+		NodeID: &n.ID, Worker: agent, EventType: EventIntentClaimed, EventOnly: true, Payload: payload,
+	}, nil); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	s.BumpVersion()
+	return &n, nil
+}
+
+// RenewIntentLease extends a live lease only for its current owner.
+func (s *ExplorationStore) RenewIntentLease(id int64, owner string, lease time.Duration) (bool, error) {
+	if lease <= 0 {
+		lease = 2 * time.Minute
+	}
+	res, err := s.db.Exec(`UPDATE exploration_nodes
+SET lease_expires_at=now()+($4 * interval '1 second'), last_lease_at=now()
+WHERE id=$1 AND exploration_id=$2 AND kind='intent' AND state='running'
+  AND owner=$3 AND lease_expires_at >= now()`, id, s.expID, owner, lease.Seconds())
 	if err != nil {
 		return false, err
 	}
-	res, err := tx.Exec(`UPDATE exploration_nodes SET state='running', owner=$1
-WHERE id=$2 AND exploration_id=$3 AND kind='intent' AND state='open'`, owner, id, s.expID)
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// FinishIntentLease changes state only while owner still holds an unexpired
+// lease. It prevents a delayed worker from overwriting a reclaimed attempt.
+func (s *ExplorationStore) FinishIntentLease(id int64, owner, state string) (bool, error) {
+	terminal := state == "done" || state == "blocked" || state == "exhausted" || state == "stopped"
+	res, err := s.db.Exec(`UPDATE exploration_nodes
+SET state=$4, owner=CASE WHEN $4='open' THEN NULL ELSE owner END,
+    lease_expires_at=NULL, completed_at=CASE WHEN $5 THEN now() ELSE NULL END
+WHERE id=$1 AND exploration_id=$2 AND kind='intent' AND state='running'
+  AND owner=$3 AND lease_expires_at >= now()`, id, s.expID, owner, state, terminal)
 	if err != nil {
-		_ = tx.Rollback()
 		return false, err
 	}
 	n, _ := res.RowsAffected()
 	if n == 1 {
-		payload, _ := json.Marshal(map[string]any{"intent_id": id, "owner": owner})
-		if _, err := appendCanonicalEvent(tx, eventScope{explorationID: &s.expID}, Activity{
-			NodeID: &id, Worker: owner, EventType: EventIntentClaimed, EventOnly: true, Payload: payload,
-		}, nil); err != nil {
-			_ = tx.Rollback()
-			return false, err
-		}
-		if err := tx.Commit(); err != nil {
-			return false, err
-		}
-		s.BumpVersion() // P2.6: intent → running 也影响 overview(running_intents)
-		return true, nil
+		s.BumpVersion()
 	}
-	_ = tx.Rollback()
-	return false, nil
+	return n == 1, nil
 }
 
 // Stats returns node counts grouped by kind (for dashboard).

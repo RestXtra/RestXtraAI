@@ -129,6 +129,9 @@ CREATE TABLE IF NOT EXISTS exploration_nodes (
     state          TEXT NOT NULL DEFAULT 'open',
     origin         TEXT,
     owner          TEXT,
+    lease_expires_at TIMESTAMPTZ,
+    attempt_count  INT NOT NULL DEFAULT 0,
+    last_lease_at  TIMESTAMPTZ,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     completed_at   TIMESTAMPTZ,
@@ -142,9 +145,16 @@ CREATE TABLE IF NOT EXISTS exploration_nodes (
         (kind='hint'    AND state IN ('active','consumed'))
     )
 );
+-- Keep idempotent startup compatible with databases created before intent
+-- leases. Open executes this schema before versioned migrations.
+ALTER TABLE exploration_nodes ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ;
+ALTER TABLE exploration_nodes ADD COLUMN IF NOT EXISTS attempt_count INT NOT NULL DEFAULT 0;
+ALTER TABLE exploration_nodes ADD COLUMN IF NOT EXISTS last_lease_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_expnodes_part     ON exploration_nodes(exploration_id, kind);
 CREATE INDEX IF NOT EXISTS idx_expnodes_frontier ON exploration_nodes(exploration_id, priority DESC)
     WHERE kind='intent' AND state='open';
+CREATE INDEX IF NOT EXISTS idx_expnodes_lease ON exploration_nodes(exploration_id, lease_expires_at)
+    WHERE kind='intent' AND state='running';
 DROP TRIGGER IF EXISTS trg_expnodes_upd ON exploration_nodes;
 CREATE TRIGGER trg_expnodes_upd BEFORE UPDATE ON exploration_nodes
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();

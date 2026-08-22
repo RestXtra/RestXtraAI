@@ -106,6 +106,28 @@ WHERE a.event_id IS NULL AND e.source_key='conversation_activity:' || a.id::text
 			return err
 		},
 	},
+	{
+		Version: 4,
+		Name:    "exploration_intent_leases",
+		Apply: func(tx *sql.Tx) error {
+			if _, err := tx.Exec(`ALTER TABLE exploration_nodes ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`ALTER TABLE exploration_nodes ADD COLUMN IF NOT EXISTS attempt_count INT NOT NULL DEFAULT 0`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`ALTER TABLE exploration_nodes ADD COLUMN IF NOT EXISTS last_lease_at TIMESTAMPTZ`); err != nil {
+				return err
+			}
+			// Pre-lease running rows have no recoverable owner lifetime. Reopen them
+			// once during migration; subsequent crash recovery is expiry-based.
+			if _, err := tx.Exec(`UPDATE exploration_nodes SET state='open', owner=NULL, completed_at=NULL WHERE kind='intent' AND state='running' AND lease_expires_at IS NULL`); err != nil {
+				return err
+			}
+			_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_expnodes_lease ON exploration_nodes(exploration_id, lease_expires_at) WHERE kind='intent' AND state='running'`)
+			return err
+		},
+	},
 }
 
 func applyMigrations(db *sql.DB) error {

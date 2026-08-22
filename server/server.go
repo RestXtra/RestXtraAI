@@ -249,10 +249,10 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 	// reload tasks persisted on disk so the task list survives a restart, and
 	// restore persisted paused state (so a task paused before restart stays paused).
 	for _, t := range m.LoadExisting() {
-		// clear stale 'running' intents from a prior crash/restart (no live worker
-		// owns them) so they re-claim instead of spinning forever in the UI.
-		if n, _ := t.Store.ResetRunningIntents(); n > 0 {
-			log.Printf("[engine] task %s 重置 %d 个残留 running 意图为 open", t.ID, n)
+		// Reopen only expired leases. A different live server may still own the
+		// remaining running intents, so startup must not reset them wholesale.
+		if n, _ := t.Store.RequeueExpiredIntentLeases(); n > 0 {
+			log.Printf("[engine] task %s 回收 %d 个过期 intent 租约", t.ID, n)
 		}
 		if t.Paused {
 			s.engine.Pause(t.ID)
