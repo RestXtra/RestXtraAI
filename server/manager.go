@@ -44,16 +44,18 @@ func loadOrCreateSecretsKey(dataDir string) ([]byte, error) {
 // sharing the process-wide asset store. ID is the PG task id as a string; ExpID
 // is the exploration the task owns.
 type Task struct {
-	ID           string `json:"id"`
-	ExpID        int64  `json:"exploration_id"`
-	Description  string `json:"description"`
-	Goal         string `json:"goal"`
-	CreatedAt    int64  `json:"created_at"`
-	CompletedAt  int64  `json:"completed_at,omitempty"` // 进入终态的 unix 秒;0=未完成
-	Paused       bool   `json:"paused"`
-	ParentRef    string `json:"parent_ref,omitempty"`     // 父任务 id(编排 spawn 记录)
-	LLMProfileID *int64 `json:"llm_profile_id,omitempty"` // 指定运行本任务 planner/worker 的 LLM 配置;nil=用全局激活配置
-	Status       string `json:"status"`                   // persisted lifecycle status (done/failed/timeout 为终态；空/其它则由运行态推导)
+	ID               string                `json:"id"`
+	ExpID            int64                 `json:"exploration_id"`
+	Description      string                `json:"description"`
+	Goal             string                `json:"goal"`
+	CreatedAt        int64                 `json:"created_at"`
+	CompletedAt      int64                 `json:"completed_at,omitempty"` // 进入终态的 unix 秒;0=未完成
+	Paused           bool                  `json:"paused"`
+	ParentRef        string                `json:"parent_ref,omitempty"`        // 父任务 id(编排 spawn 记录)
+	AllowedTools     []string              `json:"allowed_tools,omitempty"`     // child delegation capability whitelist
+	DelegationBudget pgdb.DelegationBudget `json:"delegation_budget,omitempty"` // child task execution budget
+	LLMProfileID     *int64                `json:"llm_profile_id,omitempty"`    // 指定运行本任务 planner/worker 的 LLM 配置;nil=用全局激活配置
+	Status           string                `json:"status"`                      // persisted lifecycle status (done/failed/timeout 为终态；空/其它则由运行态推导)
 	// 任务级超时(见 docs/任务级超时与收尾设计.md)。DeadlineAt/FirstRunAt 为 unix 秒,0=未设/未运行。
 	TimeoutSeconds int   `json:"timeout_seconds"`
 	FirstRunAt     int64 `json:"first_run_at,omitempty"`
@@ -580,6 +582,13 @@ func (m *Manager) LoadExisting() []*Task {
 			continue
 		}
 		t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor)
+		if delegation, err := m.pg.GetTaskDelegation(pt.ID); err == nil && delegation != nil {
+			if delegation.ParentRef != "" {
+				t.ParentRef = delegation.ParentRef
+			}
+			t.AllowedTools = append([]string(nil), delegation.AllowedTools...)
+			t.DelegationBudget = delegation.Budget
+		}
 		t.Guard.SetDenyExploit(m.pg.GetBool(settingDenyExploit, false)) // P6.1
 		m.tasks[id] = t
 		loaded = append(loaded, t)

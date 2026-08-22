@@ -114,7 +114,7 @@ var sixDomainAgents = []domainAgentSpec{
 	},
 	{
 		Key: "pentest_chain", Name: "渗透链指挥", Description: "多阶段渗透专家：侦察→利用→提权→横向→后渗透",
-		Prompt:   "你是「渗透链指挥」，负责多阶段渗透域。\n工作方法：\n1. 先 search_knowledge 查内网/域渗透/后渗透手法（intranet/ad/postex）。\n2. 用 list_assets 看清已发现的资产，规划侦察→利用→提权→横向链路。\n3. 需要隔离步骤时可用 spawn_task 派生子任务、list_task_findings 汇总各任务结论。\n4. 把链路结论汇总为 attack-chain，最终 report_finding 覆盖关键节点。",
+		Prompt:   "你是「渗透链指挥」，负责多阶段渗透域。\n工作方法：\n1. 先 search_knowledge 查内网/域渗透/后渗透手法（intranet/ad/postex）。\n2. 用 list_assets 看清已发现的资产，规划侦察→利用→提权→横向链路。\n3. 需要隔离步骤时用 spawn_task 传 objective、asset_ids、required_evidence、allowed_tools 和 budget；用 wait_task 直接接收结构化结果，只有引用不足时再读完整图或 trace。\n4. 把链路结论汇总为 attack-chain，最终 report_finding 覆盖关键节点。",
 		MaxTurns: 0, RunSecs: 0,
 		Skills: []string{"intranet-pentest-advanced", "redteam-ad-detail-pack", "redteam-postex-detail-pack",
 			"performing-active-directory-penetration-test", "exploiting-active-directory-with-bloodhound",
@@ -124,7 +124,7 @@ var sixDomainAgents = []domainAgentSpec{
 			"moving-laterally-with-netexec", "performing-active-directory-forest-trust-attack",
 			"coercing-authentication-with-coercer-petitpotam", "performing-privilege-escalation-assessment",
 			"performing-privilege-escalation-on-linux"},
-		Tools: []string{"nmap", "nuclei", "sqlmap", "list_tasks", "spawn_task", "pause_task", "get_task_graph", "list_task_findings", "add_task_hint", "get_task_worker_trace", "list_task_worker_traces", "search_task_worker_traces"},
+		Tools: []string{"nmap", "nuclei", "sqlmap", "list_tasks", "spawn_task", "wait_task", "get_task_result", "pause_task", "get_task_graph", "list_task_findings", "add_task_hint", "get_task_worker_trace", "list_task_worker_traces", "search_task_worker_traces"},
 		MCP:   []string{"browser", "ScopeSentry"},
 	},
 	{
@@ -152,7 +152,7 @@ var sixDomainAgents = []domainAgentSpec{
 	},
 	{
 		Key: "red_team_lead", Name: "红队总指挥", Description: "多智能体协调者：拆解任务并委派给六域专家",
-		Prompt:   "你是「红队总指挥」，负责把复杂任务拆解并协调六域专家：\n- 漏洞猎人(web_vuln)：Web 漏洞挖掘\n- 二进制猎人(binary_vuln)：二进制/逆向\n- 利用专家(exploit)：漏洞利用\n- 渗透链指挥(pentest_chain)：多阶段渗透\n- 云攻击专家(cloud_attack)：云攻击\n- 规避专家(evasion)：对抗规避\n工作方法：\n1. 分析任务所属领域，用 spawn_task 派生子任务并说明交接包（目标/已完成/本轮只做/成功标准）。\n2. 【重要】派发任务后用 wait_task{task_id} 阻塞等待其完成（不要 sleep 盲等）——任务一结束立即返回，马上用 list_task_findings 汇总、继续下一步。\n3. 用 list_tasks / list_task_findings / get_task_graph 跟踪各专家进度，必要时 add_task_hint 纠偏。\n4. 汇总各域结论成整体评估，输出报告要点。",
+		Prompt:   "你是「红队总指挥」，负责把复杂任务拆解并协调六域专家：\n- 漏洞猎人(web_vuln)：Web 漏洞挖掘\n- 二进制猎人(binary_vuln)：二进制/逆向\n- 利用专家(exploit)：漏洞利用\n- 渗透链指挥(pentest_chain)：多阶段渗透\n- 云攻击专家(cloud_attack)：云攻击\n- 规避专家(evasion)：对抗规避\n工作方法：\n1. 分析任务所属领域，用 spawn_task 传最小结构化交接包：objective、asset_ids、required_evidence、allowed_tools、budget；不要复制父任务 transcript。\n2. 派发后用 wait_task 阻塞等待任一子任务完成（不要 sleep 盲等），直接消费其 facts、findings、negative_results、artifact_refs、next_actions 和 usage。\n3. 用 list_tasks 跟踪进度，必要时 add_task_hint 纠偏；只有结构化结果引用不足时才调用 get_task_result、get_task_graph 或 trace。\n4. 汇总各域结论成整体评估，输出报告要点。",
 		MaxTurns: 0, RunSecs: 0,
 		Skills: []string{"web-security-advanced", "intranet-pentest-advanced", "redteam-cloud-detail-pack", "redteam-evasion-detail-pack",
 			"ctf-web", "redteam-sqli-detail-pack", "redteam-ssrf-detail-pack", "redteam-reverse-detail-pack", "redteam-deserialize-detail-pack",
@@ -164,7 +164,7 @@ var sixDomainAgents = []domainAgentSpec{
 			"performing-memory-forensics-with-volatility3", "analyzing-memory-dumps-with-volatility", "performing-file-carving-with-foremost",
 			"analyzing-packed-malware-with-upx-unpacker", "performing-steganography-detection", "performing-binary-exploitation-analysis",
 			"performing-hash-cracking-with-hashcat", "conducting-man-in-the-middle-attack-simulation"},
-		Tools: []string{"list_tasks", "spawn_task", "wait_task", "pause_task", "get_task_graph", "list_task_findings", "add_task_hint", "get_task_worker_trace", "list_task_worker_traces", "search_task_worker_traces"},
+		Tools: []string{"list_tasks", "spawn_task", "wait_task", "get_task_result", "pause_task", "get_task_graph", "list_task_findings", "add_task_hint", "get_task_worker_trace", "list_task_worker_traces", "search_task_worker_traces"},
 		MCP:   []string{"browser", "ScopeSentry"},
 	},
 }

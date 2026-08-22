@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/RestXtra/RestXtraAI/db"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
@@ -15,6 +14,7 @@ import (
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/Autumn-27/norma/transcript"
+	"github.com/RestXtra/RestXtraAI/db"
 	"github.com/RestXtra/RestXtraAI/metrics"
 )
 
@@ -132,12 +132,12 @@ const workerDefaultTmpl = `你是一个授权渗透测试系统的"执行者"(wo
 3. **穷尽后再返回，别在第一个障碍前放弃**。判"意图达成"的标准是【你已把这条方向真正探透】：初次尝试被拦（一个 payload 被过滤、一个端点 404、一个注入点没回显）不等于此路不通——先换编码/换方法/换参数/换路径把这条意图的合理手段走完，再下结论。**但边界不变**：穷尽的只是【这一条意图内部】的手段，绝不是顺手去做别的意图（枚举别的端点、测别的漏洞）；那些仍是规划者派别的 worker 的事。真正探透了、或确认此路不通了，就立即写回并返回，别因为"任务总目标还没达成"就继续，也别为凑步数在已探尽的方向空转。
 4. **边发现边写回，并且写对地方**。每得出一个结果就立刻写回（别攒到最后，否则步数耗尽全丢）。结果只算写进图里的，活在你脑子/文字里的不算。**两张图分清楚**：
    - **发现新资产/资源** → insert_assets 写【资产图】（登记资产本身：endpoint / parameter / tech 指纹 / service / 凭据 / 子域 等）。资产的结构化属性写在它自己身上：站点/接口的状态码/标题/body 长度/content_type 放 props.http，技术栈登记为 type=tech 节点。多个资产用 insert_assets 的 assets 数组一次批量登记。
-   - **得出探索结论/事实**（含指纹/枚举等正向结论，和"端口关闭"、"该参数不可注入"、"未发现登录入口"等否定结论）→ record_fact 写【探索图】（传 intent_id）。**一次探索的多个观察汇总成【一条】事实**：summary 写总结性一句话，detail 写相关细节（技术栈、状态码、响应特征等都塞进这一条的 detail）——**不要一个属性一条事实**，一条意图通常只产出一条事实，拆太碎会让图谱无限膨胀。真有多条【彼此不同】的结论才用 facts 数组一次写。【新增】**只写增量**：写回前先扫一眼上方【全局探索态势】里的 recent_facts——只写你这次【新得到】的结论，别把图里已有的事实换个措辞再记一遍（重复事实会让图谱膨胀、误导规划者以为有新进展）。若你的观察只是印证了已有 fact 而无新增，就不必再记一条。
+   - **得出探索结论/事实**（含指纹/枚举等正向结论，和"端口关闭"、"该参数不可注入"、"未发现登录入口"等否定结论）→ record_fact 写【探索图】（传 intent_id；否定结论必须传 negative=true）。**一次探索的多个观察汇总成【一条】事实**：summary 写总结性一句话，detail 写相关细节（技术栈、状态码、响应特征等都塞进这一条的 detail）——**不要一个属性一条事实**，一条意图通常只产出一条事实，拆太碎会让图谱无限膨胀。真有多条【彼此不同】的结论才用 facts 数组一次写。【新增】**只写增量**：写回前先扫一眼上方【全局探索态势】里的 recent_facts——只写你这次【新得到】的结论，别把图里已有的事实换个措辞再记一遍（重复事实会让图谱膨胀、误导规划者以为有新进展）。若你的观察只是印证了已有 fact 而无新增，就不必再记一条。
    - **确认漏洞** → report_finding 写【探索图】（含 PoC，传 intent_id）。
 
 可用工具：
 - insert_assets：登记新资产（资产图）。**你只传原始信息，key 与父子关联由代码算**：新接口→传完整 url+method（代码自动建 domain→site→endpoint、自动抽 URL 里的 query 参数，body/header 参数放 params）；指纹→type=tech,name=技术名,on_url=站点地址,props填{version,category}。多个资产放 assets 数组一次批量登记。属性写在资产自己的 props 上，探索结论不要写这里。
-- record_fact：把探索【事实/结论】写入探索图并连到意图（传 intent_id）。正向/否定结论、观察、判断用它；**一次探索的多个观察汇总成一条事实**（summary 总结一句话 + detail 放细节），不要一个属性一条。真有多条不同结论才用 facts 数组。**只写你真实看到的**：给 evidence（一行关键证据：命令+关键输出，简洁，别粘大段——细节在 detail）、标 confidence（observed 直接看到 / inferred 推断）；**否定结论**（不可注入/端口关闭等）尤其要给证据、证据弱就标 inferred，别让错的否定误导规划者放弃方向。
+- record_fact：把探索【事实/结论】写入探索图并连到意图（传 intent_id）。正向/否定结论、观察、判断用它；**一次探索的多个观察汇总成一条事实**（summary 总结一句话 + detail 放细节），不要一个属性一条。真有多条不同结论才用 facts 数组。**只写你真实看到的**：给 evidence（一行关键证据：命令+关键输出，简洁，别粘大段——细节在 detail）、标 confidence（observed 直接看到 / inferred 推断）；**否定结论**（不可注入/端口关闭等）必须传 negative=true，尤其要给证据、证据弱就标 inferred，别让错的否定误导规划者放弃方向。
 - report_finding：确认漏洞 → 记录(含 PoC，传 intent_id=你领到的意图id)。**只有你在本次运行里真实触发过该漏洞、拿到了可复现的证据（请求/响应或命令输出）才用它。** 严禁把下列当作已确认漏洞上报：仅凭版本号/指纹匹配到某 CVE、仅凭"参数看起来可注入"、仅凭外部漏洞库/更新日志/代码 diff 推断。**不要用查 CVE 库或"对比补丁版本"替代实际触发。** 触发不了但确有嫌疑，就用 record_fact 记一条 confidence=inferred 的事实（描述嫌疑点+为何未能触发），交给规划者派后续意图，别硬记成 finding。
 - list_assets（查询资产，非探索节点） / asset_neighbors / list_facts(探索事实) / list_findings(漏洞) / node_detail(探索节点 id，非资产 id)：按需查上下文。
 - 【必要时才会使用，大多数上下文都在本次会话中】search_all_worker_traces / list_worker_traces / get_worker_trace：**跨 work 复用信息**（别的 work 执行过程里出现过、却没写进 fact 的东西）。你看不到探索图，但可以：search_all_worker_traces(q) 按关键字搜全部 work 的过程（返回带 intent_id）；list_worker_traces 看有哪些 work 跑过；get_worker_trace(intent_id) 看某 work 的步骤摘要、get_worker_trace(intent_id, step_ids=[…]) 取那几步完整内容（一次≤5个）。**仅用于复用他人观察、避免重复劳动——不改变你的任务边界（仍只做你这条意图）。**
@@ -194,8 +194,8 @@ func renderWorkerGraphOverview(data map[string]any) string {
 	// P2.5 裁剪：worker 只需要"最近事实 + 计数 + 任务"，不需要完整意图血缘/资产细节。
 	// 保留的信息足够避免重复劳动、复用否定结论，但体积小很多。
 	trimmed := map[string]any{
-		"task":    data["task"],
-		"facts":   data["facts"],
+		"task":     data["task"],
+		"facts":    data["facts"],
 		"findings": data["findings"],
 	}
 	if rf, ok := data["recent_facts"].([]map[string]any); ok {
@@ -256,10 +256,12 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 	// base = built-in worker tools ∪ host tools (traffic) ∪ default tools (incl. Bash);
 	// then augment with the agent's visible skills/MCP. During the SDK settlement
 	// phase, Bash is hidden via Settlement.DisabledTools (no local gating needed).
-	base := append(tsx.WorkerTools(), w.extraTools...)
+	roleTools := tsx.WorkerTools()
+	base := append(roleTools, w.extraTools...)
 	base = append(base, withHostBash(actool.DefaultTools())...)
 	tools, def, cleanup := AugmentTools(ctx, "worker", base)
 	defer cleanup()
+	tools = applyToolPolicy(ctx, tools, &def, roleTools)
 
 	// 意图 + 全局态势改放【启动 user 消息】(见下方 input)，system 只留静态角色正文
 	// (段[A]/[B]/[C] + deferred 块)。与 planner 一致：把易变的运行期数据移出 system，
@@ -281,21 +283,21 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 	}
 	opts := agentcore.Options{
 		EmitPromptEvents: true,
-		Provider:        w.prov,
-		SystemPrompt:    system,
-		DynamicBoundary: boundary,
-		Tools:           tools,
-		DeferredTools:   def.Deferred,
-		UnlockSet:       def.Unlock,
-		PermissionMode:  permission.ModeBypass,
+		Provider:         w.prov,
+		SystemPrompt:     system,
+		DynamicBoundary:  boundary,
+		Tools:            tools,
+		DeferredTools:    def.Deferred,
+		UnlockSet:        def.Unlock,
+		PermissionMode:   permission.ModeBypass,
 		// WebFetch 走记录代理，其 HTTP 与 curl 一样被留痕；载入代理 CA 让经 MITM
 		// 重签的 HTTPS 证书能【正常校验通过】（而非关掉校验）。proxy 空则直连。
-		EnableWebFetch: true,
+		EnableWebFetch: capabilityAllowed(ctx, "WebFetch"),
 		WebFetchProxy:  w.proxyAddr,
 		WebFetchCACert: w.proxyCACert,
 		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
 		// WebSearchProxy 是独立的出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
-		EnableWebSearch:    w.webSearch.Enabled,
+		EnableWebSearch:    w.webSearch.Enabled && capabilityAllowed(ctx, "WebSearch"),
 		WebSearchBackend:   w.webSearch.Backend,
 		BraveSearchAPIKey:  w.webSearch.BraveKey,
 		TavilySearchAPIKey: w.webSearch.TavilyKey,

@@ -95,8 +95,9 @@ func renderPlannerTodos(items []actool.Todo) string {
 // TriggerEvent describes what concretely caused this planning round to fire, so
 // the planner looks first at the actual change instead of re-scanning the whole
 // overview. Kind:
-//   "done"    — a worker finished intent IntentID (its output conclusion is fetched).
-//   "finding" — a worker reported a finding on intent IntentID (Detail = 摘要).
+//
+//	"done"    — a worker finished intent IntentID (its output conclusion is fetched).
+//	"finding" — a worker reported a finding on intent IntentID (Detail = 摘要).
 type TriggerEvent struct {
 	Kind     string
 	IntentID int64
@@ -254,9 +255,11 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		tsx.SetOwnerNode(origin) // planner-side anchors default to the task root (origin fact)
 	}
 	// 领域工具 + 基础默认工具集（Read/Write/Edit/MultiEdit/LS/Glob/Grep/Bash）
-	base := append(tsx.PlannerTools(), withHostBash(actool.DefaultTools())...)
+	roleTools := tsx.PlannerTools()
+	base := append(roleTools, withHostBash(actool.DefaultTools())...)
 	tools, def, cleanup := AugmentTools(ctx, "planner", base)
 	defer cleanup()
+	tools = applyToolPolicy(ctx, tools, &def, roleTools)
 	// 关键态势（实际变动 + 预取的完整图）改放【本轮 user 输入】(见下方 input)，system
 	// 只留静态规划正文。move-out 让 system 每轮稳定、更利于缓存；代价是若单轮变长，态势
 	// 可能被 compaction 压缩（planner 单轮通常短，风险低）。situational 会拼进下方 input。
@@ -278,27 +281,27 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	}
 	opts := agentcore.Options{
 		EmitPromptEvents: true,
-		Provider:        p.prov,
-		SystemPrompt:    system,
-		DynamicBoundary: boundary,
-		Tools:           tools,
-		DeferredTools:   def.Deferred,
-		UnlockSet:       def.Unlock,
-		PermissionMode:  permission.ModeBypass,
-		EnableWebFetch:  true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
-		WebFetchProxy:   p.proxyAddr,
-		WebFetchCACert:  p.proxyCACert,
+		Provider:         p.prov,
+		SystemPrompt:     system,
+		DynamicBoundary:  boundary,
+		Tools:            tools,
+		DeferredTools:    def.Deferred,
+		UnlockSet:        def.Unlock,
+		PermissionMode:   permission.ModeBypass,
+		EnableWebFetch:   capabilityAllowed(ctx, "WebFetch"), // 走记录代理留痕；子任务白名单可禁用
+		WebFetchProxy:    p.proxyAddr,
+		WebFetchCACert:   p.proxyCACert,
 		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
 		// WebSearchProxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
-		EnableWebSearch:    p.webSearch.Enabled,
+		EnableWebSearch:    p.webSearch.Enabled && capabilityAllowed(ctx, "WebSearch"),
 		WebSearchBackend:   p.webSearch.Backend,
 		BraveSearchAPIKey:  p.webSearch.BraveKey,
 		TavilySearchAPIKey: p.webSearch.TavilyKey,
 		WebSearchProxy:     p.webSearch.Proxy,
-		BashEnv:           proxyEnv(p.proxyAddr, p.proxyCACert), // Bash 子命令默认走代理+信任 CA
-		MaxTurns:          p.maxTurns,                           // 0 = unlimited (configurable in agent management)
-		MaxDuration:       maxDur,                               // 0=不限;有 deadline 时=距 deadline 剩余
-		Compaction:        compactionConfig(p.window),
+		BashEnv:            proxyEnv(p.proxyAddr, p.proxyCACert), // Bash 子命令默认走代理+信任 CA
+		MaxTurns:           p.maxTurns,                           // 0 = unlimited (configurable in agent management)
+		MaxDuration:        maxDur,                               // 0=不限;有 deadline 时=距 deadline 剩余
+		Compaction:         compactionConfig(p.window),
 		// P7.3：免 LLM 的确定性摘要。
 		Summarizer: DeterministicSummarizer,
 		// 跨唤醒共享的规划待办：让串行链在多轮之间保留（session 是新的，store 不是）。

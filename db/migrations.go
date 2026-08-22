@@ -128,6 +128,30 @@ WHERE a.event_id IS NULL AND e.source_key='conversation_activity:' || a.id::text
 			return err
 		},
 	},
+	{
+		Version: 5,
+		Name:    "structured_task_delegations",
+		Apply: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS task_delegations (
+                child_task_id BIGINT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+                parent_ref TEXT,
+                contract JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )`)
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_task_delegations_parent ON task_delegations(parent_ref) WHERE parent_ref IS NOT NULL`)
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(`DROP TRIGGER IF EXISTS trg_task_delegations_upd ON task_delegations;
+CREATE TRIGGER trg_task_delegations_upd BEFORE UPDATE ON task_delegations
+FOR EACH ROW EXECUTE FUNCTION set_updated_at()`)
+			return err
+		},
+	},
 }
 
 func applyMigrations(db *sql.DB) error {

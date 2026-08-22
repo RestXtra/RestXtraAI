@@ -12,6 +12,7 @@ import (
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/RestXtra/RestXtraAI/agent"
+	pgdb "github.com/RestXtra/RestXtraAI/db"
 )
 
 // jsonResult marshals v to a JSON tool result.
@@ -66,6 +67,7 @@ func (s *Server) orchestrationTools() []actool.CoreTool {
 		s.toolListLLMProfiles(),
 		s.toolSpawnTask(),
 		s.toolWaitTask(),
+		s.toolGetTaskResult(),
 		s.toolPauseTask(),
 		s.toolGetTaskGraph(),
 		s.toolListTaskFindings(),
@@ -233,30 +235,85 @@ func (s *Server) toolListLLMProfiles() actool.CoreTool {
 
 func (s *Server) toolSpawnTask() actool.CoreTool {
 	return wrTool("spawn_task",
-		"新建一个子任务并启动探索引擎，返回 task_id。用于把一件事(如一道题/一个目标)派成独立任务。parent_ref 可选：填当前编排关联的父任务 id 做父子关联。",
+		"新建一个隔离子任务并启动探索引擎，返回结构化 delegation contract。只传 objective、asset_ids、required_evidence、budget、allowed_tools 等最小交接信息，不复制父 Agent 历史。parent_ref 用于父子关联。",
 		objSchema(map[string]any{
-			"description":     strParam("任务描述(简短标题)"),
-			"goal":            strParam("任务目标(要达成什么)"),
-			"parent_ref":      strParam("可选：父任务 id(做父子关联)"),
+			"description":       strParam("任务描述(简短标题)"),
+			"objective":         strParam("子 Agent 的唯一目标（推荐；goal 作为旧参数仍兼容）"),
+			"goal":              strParam("兼容旧调用：任务目标；objective 为空时使用"),
+			"parent_ref":        strParam("可选：父任务 id(做父子关联)"),
+			"asset_ids":         map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "子 Agent 可直接引用的目标资产 id；只传引用，不复制资产/历史正文"},
+			"required_evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "完成条件要求的证据清单；为空时使用平台安全默认"},
+			"allowed_tools":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "可选能力白名单。图谱核心读写工具始终保留；Bash、外部工具、MCP/Skill 仅白名单内可用。空数组保持普通任务工具策略"},
+			"budget": map[string]any{"type": "object", "description": "子 Agent 预算", "properties": map[string]any{
+				"max_wall_time_seconds": map[string]any{"type": "integer", "description": "墙钟上限；映射为任务 deadline 并强制执行"},
+				"max_input_tokens":      map[string]any{"type": "integer", "description": "输入 token 预算，用于结果核算/熔断决策"},
+				"max_output_tokens":     map[string]any{"type": "integer", "description": "输出 token 预算，用于结果核算/熔断决策"},
+				"max_tool_calls":        map[string]any{"type": "integer", "description": "工具调用预算，用于结果核算/熔断决策"},
+			}},
 			"llm_profile_id":  map[string]any{"type": "integer", "description": "可选：指定本子任务 planner/worker 用的 LLM 配置 id(见 list_llm_profiles)；留空则继承父任务、再回退全局激活配置"},
-			"timeout_seconds": map[string]any{"type": "integer", "description": "可选：任务级超时(秒)。到点后触发优雅收尾并进入 timeout 终态；留空或 0 = 不限时"},
-		}, "description", "goal"),
+			"timeout_seconds": map[string]any{"type": "integer", "description": "兼容旧调用：任务级超时；budget.max_wall_time_seconds 优先"},
+		}, "description"),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
-				Description, Goal, ParentRef string
-				LLMProfileID                 json.RawMessage `json:"llm_profile_id"`
-				TimeoutSeconds               int             `json:"timeout_seconds"`
+				Description      string                `json:"description"`
+				Objective        string                `json:"objective"`
+				Goal             string                `json:"goal"`
+				ParentRef        string                `json:"parent_ref"`
+				AssetIDs         []int64               `json:"asset_ids"`
+				RequiredEvidence []string              `json:"required_evidence"`
+				AllowedTools     []string              `json:"allowed_tools"`
+				Budget           pgdb.DelegationBudget `json:"budget"`
+				LLMProfileID     json.RawMessage       `json:"llm_profile_id"`
+				TimeoutSeconds   int                   `json:"timeout_seconds"`
 			}
-			_ = json.Unmarshal(in, &a)
+			if err := json.Unmarshal(in, &a); err != nil {
+				return actool.Errorf("参数解析失败: " + err.Error()), nil
+			}
 			if strings.TrimSpace(a.Description) == "" {
 				a.Description = "未命名任务"
 			}
-			if strings.TrimSpace(a.Goal) == "" {
-				return actool.Errorf("goal 为必填"), nil
+			objective := strings.TrimSpace(a.Objective)
+			if objective == "" {
+				objective = strings.TrimSpace(a.Goal)
 			}
-			if a.TimeoutSeconds < 0 {
-				a.TimeoutSeconds = 0
+			if objective == "" {
+				return actool.Errorf("objective（或兼容参数 goal）为必填"), nil
 			}
+			if a.ParentRef != "" {
+				if _, ok := s.m.Task(a.ParentRef); !ok {
+					return actool.Errorf("父任务不存在: " + a.ParentRef), nil
+				}
+			}
+			if len(a.AssetIDs) > 0 {
+				assets, err := s.m.Assets().GetByIDs(a.AssetIDs)
+				if err != nil {
+					return actool.Errorf("读取 asset_ids 失败: " + err.Error()), nil
+				}
+				found := map[int64]bool{}
+				for _, asset := range assets {
+					found[asset.ID] = true
+				}
+				for _, id := range a.AssetIDs {
+					if id <= 0 || !found[id] {
+						return actool.Errorf(fmt.Sprintf("asset 不存在: %d", id)), nil
+					}
+				}
+			}
+			if len(a.RequiredEvidence) == 0 {
+				a.RequiredEvidence = []string{
+					"facts include summary, evidence and confidence",
+					"negative results set negative=true and include evidence",
+					"findings include reproducible request/response or command evidence",
+				}
+			}
+			timeout := a.Budget.MaxWallTimeSeconds
+			if timeout <= 0 {
+				timeout = a.TimeoutSeconds
+			}
+			if timeout < 0 {
+				timeout = 0
+			}
+			a.Budget.MaxWallTimeSeconds = timeout
 			// LLM profile resolution: explicit id > inherit parent's pin > active(nil).
 			var pin *int64
 			if id := parseProfileID(a.LLMProfileID); id > 0 {
@@ -269,20 +326,203 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 					pin = pt.LLMProfileID
 				}
 			}
-			t, err := s.m.CreateTask(a.Description, a.Goal, pin, a.TimeoutSeconds, 0, nil)
+			t, err := s.m.CreateTask(a.Description, objective, pin, timeout, 0, nil)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
+			childID, _ := strconv.ParseInt(t.ID, 10, 64)
+			contract := pgdb.TaskDelegation{ChildTaskID: childID, ParentRef: a.ParentRef,
+				Objective: objective, AssetIDs: a.AssetIDs, RequiredEvidence: a.RequiredEvidence,
+				AllowedTools: a.AllowedTools, Budget: a.Budget}
+			if err := s.m.PG().SaveTaskDelegation(contract); err != nil {
+				_ = s.m.DeleteTask(t.ID)
+				return actool.Errorf("保存 delegation contract 失败: " + err.Error()), nil
+			}
+			if saved, err := s.m.PG().GetTaskDelegation(childID); err == nil && saved != nil {
+				contract = *saved
+			}
+			t.AllowedTools = append([]string(nil), contract.AllowedTools...)
+			t.DelegationBudget = contract.Budget
 			if a.ParentRef != "" {
 				t.ParentRef = a.ParentRef
-				if id, e := strconv.ParseInt(t.ID, 10, 64); e == nil {
-					_ = s.m.PG().SetParentRef(id, a.ParentRef)
+				if err := s.m.PG().SetParentRef(childID, a.ParentRef); err != nil {
+					_ = s.m.DeleteTask(t.ID)
+					return actool.Errorf("保存父子任务关系失败: " + err.Error()), nil
 				}
 			}
-			s.seed(t, a.Description+" "+a.Goal) // seed 初始资产，喂给事件驱动 loop
-			s.createGoals(s.ctx, t, nil)        // 目标分解(LLM;规则兜底)
-			s.engine.Run(s.ctx, t)              // 启动该任务的探索引擎
-			return actool.Text(fmt.Sprintf("task created: %s", t.ID)), nil
+			origin, err := t.Store.OriginFactID()
+			if err != nil {
+				_ = s.m.DeleteTask(t.ID)
+				return actool.Errorf("读取子任务 origin 失败: " + err.Error()), nil
+			}
+			if origin > 0 {
+				for _, assetID := range contract.AssetIDs {
+					if err := t.Store.Anchor(origin, assetID); err != nil {
+						_ = s.m.DeleteTask(t.ID)
+						return actool.Errorf(fmt.Sprintf("锚定 asset %d 失败: %v", assetID, err)), nil
+					}
+				}
+			}
+			s.seed(t, a.Description+" "+objective) // seed 初始资产，喂给事件驱动 loop
+			s.createGoals(s.ctx, t, nil)           // 目标分解(LLM;规则兜底)
+			s.engine.Run(s.ctx, t)                 // 启动该任务的探索引擎
+			return jsonResult(map[string]any{"task_id": t.ID, "delegation": contract})
+		})
+}
+
+func resultPayload(node *pgdb.Node, fields ...string) map[string]any {
+	var payload map[string]any
+	_ = json.Unmarshal(node.Payload, &payload)
+	out := map[string]any{"id": node.ID}
+	for _, field := range fields {
+		if value, ok := payload[field]; ok {
+			if text, ok := value.(string); ok {
+				value = firstLine(text, 1000)
+			}
+			out[field] = value
+		}
+	}
+	return out
+}
+
+// taskDelegationResult returns a bounded, structured child-agent result. Full
+// transcripts and artifact bodies stay external and are available only through
+// explicit trace/artifact reads.
+func (s *Server) taskDelegationResult(t *Task) (map[string]any, error) {
+	result := map[string]any{"task_id": t.ID, "status": s.deriveTaskStatus(t)}
+	childID, _ := strconv.ParseInt(t.ID, 10, 64)
+	delegation, err := s.m.PG().GetTaskDelegation(childID)
+	if err != nil {
+		return nil, err
+	}
+	if delegation != nil {
+		result["assignment"] = delegation
+	} else {
+		result["assignment"] = map[string]any{"schema_version": 1, "child_task_id": childID, "objective": t.Goal}
+	}
+
+	nodes, err := t.Store.ListByKind(pgdb.KindFact, 200)
+	if err != nil {
+		return nil, err
+	}
+	facts := make([]map[string]any, 0, len(nodes))
+	negative := make([]map[string]any, 0)
+	for _, node := range nodes {
+		if node.State != "confirmed" {
+			continue
+		}
+		entry := resultPayload(node, "summary", "confidence", "evidence")
+		var payload struct {
+			Negative bool `json:"negative"`
+		}
+		_ = json.Unmarshal(node.Payload, &payload)
+		if payload.Negative {
+			negative = append(negative, entry)
+		} else {
+			facts = append(facts, entry)
+		}
+	}
+	result["facts"] = facts
+	result["negative_results"] = negative
+
+	findNodes, err := t.Store.ListByKind(pgdb.KindFinding, 100)
+	if err != nil {
+		return nil, err
+	}
+	findings := make([]map[string]any, 0, len(findNodes))
+	for _, node := range findNodes {
+		if node.State == "confirmed" {
+			findings = append(findings, resultPayload(node, "summary", "vulnclass", "severity", "evidence", "flag"))
+		}
+	}
+	result["findings"] = findings
+
+	artifacts, err := t.Store.Artifacts("", 0, 100)
+	if err != nil {
+		return nil, err
+	}
+	artifactRefs := make([]map[string]any, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		artifactRefs = append(artifactRefs, map[string]any{
+			"id": artifact.ID, "node_id": artifact.NodeID, "path": artifact.StoragePath,
+			"content_hash": artifact.ContentHash, "mime_type": artifact.MIMEType,
+			"byte_size": artifact.ByteSize, "line_count": artifact.LineCount,
+			"summary": firstLine(artifact.Summary, 300), "permission": artifact.PermissionLabel,
+		})
+	}
+	result["artifact_refs"] = artifactRefs
+
+	frontier, err := t.Store.Frontier(20)
+	if err != nil {
+		return nil, err
+	}
+	next := make([]map[string]any, 0, len(frontier))
+	for _, node := range frontier {
+		next = append(next, resultPayload(node, "summary", "asset_ids"))
+	}
+	result["next_actions"] = next
+
+	usage, err := t.Store.TokenTotal()
+	if err != nil {
+		return nil, err
+	}
+	costs, err := t.Store.RoundCostsByWorker()
+	if err != nil {
+		return nil, err
+	}
+	total := sumRoundCosts(costs)
+	runSeconds := time.Now().Unix() - t.CreatedAt
+	if t.CompletedAt > 0 {
+		runSeconds = t.CompletedAt - t.CreatedAt
+	}
+	if runSeconds < 0 {
+		runSeconds = 0
+	}
+	result["usage"] = map[string]any{
+		"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens,
+		"cache_read_tokens": usage.CacheReadTokens, "cache_write_tokens": usage.CacheWriteTokens,
+		"tool_calls": total.ToolCalls, "tool_errors": total.ToolErrors, "rounds": total.Rounds,
+		"wall_time_seconds": runSeconds,
+	}
+	if delegation != nil {
+		exceeded := make([]string, 0, 4)
+		if max := delegation.Budget.MaxWallTimeSeconds; max > 0 && runSeconds >= int64(max) {
+			exceeded = append(exceeded, "max_wall_time_seconds")
+		}
+		if max := delegation.Budget.MaxInputTokens; max > 0 && usage.InputTokens >= max {
+			exceeded = append(exceeded, "max_input_tokens")
+		}
+		if max := delegation.Budget.MaxOutputTokens; max > 0 && usage.OutputTokens >= max {
+			exceeded = append(exceeded, "max_output_tokens")
+		}
+		if max := delegation.Budget.MaxToolCalls; max > 0 && total.ToolCalls >= max {
+			exceeded = append(exceeded, "max_tool_calls")
+		}
+		result["budget_exceeded"] = exceeded
+	}
+	return result, nil
+}
+
+func (s *Server) toolGetTaskResult() actool.CoreTool {
+	return roTool("get_task_result",
+		"一次读取子 Agent 的结构化结果：assignment、facts、findings、negative_results、artifact_refs、next_actions、usage。不会返回完整 transcript 或大工具输出；需要原文时再按引用读取。",
+		objSchema(map[string]any{"task_id": strParam("子任务 id")}, "task_id"),
+		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+			var a struct {
+				TaskID string `json:"task_id"`
+			}
+			if err := json.Unmarshal(in, &a); err != nil {
+				return actool.Errorf("参数解析失败: " + err.Error()), nil
+			}
+			t, ok := s.m.Task(strings.TrimSpace(a.TaskID))
+			if !ok {
+				return actool.Errorf("task 不存在: " + a.TaskID), nil
+			}
+			result, err := s.taskDelegationResult(t)
+			if err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			return jsonResult(result)
 		})
 }
 
@@ -308,7 +548,7 @@ func (s *Server) toolPauseTask() actool.CoreTool {
 // bench_close finished containers and spawn replacements — no blind sleep.
 func (s *Server) toolWaitTask() actool.CoreTool {
 	return wrTool("wait_task",
-		"阻塞等待任务进入终态，最多等 timeout_seconds(默认 600)。支持同时等多个任务：task_id 或 task_ids 传一个/多个任务 id（来自 spawn_task）。【任一】任务到达 done/timeout/stopped 立即返回，并报告所有被等任务的当前状态。拿到结果立刻 list_task_findings 汇总、bench_close 释放已结束容器、spawn 补位。不要 sleep 盲等。",
+		"阻塞等待任务进入终态，最多等 timeout_seconds(默认 600)。支持同时等待多个任务；任一结束立即返回所有状态，并为已结束子任务内联结构化 result（facts/findings/negative_results/artifact_refs/next_actions/usage），无需再拉完整图或 transcript。",
 		objSchema(map[string]any{
 			"task_id":         strParam("要等待的任务 id(单个，来自 spawn_task)；或用 task_ids 等多个"),
 			"task_ids":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "可选：要同时等待的多个任务 id(任一结束即返回)"},
@@ -330,6 +570,16 @@ func (s *Server) toolWaitTask() actool.CoreTool {
 			if len(ids) == 0 {
 				return actool.Errorf("task_id 或 task_ids 至少提供一个"), nil
 			}
+			seenInput := map[string]bool{}
+			deduped := ids[:0]
+			for _, id := range ids {
+				id = strings.TrimSpace(id)
+				if id != "" && !seenInput[id] {
+					seenInput[id] = true
+					deduped = append(deduped, id)
+				}
+			}
+			ids = deduped
 			// 并发感知：把显式指定的任务扩展为它的"兄弟任务"(同 parent_ref 的其它在跑任务)
 			// 一起监控 —— 这样即便 agent 只传单个 task_id，也能一次感知同批任务里任意一个
 			// 结束，避免逐个 wait_task 串行等待。parent_ref 为空时扩展所有非终态任务。
@@ -369,30 +619,36 @@ func (s *Server) toolWaitTask() actool.CoreTool {
 			}
 			deadline := time.Now().Add(time.Duration(wait) * time.Second)
 			for {
-				statuses := make([]string, 0, len(ids))
+				tasks := make([]map[string]any, 0, len(ids))
 				anyDone := false
 				for _, id := range ids {
 					t, ok := s.m.Task(id)
 					if !ok {
-						statuses = append(statuses, fmt.Sprintf("%s=不存在", id))
+						tasks = append(tasks, map[string]any{"task_id": id, "status": "not_found"})
 						anyDone = true
 						continue
 					}
 					st := s.deriveTaskStatus(t)
-					statuses = append(statuses, fmt.Sprintf("%s=%s", id, st))
+					row := map[string]any{"task_id": id, "status": st}
 					if st == "done" || st == "timeout" || st == "stopped" || st == "failed" {
 						anyDone = true
+						if result, err := s.taskDelegationResult(t); err == nil {
+							row["result"] = result
+						} else {
+							row["result_error"] = err.Error()
+						}
 					}
+					tasks = append(tasks, row)
 				}
 				if anyDone {
-					return actool.Text("任务状态: " + strings.Join(statuses, ", ")), nil
+					return jsonResult(map[string]any{"reason": "terminal", "tasks": tasks})
 				}
 				if time.Now().After(deadline) {
-					return actool.Text(fmt.Sprintf("等待超时(%d 秒): %s", wait, strings.Join(statuses, ", "))), nil
+					return jsonResult(map[string]any{"reason": "wait_timeout", "waited_seconds": wait, "tasks": tasks})
 				}
 				select {
 				case <-ctx.Done():
-					return actool.Text("wait_task 被取消: " + strings.Join(statuses, ", ")), nil
+					return jsonResult(map[string]any{"reason": "cancelled", "tasks": tasks})
 				case <-time.After(5 * time.Second):
 				}
 			}
@@ -501,7 +757,7 @@ func (s *Server) seedOrchestrationTools() {
 // reaches an old DB otherwise. Preserves each tool's agent binding + enabled flag.
 // Bump the flag whenever these tools' schemas/descriptions change in code.
 func (s *Server) refreshBuiltinToolSchemas() {
-	const flag = "tool_schema_refresh_v4_goal_met_desc"
+	const flag = "tool_schema_refresh_v5_structured_delegation"
 	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
 		return
 	}

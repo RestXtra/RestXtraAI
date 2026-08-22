@@ -273,6 +273,21 @@ CREATE TABLE IF NOT EXISTS task_companies (
 CREATE INDEX IF NOT EXISTS idx_task_companies_company ON task_companies(company_id);
 CREATE INDEX IF NOT EXISTS idx_task_companies_task    ON task_companies(task_id);
 
+-- Structured parent -> child agent handoff. The contract is intentionally
+-- bounded and contains references/budgets rather than a copied transcript.
+CREATE TABLE IF NOT EXISTS task_delegations (
+    child_task_id BIGINT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    parent_ref    TEXT,
+    contract      JSONB NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_task_delegations_parent ON task_delegations(parent_ref)
+    WHERE parent_ref IS NOT NULL;
+DROP TRIGGER IF EXISTS trg_task_delegations_upd ON task_delegations;
+CREATE TRIGGER trg_task_delegations_upd BEFORE UPDATE ON task_delegations
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 -- =====================================================================
 -- E. Agents / 提示词模板 / 变量目录
 -- =====================================================================

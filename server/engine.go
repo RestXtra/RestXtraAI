@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -521,10 +522,14 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		if e.isSettling(t.ID) {
 			return
 		}
+		if e.enforceDelegationBudget(t) {
+			return
+		}
 		e.stampFirstRun(t) // 首次真正规划 → 盖 first_run_at + 算 deadline(仅带 timeout 的任务)
 		e.touch(t.ID)
 		emit := func(r db.Activity) { e.emitActivity(t, r) }
 		ectx := e.clockCtx(e.execContextFor(ctx, t.ID), t, false) // cancellable by Pause; 带任务 deadline
+		ectx = agent.WithAllowedTools(ectx, t.AllowedTools)
 		log.Printf("[planner] task %s 规划中…(%s 触发)", t.ID, src)
 		// round marker: each Plan() is one planner round; emit a boundary so the
 		// UI can separate rounds in the transcript (kind='round').
@@ -604,6 +609,12 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 			}
 			continue // 任务已终态(done/failed/timeout):停止领取遗留意图,别在完成后空跑 frontier
 		}
+		if e.enforceDelegationBudget(t) {
+			if sleepCtx(ctx, 1000*time.Millisecond) {
+				return
+			}
+			continue
+		}
 		intent := e.claimNext(t, name)
 		if intent == nil {
 			if sleepCtx(ctx, 800*time.Millisecond) {
@@ -617,6 +628,7 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 		e.touch(t.ID)
 		emit := func(r db.Activity) { e.emitActivity(t, r) }
 		ectx := e.clockCtx(e.execContextFor(ctx, t.ID), t, false) // cancellable by Pause; 带任务 deadline
+		ectx = agent.WithAllowedTools(ectx, t.AllowedTools)
 		// per-work child context so the planner's kill_work can stop just this work.
 		workCtx, workCancel := context.WithCancel(ectx)
 		e.registerWork(intent.ID, workCancel)
@@ -771,8 +783,68 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 			t.ResetEmptyRuns()
 		}
 		e.touch(t.ID)
+		if e.enforceDelegationBudget(t) {
+			continue
+		}
 		t.NotifyDone(intent.ID) // results changed the graph -> wake the planner (with the just-finished intent id)
 	}
+}
+
+// enforceDelegationBudget stops a delegated child task at the first completed
+// activity boundary that reaches a token or tool-call limit. Provider streams
+// cannot be interrupted at an exact token, so a single in-flight round may
+// overshoot; the guarded terminal write ensures only one caller records the
+// transition and cancels the remaining planner/workers.
+func (e *Engine) enforceDelegationBudget(t *Task) bool {
+	budget := t.DelegationBudget
+	if budget.MaxInputTokens <= 0 && budget.MaxOutputTokens <= 0 && budget.MaxToolCalls <= 0 {
+		return false
+	}
+	usage, err := t.Store.TokenTotal()
+	if err != nil {
+		log.Printf("[budget] task %s 查询 token 用量失败: %v", t.ID, err)
+		return false
+	}
+	costs, err := t.Store.RoundCostsByWorker()
+	if err != nil {
+		log.Printf("[budget] task %s 查询工具用量失败: %v", t.ID, err)
+		return false
+	}
+	toolCalls := 0
+	for _, cost := range costs {
+		toolCalls += cost.ToolCalls
+	}
+	exceeded := make([]string, 0, 3)
+	if budget.MaxInputTokens > 0 && usage.InputTokens >= budget.MaxInputTokens {
+		exceeded = append(exceeded, "max_input_tokens")
+	}
+	if budget.MaxOutputTokens > 0 && usage.OutputTokens >= budget.MaxOutputTokens {
+		exceeded = append(exceeded, "max_output_tokens")
+	}
+	if budget.MaxToolCalls > 0 && toolCalls >= budget.MaxToolCalls {
+		exceeded = append(exceeded, "max_tool_calls")
+	}
+	if len(exceeded) == 0 {
+		return false
+	}
+
+	won, err := e.m.SetTaskStatusGuarded(t.ID, "timeout")
+	if err != nil {
+		log.Printf("[budget] task %s 标记预算耗尽失败: %v", t.ID, err)
+		return false
+	}
+	if won {
+		payload, _ := json.Marshal(map[string]any{
+			"reason": "delegation_budget_exceeded", "exceeded": exceeded,
+			"budget": budget, "input_tokens": usage.InputTokens,
+			"output_tokens": usage.OutputTokens, "tool_calls": toolCalls,
+		})
+		e.emitActivity(t, db.Activity{Worker: "system", EventType: db.EventBudgetChanged,
+			EventOnly: true, Summary: "子任务执行预算已耗尽", Payload: payload})
+		log.Printf("[budget] task %s 达到委派预算(%s)，停止后续回合", t.ID, strings.Join(exceeded, ","))
+		e.cancelExec(t.ID)
+	}
+	return won || isTerminalStatus(e.m.TaskStatus(t.ID))
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) (done bool) {
