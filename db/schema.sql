@@ -161,6 +161,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_expnodes_intent_dedupe
 CREATE INDEX IF NOT EXISTS idx_expnodes_intent_scope
     ON exploration_nodes(exploration_id, (payload->>'intent_scope_key'), completed_at DESC, id DESC)
     WHERE kind='intent' AND payload ? 'intent_scope_key';
+
+CREATE TABLE IF NOT EXISTS agent_resource_leases (
+    id             BIGSERIAL PRIMARY KEY,
+    exploration_id BIGINT NOT NULL REFERENCES explorations(id) ON DELETE CASCADE,
+    intent_id      BIGINT NOT NULL REFERENCES exploration_nodes(id) ON DELETE CASCADE,
+    owner          TEXT NOT NULL,
+    resource_key   TEXT NOT NULL,
+    mode           TEXT NOT NULL CHECK (mode IN ('shared','exclusive')),
+    lease_expires_at TIMESTAMPTZ NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (exploration_id, resource_key, owner)
+);
+CREATE INDEX IF NOT EXISTS idx_resource_leases_conflict
+    ON agent_resource_leases(exploration_id, resource_key, lease_expires_at);
 DROP TRIGGER IF EXISTS trg_expnodes_upd ON exploration_nodes;
 CREATE TRIGGER trg_expnodes_upd BEFORE UPDATE ON exploration_nodes
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
@@ -509,6 +523,7 @@ CREATE TABLE IF NOT EXISTS agent_events (
     CHECK ((exploration_id IS NOT NULL) <> (conversation_id IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_agent_events_exploration ON agent_events(exploration_id, id) WHERE exploration_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_events_exploration_type ON agent_events(exploration_id, event_type, id) WHERE exploration_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_agent_events_conversation ON agent_events(conversation_id, id) WHERE conversation_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_agent_events_turn ON agent_events(turn_id, id) WHERE turn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type, id);

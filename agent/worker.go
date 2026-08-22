@@ -267,7 +267,8 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 	// (段[A]/[B]/[C] + deferred 块)。与 planner 一致：把易变的运行期数据移出 system，
 	// system 每 session 稳定、更利于缓存；代价是长 run 里这条 user 消息可能被 compaction
 	// 压缩（意图是 worker 全部职责，若被压掉由证据闸门/收尾兜底，见 2.5/2.6 说明）。
-	overview := renderWorkerGraphOverview(tsx.graphOverviewData())
+	intentID := intent.ID
+	overview := restoreWorkingSet(ts, name, &intentID) + renderWorkerGraphOverview(tsx.graphOverviewData())
 	system, boundary := deferredSystem(workerSystem(w.proxyAddr, w.workDir), def)
 	// 任务级 deadline(经 ctx 注入)夹逼本 run 的墙钟预算 + 决定收尾词(见 taskclock.go)。
 	tc := taskClockFrom(ctx)
@@ -334,7 +335,6 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 		opts.Transcript = w.tx
 		opts.SessionID = fmt.Sprintf("exp%d-worker-i%d", ts.ID(), intent.ID)
 	}
-	intentID := intent.ID
 	emitWrap := func(r db.Activity) {
 		if emit != nil {
 			r.NodeID, r.Worker = &intentID, name

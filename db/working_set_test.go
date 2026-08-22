@@ -63,3 +63,28 @@ func TestWorkingSetProjectionIsVersionedAndIdempotent(t *testing.T) {
 		t.Fatalf("summary event missing replay payload: %s (err=%v)", payload, err)
 	}
 }
+
+func TestWorkingSetRestoredEventIsAuditable(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) - skipping", err)
+	}
+	defer d.Close()
+	task, err := d.CreateTask("restore audit", "resume safely", nil, 0, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(task.ID) //nolint:errcheck
+	store := d.Exploration(task.ExplorationID)
+	payload := json.RawMessage(`{"working_set_id":7,"version":2,"content_hash":"sha256:test","source_event_id":11,"agent":"planner"}`)
+	if _, err := store.AppendActivity(Activity{EventType: EventWorkingSetRestored, EventOnly: true, Worker: "planner", Payload: payload}); err != nil {
+		t.Fatal(err)
+	}
+	events, _, err := store.AgentEvents(0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].EventType != EventWorkingSetRestored || string(events[0].Payload) == "" {
+		t.Fatalf("unexpected restore audit events: %+v", events)
+	}
+}

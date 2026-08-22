@@ -358,6 +358,103 @@ export interface TaskRoundCosts {
   total: AgentRoundCost;
 }
 
+export interface AgentEvent {
+  id: number;
+  node_id?: number;
+  agent?: string;
+  event_type: string;
+  payload: Record<string, unknown>;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_tokens?: number;
+  created_at: string;
+}
+
+export interface TaskPerformanceBaseline {
+  schema_version: string;
+  task_id: number;
+  status: string;
+  repeatable: boolean;
+  time_to_first_confirmed_fact_seconds?: number;
+  time_to_first_evidence_fact_seconds?: number;
+  time_to_first_confirmed_finding_seconds?: number;
+  task_completion_seconds?: number;
+  results: {
+    confirmed_facts: number;
+    negative_results: number;
+    evidence_backed_facts: number;
+    confirmed_findings: number;
+    evidence_backed_findings: number;
+    artifacts: number;
+  };
+  intents: {
+    total: number;
+    attempts: number;
+    repeated_attempts: number;
+    duplicate_intents: number;
+    zero_yield_intents: number;
+    duplicate_intent_rejections: number;
+    zero_yield_scope_rejections: number;
+  };
+  coverage: { total: number; verified: number; vulnerable: number; verified_rate: number; vulnerable_rate: number };
+  usage: AgentRoundCost;
+  efficiency: {
+    tool_error_rate: number;
+    duplicate_intent_rate: number;
+    zero_yield_intent_rate: number;
+    evidence_coverage_rate: number;
+    cache_read_rate: number;
+    confirmed_results_per_1k_input_tokens: number;
+    input_tokens_per_finding?: number;
+    tool_calls_per_finding?: number;
+  };
+}
+
+export interface AgentWorkingSet {
+  id: number;
+  version: number;
+  schema_version: number;
+  content_hash: string;
+  source_event_id: number;
+  created_at: string;
+  fixed: { objective: string; authorization_scope: string[]; constraints: string[]; risk_policy: string[] };
+  sliding: {
+    recent_intents: unknown[];
+    pending_dependencies: unknown[];
+    recent_tool_errors: unknown[];
+    pending_evidence: unknown[];
+    artifact_refs: unknown[];
+  };
+}
+
+export interface TaskOperationsDashboard {
+  task_id: number;
+  baseline: TaskPerformanceBaseline;
+  costs: TaskRoundCosts;
+  events: AgentEvent[];
+  event_counts: Record<string, number>;
+  working_set?: AgentWorkingSet;
+  resource_leases: {
+    intent_id: number;
+    owner: string;
+    resource_key: string;
+    mode: "shared" | "exclusive";
+    lease_expires_at: string;
+  }[];
+  projection: {
+    complete: boolean;
+    matches: boolean;
+    event_hash: string;
+    projection_hash: string;
+    event_nodes: number;
+    projected_nodes: number;
+    event_edges: number;
+    projected_edges: number;
+    event_anchors: number;
+    projected_anchors: number;
+  };
+}
+
 export interface TaskOverview {
   task: Task;
   engine_mode: EngineMode;

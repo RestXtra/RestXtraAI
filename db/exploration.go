@@ -210,13 +210,29 @@ VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 		s.expID, kind, string(raw), priority, state, origin).Scan(&id); err != nil {
 		return 0, err
 	}
+	insertedAnchors := make([]int64, 0, len(anchors))
 	for _, a := range anchors {
-		if _, err := tx.Exec(`INSERT INTO exploration_anchors(node_id, asset_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, id, a); err != nil {
+		res, err := tx.Exec(`INSERT INTO exploration_anchors(node_id, asset_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, id, a)
+		if err != nil {
+			return 0, err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			insertedAnchors = append(insertedAnchors, a)
+		}
+	}
+	if err := appendNodeCreatedEvent(tx, s.expID, id, kind, raw, priority, state, origin); err != nil {
+		return 0, err
+	}
+	for _, a := range insertedAnchors {
+		if err := appendAnchorCreatedEvent(tx, s.expID, id, a); err != nil {
 			return 0, err
 		}
 	}
-	s.BumpVersion() // P2.6: graph changed → invalidate overview cache
-	return id, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	s.BumpVersion()
+	return id, nil
 }
 
 // AddIntent is a convenience: an open intent.
@@ -224,7 +240,13 @@ func (s *ExplorationStore) AddIntent(payload map[string]any, priority int, ancho
 	if origin == "" {
 		origin = "planner"
 	}
-	return s.AddNode("intent", payload, priority, "open", origin, anchors)
+	stored := make(map[string]any, len(payload)+2)
+	for key, value := range payload {
+		stored[key] = value
+	}
+	stored["concurrency_class"] = intentConcurrencyClass(stored)
+	stored["resource_claims"] = normalizeResourceClaims(stored, anchors)
+	return s.AddNode("intent", stored, priority, "open", origin, anchors)
 }
 
 // AddGoal writes a goal node (state open).
@@ -254,38 +276,124 @@ func (s *ExplorationStore) Anchor(nodeID, assetID int64) error {
 	if nodeID <= 0 || assetID <= 0 {
 		return nil
 	}
-	_, err := s.db.Exec(`INSERT INTO exploration_anchors(node_id, asset_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, nodeID, assetID)
-	s.BumpVersion() // P2.6
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`INSERT INTO exploration_anchors(node_id, asset_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, nodeID, assetID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		if err := appendAnchorCreatedEvent(tx, s.expID, nodeID, assetID); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.BumpVersion()
+	return nil
 }
 
 // Link adds a typed exploration edge (idempotent).
 func (s *ExplorationStore) Link(from int64, rel string, to int64) error {
-	_, err := s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`
 INSERT INTO exploration_edges(exploration_id, src_id, rel, dst_id) VALUES ($1,$2,$3,$4)
 ON CONFLICT (exploration_id, src_id, rel, dst_id) DO NOTHING`, s.expID, from, rel, to)
-	s.BumpVersion() // P2.6
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		if err := appendEdgeCreatedEvent(tx, s.expID, from, rel, to); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.BumpVersion()
+	return nil
 }
 
 // SetNodeState updates any node's state (never deletes).
 func (s *ExplorationStore) SetNodeState(id int64, state string) error {
-	_, err := s.db.Exec(`UPDATE exploration_nodes SET state=$1 WHERE id=$2 AND exploration_id=$3`, state, id, s.expID)
-	s.BumpVersion() // P2.6
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var previous string
+	if err := tx.QueryRow(`SELECT state FROM exploration_nodes WHERE id=$1 AND exploration_id=$2 FOR UPDATE`, id, s.expID).Scan(&previous); err != nil {
+		return err
+	}
+	if previous == state {
+		return tx.Commit()
+	}
+	if _, err := tx.Exec(`UPDATE exploration_nodes SET state=$1 WHERE id=$2 AND exploration_id=$3`, state, id, s.expID); err != nil {
+		return err
+	}
+	if err := appendNodeStateEvent(tx, s.expID, id, previous, state, "", "explicit"); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.BumpVersion()
+	return nil
 }
 
 // RequeueExpiredIntentLeases makes crash recovery explicit without disturbing
 // work still owned by another live server instance.
 func (s *ExplorationStore) RequeueExpiredIntentLeases() (int64, error) {
-	res, err := s.db.Exec(`UPDATE exploration_nodes
-SET state='open', owner=NULL, lease_expires_at=NULL, completed_at=NULL
-WHERE exploration_id=$1 AND kind='intent' AND state='running'
-  AND (lease_expires_at IS NULL OR lease_expires_at < now())`, s.expID)
+	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
 	}
-	n, _ := res.RowsAffected()
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM agent_resource_leases WHERE exploration_id=$1 AND lease_expires_at<now()`, s.expID); err != nil {
+		return 0, err
+	}
+	rows, err := tx.Query(`UPDATE exploration_nodes
+SET state='open', owner=NULL, lease_expires_at=NULL, completed_at=NULL
+WHERE exploration_id=$1 AND kind='intent' AND state='running'
+	  AND (lease_expires_at IS NULL OR lease_expires_at < now()) RETURNING id,COALESCE(owner,'')`, s.expID)
+	if err != nil {
+		return 0, err
+	}
+	var changed []struct {
+		id    int64
+		owner string
+	}
+	for rows.Next() {
+		var v struct {
+			id    int64
+			owner string
+		}
+		if err := rows.Scan(&v.id, &v.owner); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		changed = append(changed, v)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	for _, v := range changed {
+		if err := appendNodeStateEvent(tx, s.expID, v.id, "running", "open", v.owner, "lease_expired"); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	n := int64(len(changed))
 	if n > 0 {
 		s.BumpVersion() // P2.6
 	}
@@ -548,6 +656,13 @@ func (s *ExplorationStore) ClaimNextIntentLease(owner, agent string, lease time.
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
+	// Resource compatibility must be checked and leased atomically. Serializing
+	// only this short claim transaction prevents two processes from both seeing
+	// an empty conflicting resource set.
+	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock($1)`, s.expID); err != nil {
+		return nil, err
+	}
 	var n Node
 	var raw []byte
 	var reclaimed bool
@@ -557,6 +672,11 @@ WITH candidate AS (
     FROM exploration_nodes n
     WHERE n.exploration_id=$1 AND n.kind='intent'
       AND (n.state='open' OR (n.state='running' AND n.lease_expires_at < now()))
+	  AND NOT EXISTS (
+	      SELECT 1 FROM jsonb_to_recordset(COALESCE(n.payload->'resource_claims','[]'::jsonb)) c(key text,mode text)
+	      JOIN agent_resource_leases l ON l.exploration_id=n.exploration_id AND l.resource_key=c.key AND l.lease_expires_at>=now()
+	      WHERE l.owner<>$2 AND (l.mode='exclusive' OR c.mode='exclusive')
+	  )
       AND NOT EXISTS (
           SELECT 1
           FROM exploration_edges dep
@@ -587,7 +707,12 @@ SELECT * FROM claimed`, s.expID, owner, lease.Seconds()).Scan(
 		&n.ID, &n.Kind, &raw, &n.Priority, &n.State, &n.Origin, &n.Owner,
 		&n.LeaseExpiresAt, &n.AttemptCount, &n.LastLeaseAt, &n.CreatedAt, &reclaimed)
 	if err == sql.ErrNoRows {
-		_ = tx.Rollback()
+		if err := appendFirstResourceConflict(tx, s.expID, agent); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
 	if err != nil {
@@ -595,10 +720,21 @@ SELECT * FROM claimed`, s.expID, owner, lease.Seconds()).Scan(
 		return nil, err
 	}
 	n.Payload = json.RawMessage(raw)
+	if err := acquireIntentResources(tx, s.expID, &n, owner, agent); err != nil {
+		return nil, err
+	}
 	payload, _ := json.Marshal(map[string]any{
 		"intent_id": n.ID, "owner": owner, "attempt": n.AttemptCount,
 		"lease_expires_at": n.LeaseExpiresAt, "reclaimed": reclaimed,
 	})
+	previous := "open"
+	if reclaimed {
+		previous = "running"
+	}
+	if err := appendNodeStateEvent(tx, s.expID, n.ID, previous, "running", owner, "intent_claimed"); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
 	if _, err := appendCanonicalEvent(tx, eventScope{explorationID: &s.expID}, Activity{
 		NodeID: &n.ID, Worker: agent, EventType: EventIntentClaimed, EventOnly: true, Payload: payload,
 	}, nil); err != nil {
@@ -617,7 +753,12 @@ func (s *ExplorationStore) RenewIntentLease(id int64, owner string, lease time.D
 	if lease <= 0 {
 		lease = 2 * time.Minute
 	}
-	res, err := s.db.Exec(`UPDATE exploration_nodes
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE exploration_nodes
 SET lease_expires_at=now()+($4 * interval '1 second'), last_lease_at=now()
 WHERE id=$1 AND exploration_id=$2 AND kind='intent' AND state='running'
   AND owner=$3 AND lease_expires_at >= now()`, id, s.expID, owner, lease.Seconds())
@@ -625,14 +766,25 @@ WHERE id=$1 AND exploration_id=$2 AND kind='intent' AND state='running'
 		return false, err
 	}
 	n, _ := res.RowsAffected()
-	return n == 1, nil
+	if n != 1 {
+		return false, tx.Commit()
+	}
+	if _, err := tx.Exec(`UPDATE agent_resource_leases SET lease_expires_at=now()+($4 * interval '1 second') WHERE exploration_id=$1 AND intent_id=$2 AND owner=$3`, s.expID, id, owner, lease.Seconds()); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 // FinishIntentLease changes state only while owner still holds an unexpired
 // lease. It prevents a delayed worker from overwriting a reclaimed attempt.
 func (s *ExplorationStore) FinishIntentLease(id int64, owner, state string) (bool, error) {
 	terminal := state == "done" || state == "blocked" || state == "exhausted" || state == "stopped"
-	res, err := s.db.Exec(`UPDATE exploration_nodes
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE exploration_nodes
 SET state=$4, owner=CASE WHEN $4='open' THEN NULL ELSE owner END,
     lease_expires_at=NULL, completed_at=CASE WHEN $5 THEN now() ELSE NULL END
 WHERE id=$1 AND exploration_id=$2 AND kind='intent' AND state='running'
@@ -642,9 +794,26 @@ WHERE id=$1 AND exploration_id=$2 AND kind='intent' AND state='running'
 	}
 	n, _ := res.RowsAffected()
 	if n == 1 {
+		if err := appendNodeStateEvent(tx, s.expID, id, "running", state, owner, "intent_finished"); err != nil {
+			return false, err
+		}
+		var claims json.RawMessage
+		_ = tx.QueryRow(`SELECT COALESCE(jsonb_agg(jsonb_build_object('key',resource_key,'mode',mode)),'[]'::jsonb) FROM agent_resource_leases WHERE exploration_id=$1 AND intent_id=$2 AND owner=$3`, s.expID, id, owner).Scan(&claims)
+		if len(claims) > 0 && string(claims) != "[]" {
+			if err := appendResourceEvent(tx, s.expID, &id, owner, EventResourceLeaseReleased, "", map[string]any{"intent_id": id, "owner": owner, "resource_claims": claims}); err != nil {
+				return false, err
+			}
+		}
+		if _, err := tx.Exec(`DELETE FROM agent_resource_leases WHERE exploration_id=$1 AND intent_id=$2 AND owner=$3`, s.expID, id, owner); err != nil {
+			return false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
 		s.BumpVersion()
+		return true, nil
 	}
-	return n == 1, nil
+	return false, tx.Commit()
 }
 
 // Stats returns node counts grouped by kind (for dashboard).

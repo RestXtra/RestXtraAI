@@ -65,6 +65,7 @@ import type {
   Stats,
   Task,
   TaskNode,
+  TaskOperationsDashboard,
   TaskOverview,
   TaskRoundCosts,
   TaskWorkflow,
@@ -197,6 +198,8 @@ export const api = {
     get<{ count: number; assets: Asset[] }>(`/assets?task_id=${taskId}&type=${type}`).then((r) => r?.assets ?? []),
   taskCoverageGraph: (taskId: string) => get<CoverageGraphData>(`/tasks/${encodeURIComponent(taskId)}/coverage-graph`),
   taskRoundCosts: (taskId: string) => get<TaskRoundCosts>(`/tasks/${encodeURIComponent(taskId)}/costs`),
+  taskOperationsDashboard: (taskId: string) =>
+    get<TaskOperationsDashboard>(`/tasks/${encodeURIComponent(taskId)}/operations-dashboard`),
   taskOverview: (taskId: string) => get<TaskOverview>(`/tasks/${encodeURIComponent(taskId)}/overview`),
 
   // ---- companies (企业 + 资产范围；归属唯一来源) ----

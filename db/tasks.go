@@ -73,9 +73,10 @@ func (d *DB) CreateTask(description, goal string, llmProfileID *int64, timeoutSe
 		"description": description,
 		"goal":        goal,
 	})
-	if _, err := tx.Exec(`
+	var originID int64
+	if err := tx.QueryRow(`
 INSERT INTO exploration_nodes(exploration_id, kind, payload, priority, state, origin)
-VALUES ($1, 'fact', $2, 0, 'origin', 'system')`, expID, string(originPayload)); err != nil {
+VALUES ($1, 'fact', $2, 0, 'origin', 'system') RETURNING id`, expID, string(originPayload)).Scan(&originID); err != nil {
 		return nil, err
 	}
 	if timeoutSeconds < 0 {
@@ -96,6 +97,9 @@ RETURNING id, status, paused, created_at`, description, goal, expID, llmProfileI
 		return nil, err
 	}
 	if err := writeTaskCompanies(tx, t.ID, companyIDs); err != nil {
+		return nil, err
+	}
+	if err := appendNodeCreatedEvent(tx, expID, originID, KindFact, originPayload, 0, StateOrigin, "system"); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

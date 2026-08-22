@@ -172,6 +172,66 @@ WHERE kind='intent' AND payload ? 'intent_scope_key'`)
 			return err
 		},
 	},
+	{
+		Version: 8,
+		Name:    "agent_resource_leases",
+		Apply: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS agent_resource_leases (
+                id BIGSERIAL PRIMARY KEY,
+                exploration_id BIGINT NOT NULL REFERENCES explorations(id) ON DELETE CASCADE,
+                intent_id BIGINT NOT NULL REFERENCES exploration_nodes(id) ON DELETE CASCADE,
+                owner TEXT NOT NULL,
+                resource_key TEXT NOT NULL,
+                mode TEXT NOT NULL CHECK (mode IN ('shared','exclusive')),
+                lease_expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                UNIQUE (exploration_id, resource_key, owner)
+            );
+            CREATE INDEX IF NOT EXISTS idx_resource_leases_conflict
+                ON agent_resource_leases(exploration_id, resource_key, lease_expires_at)`)
+			return err
+		},
+	},
+	{
+		Version: 9,
+		Name:    "canonical_graph_event_backfill",
+		Apply: func(tx *sql.Tx) error {
+			if _, err := tx.Exec(`INSERT INTO agent_events(exploration_id,node_id,agent,event_type,payload,source_key,created_at)
+SELECT n.exploration_id,n.id,n.origin,'node_created',jsonb_build_object(
+    'node_id',n.id,'kind',n.kind,'payload',n.payload,'priority',n.priority,'state',n.state,'origin',COALESCE(n.origin,''),'backfilled',true),
+    'graph-backfill:node:'||n.id::text,n.created_at
+FROM exploration_nodes n
+WHERE NOT EXISTS (SELECT 1 FROM agent_events e WHERE e.exploration_id=n.exploration_id AND e.event_type='node_created' AND (e.payload->>'node_id')::bigint=n.id)
+ON CONFLICT (source_key) DO NOTHING`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`INSERT INTO agent_events(exploration_id,event_type,payload,source_key,created_at)
+SELECT e.exploration_id,'edge_created',jsonb_build_object('from',e.src_id,'rel',e.rel,'to',e.dst_id,'backfilled',true),
+    'graph-backfill:edge:'||e.exploration_id::text||':'||e.src_id::text||':'||e.rel||':'||e.dst_id::text,e.created_at
+FROM exploration_edges e
+WHERE NOT EXISTS (SELECT 1 FROM agent_events a WHERE a.exploration_id=e.exploration_id AND a.event_type='edge_created'
+  AND (a.payload->>'from')::bigint=e.src_id AND a.payload->>'rel'=e.rel AND (a.payload->>'to')::bigint=e.dst_id)
+ON CONFLICT (source_key) DO NOTHING`); err != nil {
+				return err
+			}
+			_, err := tx.Exec(`INSERT INTO agent_events(exploration_id,node_id,event_type,payload,source_key)
+SELECT n.exploration_id,a.node_id,'anchor_created',jsonb_build_object('node_id',a.node_id,'asset_id',a.asset_id,'backfilled',true),
+    'graph-backfill:anchor:'||a.node_id::text||':'||a.asset_id::text
+FROM exploration_anchors a JOIN exploration_nodes n ON n.id=a.node_id
+WHERE NOT EXISTS (SELECT 1 FROM agent_events e WHERE e.exploration_id=n.exploration_id AND e.event_type='anchor_created'
+  AND (e.payload->>'node_id')::bigint=a.node_id AND (e.payload->>'asset_id')::bigint=a.asset_id)
+ON CONFLICT (source_key) DO NOTHING`)
+			return err
+		},
+	},
+	{
+		Version: 10,
+		Name:    "agent_event_task_type_index",
+		Apply: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_events_exploration_type ON agent_events(exploration_id,event_type,id) WHERE exploration_id IS NOT NULL`)
+			return err
+		},
+	},
 }
 
 func applyMigrations(db *sql.DB) error {

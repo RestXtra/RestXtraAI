@@ -103,6 +103,51 @@ WHERE exploration_id=$1 AND event_type=$2 ORDER BY id DESC LIMIT 1`, expID, Even
 	}
 }
 
+func TestGraphProjectionReplaysFromCanonicalEvents(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) - skipping", err)
+	}
+	defer d.Close()
+	task, err := d.CreateTask("event replay", "verify graph", nil, 0, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(task.ID) //nolint:errcheck
+	store := d.Exploration(task.ExplorationID)
+	intent, err := store.AddIntent(map[string]any{"summary": "inspect"}, 5, nil, "planner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact, err := store.AddNode(KindFact, map[string]any{"summary": "observed"}, 5, "confirmed", "worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Link(intent, RelYields, fact); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetNodeState(intent, "done"); err != nil {
+		t.Fatal(err)
+	}
+	verification, err := store.VerifyGraphProjection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.Complete || !verification.Matches || verification.EventNodes != 3 || verification.EventEdges != 1 {
+		t.Fatalf("unexpected graph replay verification: %+v", verification)
+	}
+	if _, err := d.Exec(`UPDATE exploration_nodes SET state='blocked' WHERE id=$1`, intent); err != nil {
+		t.Fatal(err)
+	}
+	verification, err = store.VerifyGraphProjection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.Matches || verification.EventHash == verification.ProjectionHash {
+		t.Fatalf("out-of-band projection drift was not detected: %+v", verification)
+	}
+}
+
 func TestIntentLeaseWorkGraph(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {

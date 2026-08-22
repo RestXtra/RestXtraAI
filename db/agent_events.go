@@ -15,19 +15,20 @@ import (
 )
 
 const (
-	EventTurnStarted       = "turn_started"
-	EventPromptAssembled   = "prompt_assembled"
-	EventToolCalled        = "tool_called"
-	EventToolResult        = "tool_result"
-	EventArtifactCreated   = "artifact_created"
-	EventSummaryCreated    = "summary_created"
-	EventIntentClaimed     = "intent_claimed"
-	EventIntentRejected    = "intent_rejected"
-	EventBudgetChanged     = "budget_changed"
-	EventTurnFinished      = "turn_finished"
-	EventAssistantText     = "assistant_text"
-	EventAssistantThinking = "assistant_thinking"
-	EventUserMessage       = "user_message"
+	EventTurnStarted        = "turn_started"
+	EventPromptAssembled    = "prompt_assembled"
+	EventToolCalled         = "tool_called"
+	EventToolResult         = "tool_result"
+	EventArtifactCreated    = "artifact_created"
+	EventSummaryCreated     = "summary_created"
+	EventWorkingSetRestored = "working_set_restored"
+	EventIntentClaimed      = "intent_claimed"
+	EventIntentRejected     = "intent_rejected"
+	EventBudgetChanged      = "budget_changed"
+	EventTurnFinished       = "turn_finished"
+	EventAssistantText      = "assistant_text"
+	EventAssistantThinking  = "assistant_thinking"
+	EventUserMessage        = "user_message"
 )
 
 // ArtifactCandidate is a file made model-visible by a tool result. Metadata is
@@ -290,6 +291,48 @@ FROM agent_events WHERE exploration_id=$1 AND id>$2 ORDER BY id LIMIT $3`, s.exp
 		cursor = event.ID
 	}
 	return out, cursor, rows.Err()
+}
+
+// LatestAgentEvents returns the newest canonical events in chronological order
+// for compact dashboards. It does not require walking the full global cursor.
+func (s *ExplorationStore) LatestAgentEvents(limit int) ([]AgentEvent, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 30
+	}
+	rows, err := s.db.Query(`SELECT id,exploration_id,conversation_id,COALESCE(turn_id,''),node_id,COALESCE(agent,''),
+event_type,COALESCE(correlation_id,''),artifact_id,payload,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,created_at
+FROM (SELECT * FROM agent_events WHERE exploration_id=$1 ORDER BY id DESC LIMIT $2) recent ORDER BY id`, s.expID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AgentEvent{}
+	for rows.Next() {
+		var event AgentEvent
+		if err := rows.Scan(&event.ID, &event.ExplorationID, &event.ConversationID, &event.TurnID, &event.NodeID, &event.Agent, &event.EventType, &event.CorrelationID, &event.ArtifactID, &event.Payload, &event.InputTokens, &event.OutputTokens, &event.CacheReadTokens, &event.CacheWriteTokens, &event.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, event)
+	}
+	return out, rows.Err()
+}
+
+func (s *ExplorationStore) AgentEventTypeCounts() (map[string]int, error) {
+	rows, err := s.db.Query(`SELECT event_type,count(*) FROM agent_events WHERE exploration_id=$1 GROUP BY event_type ORDER BY event_type`, s.expID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var kind string
+		var count int
+		if err := rows.Scan(&kind, &count); err != nil {
+			return nil, err
+		}
+		out[kind] = count
+	}
+	return out, rows.Err()
 }
 
 // Artifacts searches artifact metadata for one exploration. File content is

@@ -161,6 +161,9 @@ WHERE exploration_id=$1 AND kind='fact' AND state='origin' ORDER BY id LIMIT 1`,
 VALUES ($1,'fact',$2,0,'origin','system') RETURNING id`, s.expID, string(originPayload)).Scan(&originID); err != nil {
 				return 0, false, err
 			}
+			if err := appendNodeCreatedEvent(tx, s.expID, originID, KindFact, originPayload, 0, StateOrigin, "system"); err != nil {
+				return 0, false, err
+			}
 		}
 		parents = []int64{originID}
 	}
@@ -186,6 +189,8 @@ VALUES ($1,'fact',$2,0,'origin','system') RETURNING id`, s.expID, string(originP
 	if len(assets) > 0 {
 		stored["asset_ids"] = assets
 	}
+	stored["concurrency_class"] = intentConcurrencyClass(stored)
+	stored["resource_claims"] = normalizeResourceClaims(stored, assets)
 	raw, err := json.Marshal(stored)
 	if err != nil {
 		return 0, false, err
@@ -248,6 +253,19 @@ WHERE exploration_id=$1 AND kind='intent' AND payload->>'dedupe_key'=$2`, s.expI
 	for _, parentID := range parents {
 		if _, err := tx.Exec(`INSERT INTO exploration_edges(exploration_id,src_id,rel,dst_id)
 VALUES ($1,$2,'derived_from',$3) ON CONFLICT DO NOTHING`, s.expID, parentID, id); err != nil {
+			return 0, false, err
+		}
+	}
+	if err := appendNodeCreatedEvent(tx, s.expID, id, KindIntent, raw, priority, "open", origin); err != nil {
+		return 0, false, err
+	}
+	for _, assetID := range assets {
+		if err := appendAnchorCreatedEvent(tx, s.expID, id, assetID); err != nil {
+			return 0, false, err
+		}
+	}
+	for _, parentID := range parents {
+		if err := appendEdgeCreatedEvent(tx, s.expID, parentID, RelDerivedFrom, id); err != nil {
 			return 0, false, err
 		}
 	}

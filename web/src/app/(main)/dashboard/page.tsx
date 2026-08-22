@@ -37,6 +37,7 @@ import type {
   SkillItem,
   Stats,
   Task,
+  TaskOperationsDashboard,
   TokenTotal,
   Tool,
   TrafficExchange,
@@ -69,6 +70,23 @@ function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
+}
+
+function fmtDuration(seconds?: number): string {
+  if (seconds === undefined || seconds === null) return "—";
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+function projectionBadge(projection: TaskOperationsDashboard["projection"]): { label: string; className: string } {
+  if (projection.matches) {
+    return { label: "投影一致", className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-400" };
+  }
+  if (projection.complete) {
+    return { label: "投影漂移", className: "border-red-500/30 bg-red-500/10 text-red-400" };
+  }
+  return { label: "历史流不完整", className: "border-amber-500/30 bg-amber-500/10 text-amber-400" };
 }
 
 const ASSET_TYPE_LABELS: Record<string, string> = {
@@ -150,6 +168,8 @@ export default function DashboardPage() {
   const [llmProfiles, setLLMProfiles] = React.useState<LLMProfile[]>([]);
   const [companyStats, setCompanyStats] = React.useState<CompanyStat[]>([]);
   const [companyFilter, setCompanyFilter] = React.useState<number | "all">("all");
+  const [operationsTaskID, setOperationsTaskID] = React.useState("");
+  const [operations, setOperations] = React.useState<TaskOperationsDashboard | null>(null);
 
   // fast poll: tasks, findings, stats, pending, activity (every 5s)
   React.useEffect(() => {
@@ -230,7 +250,9 @@ export default function DashboardPage() {
         .then((cs) => {
           if (alive) setCompanyStats(cs);
         })
-        .catch(() => {});
+        .catch(() => {
+          /* transient errors */
+        });
     load();
     const t = setInterval(load, 30000);
     return () => {
@@ -238,6 +260,41 @@ export default function DashboardPage() {
       clearInterval(t);
     };
   }, []);
+
+  React.useEffect(() => {
+    if (tasks.length === 0) {
+      setOperationsTaskID("");
+      setOperations(null);
+      return;
+    }
+    if (!tasks.some((task) => task.id === operationsTaskID)) {
+      const latest = [...tasks].sort(
+        (a, b) => (b.last_activity_unix ?? b.created_unix ?? 0) - (a.last_activity_unix ?? a.created_unix ?? 0),
+      )[0];
+      setOperationsTaskID(latest.id);
+    }
+  }, [tasks, operationsTaskID]);
+
+  React.useEffect(() => {
+    if (!operationsTaskID) return;
+    setOperations(null);
+    let alive = true;
+    const load = () =>
+      api
+        .taskOperationsDashboard(operationsTaskID)
+        .then((value) => {
+          if (alive && value?.baseline && value?.costs && value?.projection) setOperations(value);
+        })
+        .catch(() => {
+          /* transient errors */
+        });
+    load();
+    const timer = setInterval(load, 10000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [operationsTaskID]);
 
   // ── derived ───────────────────────────────────────────────────────────────
 
@@ -817,6 +874,193 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+      </Card>
+
+      {/* ── Agent operations and performance ── */}
+      <Card className="p-4">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 font-semibold text-xs">
+            <ActivityIcon className="size-3.5 text-muted-foreground" />
+            Agent 运行与性能
+            {operations && (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "ml-1 px-1.5 py-0 text-[9px]",
+                  operations.baseline.repeatable
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                    : "text-muted-foreground",
+                )}
+              >
+                {operations.baseline.repeatable ? "可重复基线" : "运行中快照"}
+              </Badge>
+            )}
+          </div>
+          <Select value={operationsTaskID} onValueChange={setOperationsTaskID}>
+            <SelectTrigger size="sm" className="w-64 max-w-full">
+              <SelectValue placeholder="选择任务" />
+            </SelectTrigger>
+            <SelectContent>
+              {tasks.map((task) => (
+                <SelectItem key={task.id} value={task.id}>
+                  {task.description || `任务 ${task.id}`}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {!operations ? (
+          <div className="flex h-36 items-center justify-center border-t text-muted-foreground text-xs">
+            {tasks.length === 0 ? "暂无任务数据" : "正在加载运行数据"}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 border-t lg:grid-cols-[1fr_1fr_1.25fr] lg:divide-x">
+            <div className="py-4 lg:pr-5">
+              <div className="mb-3 font-semibold text-[10px] text-muted-foreground">结果效率</div>
+              <div className="grid grid-cols-2 gap-x-5 gap-y-3">
+                {[
+                  ["首个事实", fmtDuration(operations.baseline.time_to_first_confirmed_fact_seconds)],
+                  ["首个漏洞", fmtDuration(operations.baseline.time_to_first_confirmed_finding_seconds)],
+                  ["完成时间", fmtDuration(operations.baseline.task_completion_seconds)],
+                  ["证据覆盖", `${Math.round(operations.baseline.efficiency.evidence_coverage_rate * 100)}%`],
+                ].map(([label, value]) => (
+                  <div key={label}>
+                    <div className="text-[9px] text-muted-foreground">{label}</div>
+                    <div className="mt-0.5 font-semibold text-base tabular-nums">{value}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4">
+                <div className="mb-1 flex justify-between text-[9px] text-muted-foreground">
+                  <span>资产验证</span>
+                  <span className="tabular-nums">
+                    {operations.baseline.coverage.verified}/{operations.baseline.coverage.total}
+                  </span>
+                </div>
+                <Progress value={operations.baseline.coverage.verified_rate * 100} className="h-1.5" />
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 border-t pt-3 text-center">
+                <div>
+                  <div className="font-semibold text-sm tabular-nums">
+                    {operations.baseline.results.confirmed_facts}
+                  </div>
+                  <div className="text-[9px] text-muted-foreground">确认事实</div>
+                </div>
+                <div>
+                  <div className="font-semibold text-sm tabular-nums">
+                    {operations.baseline.results.confirmed_findings}
+                  </div>
+                  <div className="text-[9px] text-muted-foreground">确认漏洞</div>
+                </div>
+                <div>
+                  <div className="font-semibold text-sm tabular-nums">
+                    {operations.baseline.intents.zero_yield_intents}
+                  </div>
+                  <div className="text-[9px] text-muted-foreground">零产出意图</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t py-4 lg:border-t-0 lg:px-5">
+              <div className="mb-3 flex items-center justify-between text-[10px]">
+                <span className="font-semibold text-muted-foreground">Agent 回合成本</span>
+                <span className="font-mono text-muted-foreground">
+                  {fmtTokens(operations.costs.total.input_tokens + operations.costs.total.output_tokens)} token
+                </span>
+              </div>
+              <div className="space-y-3">
+                {operations.costs.workers.length === 0 ? (
+                  <div className="py-8 text-center text-muted-foreground text-xs">暂无回合成本</div>
+                ) : (
+                  operations.costs.workers.slice(0, 6).map((worker) => {
+                    const total = worker.input_tokens + worker.output_tokens;
+                    const max = Math.max(
+                      ...operations.costs.workers.map((item) => item.input_tokens + item.output_tokens),
+                      1,
+                    );
+                    return (
+                      <div key={worker.worker}>
+                        <div className="mb-1 flex items-center justify-between text-[10px]">
+                          <span className="truncate font-medium">{worker.worker || "unknown"}</span>
+                          <span className="font-mono text-muted-foreground tabular-nums">
+                            {fmtTokens(total)} · {worker.tool_calls} 调用 · {worker.tool_errors} 错误
+                          </span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-blue-500"
+                            style={{ width: `${(total / max) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+              <div className="mt-4 flex flex-wrap gap-1.5 border-t pt-3 text-[9px] text-muted-foreground">
+                <span className="rounded border px-1.5 py-0.5">轮次 {operations.costs.total.rounds}</span>
+                <span className="rounded border px-1.5 py-0.5">
+                  错误率 {Math.round(operations.baseline.efficiency.tool_error_rate * 100)}%
+                </span>
+                <span className="rounded border px-1.5 py-0.5">
+                  缓存读 {Math.round(operations.baseline.efficiency.cache_read_rate * 100)}%
+                </span>
+              </div>
+            </div>
+
+            <div className="border-t py-4 lg:border-t-0 lg:pl-5">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <span className="font-semibold text-[10px] text-muted-foreground">规范事件流</span>
+                <div className="flex items-center gap-1.5">
+                  <Badge
+                    variant="outline"
+                    className={cn("px-1.5 py-0 text-[9px]", projectionBadge(operations.projection).className)}
+                  >
+                    {projectionBadge(operations.projection).label}
+                  </Badge>
+                  <Badge variant="outline" className="px-1.5 py-0 text-[9px] text-muted-foreground">
+                    WS v{operations.working_set?.version ?? 0}
+                  </Badge>
+                </div>
+              </div>
+              <div className="mb-2 flex flex-wrap gap-1">
+                {[
+                  ["工具", operations.event_counts.tool_called ?? 0],
+                  ["摘要", operations.event_counts.summary_created ?? 0],
+                  ["恢复", operations.event_counts.working_set_restored ?? 0],
+                  ["冲突等待", operations.event_counts.resource_conflict_wait ?? 0],
+                  ["活动租约", operations.resource_leases.length],
+                ].map(([label, value]) => (
+                  <span
+                    key={String(label)}
+                    className="rounded border bg-muted/20 px-1.5 py-0.5 text-[9px] text-muted-foreground"
+                  >
+                    {label} <strong className="text-foreground/80">{value}</strong>
+                  </span>
+                ))}
+              </div>
+              <div className="max-h-44 divide-y overflow-y-auto border-t">
+                {operations.events.length === 0 ? (
+                  <div className="py-6 text-center text-muted-foreground text-xs">暂无规范事件</div>
+                ) : (
+                  [...operations.events]
+                    .reverse()
+                    .slice(0, 10)
+                    .map((event) => (
+                      <div key={event.id} className="flex items-center gap-2 py-1.5 text-[10px]">
+                        <span className="w-24 shrink-0 truncate font-mono text-muted-foreground">
+                          {event.event_type}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">{event.agent || "system"}</span>
+                        <span className="shrink-0 text-[9px] text-muted-foreground">{fmtRel(event.created_at)}</span>
+                      </div>
+                    ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* ── Row 3: 活动流 | 发现 ── */}
