@@ -52,7 +52,7 @@ func TestWireTools(t *testing.T) {
 	base := append(ts.WorkerTools(), actool.DefaultTools()...)
 	ctx := context.Background()
 
-	worker := names(agent.ToolResolve(ctx, "worker", base))
+	worker := names(agent.ToolResolve(ctx, "worker", base, agent.DeferredInfo{}))
 	if _, ok := worker["record_fact"]; !ok {
 		t.Error("worker lost record_fact")
 	}
@@ -65,7 +65,7 @@ func TestWireTools(t *testing.T) {
 		t.Error("Bash should pass through undecorated, but description changed")
 	}
 	// planner is not bound to record_fact → resolving a base that contains it drops it.
-	planner := names(agent.ToolResolve(ctx, "planner", base))
+	planner := names(agent.ToolResolve(ctx, "planner", base, agent.DeferredInfo{}))
 	if _, ok := planner["record_fact"]; ok {
 		t.Error("planner should not get record_fact (not bound)")
 	}
@@ -85,7 +85,7 @@ func TestWireTools(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	worker2 := names(agent.ToolResolve(ctx, "worker", base))
+	worker2 := names(agent.ToolResolve(ctx, "worker", base, agent.DeferredInfo{}))
 	got := worker2["record_fact"]
 	if got == nil {
 		t.Fatal("record_fact missing after edit")

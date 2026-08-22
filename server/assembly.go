@@ -16,6 +16,10 @@ import (
 	"github.com/RestXtra/RestXtraAI/traffic"
 )
 
+// Appended to Bash only when the same agent assembly snapshot enables the
+// interactive-shell tool family, so the prompt never references a missing tool.
+const bashInteractiveShellNote = "\n\n需要【交互输入】的程序（msfconsole / ssh 交互登录 / mysql、psql、python 等 REPL / 密码或 yes/no 提示 / nc 反弹 shell）不要用 Bash（它没有 stdin、会卡住），改用 shell_open 开交互会话（用完 shell_close）。一次性、非交互命令仍用 Bash。"
+
 // wireAgentAugment connects the PG agent_visibility table into the agent runtime:
 // an agent's visible skills are loaded from the filesystem and packed into one
 // Skill meta-tool; its visible stdio MCP servers are spawned and expanded to
@@ -174,10 +178,11 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 			}
 		}
 		def := agent.DeferredInfo{
-			Deferred:    allNames,
-			GlobalNames: globalNames,
-			Unlock:      unlock,
-			UnlockSkill: unlockSkill,
+			Deferred:         allNames,
+			GlobalNames:      globalNames,
+			Unlock:           unlock,
+			UnlockSkill:      unlockSkill,
+			InteractiveShell: a.InteractiveShell,
 		}
 		return extra, def, cleanup
 	}
@@ -363,11 +368,7 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, catalog *toolCat
 			log.Printf("[tools] seed %s 失败: %v", t.Name(), err)
 		}
 	}
-	// bashInteractiveShellNote is appended to Bash's description ONLY for agents whose
-	// interactive_shell is on, so Bash points at shell_open for interactive programs
-	// without ever referencing a tool that isn't injected (§14.1/§14.2).
-	const bashInteractiveShellNote = "\n\n需要【交互输入】的程序（msfconsole / ssh 交互登录 / mysql、psql、python 等 REPL / 密码或 yes/no 提示 / nc 反弹 shell）不要用 Bash（它没有 stdin、会卡住），改用 shell_open 开交互会话（用完 shell_close）。一次性、非交互命令仍用 Bash。"
-	agent.ToolResolve = func(_ context.Context, agentKey string, tools []actool.CoreTool) []actool.CoreTool {
+	agent.ToolResolve = func(_ context.Context, agentKey string, tools []actool.CoreTool, info agent.DeferredInfo) []actool.CoreTool {
 		rows, err := catalog.get(pg.ListTools)
 		if err != nil {
 			log.Printf("[tools] 读取工具表失败，按代码默认放行: %v", err)
@@ -446,19 +447,22 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, catalog *toolCat
 		// web_search), NOT by tools-table binding. When on, inject the 5 shell_* tools
 		// and COUPLE the Bash description addendum so it points at shell_open — and never
 		// dangles when off. See docs/交互式shell设计.md §14.2.
-		if !actool.InteractiveShellDisabled() {
-			if a, err := pg.GetAgentByKey(agentKey); err == nil && a != nil && a.InteractiveShell {
-				out = append(out, actool.ShellSessionTools()...)
-				for i, t := range out {
-					if t.Name() == "Bash" {
-						out[i] = agent.DecorateTool(t, t.Description()+bashInteractiveShellNote, t.InputSchema())
-						break
-					}
-				}
-			}
-		}
-		return out
+		return injectInteractiveShell(out, info.InteractiveShell)
 	}
+}
+
+func injectInteractiveShell(tools []actool.CoreTool, enabled bool) []actool.CoreTool {
+	if !enabled || actool.InteractiveShellDisabled() {
+		return tools
+	}
+	tools = append(tools, actool.ShellSessionTools()...)
+	for i, t := range tools {
+		if t.Name() == "Bash" {
+			tools[i] = agent.DecorateTool(t, t.Description()+bashInteractiveShellNote, t.InputSchema())
+			break
+		}
+	}
+	return tools
 }
 
 func contains(ss []string, v string) bool {

@@ -12,10 +12,11 @@ import (
 // UnlockSkill unlocks a named skill's MCPs — hosts call it to rebuild the unlock set
 // from history on a resumed session (design doc C2).
 type DeferredInfo struct {
-	Deferred    []string          // all MCP tool names (schema withheld)
-	GlobalNames []string          // MCP names to list in the system-prompt block
-	Unlock      *actool.UnlockSet // shared call-gate; nil when no MCP tools
-	UnlockSkill func(skillName string)
+	Deferred         []string          // all MCP tool names (schema withheld)
+	GlobalNames      []string          // MCP names to list in the system-prompt block
+	Unlock           *actool.UnlockSet // shared call-gate; nil when no MCP tools
+	UnlockSkill      func(skillName string)
+	InteractiveShell bool // runtime flag from the same agent assembly snapshot
 }
 
 // ToolAugment, if set, returns the EXTRA tools an agent should see beyond its
@@ -53,7 +54,7 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 	// descriptions/schemas + default injection. MCP/skill/host tools have no row
 	// and pass through untouched, so deferred/unlock wiring stays consistent.
 	if ToolResolve != nil {
-		out = ToolResolve(ctx, agentKey, out)
+		out = ToolResolve(ctx, agentKey, out, def)
 	}
 	// P2.2 工具渐进披露：把低频内置工具（bench_*/traffic_*）的 schema 隐藏进 deferred，
 	// 模型只看到名字（system 块）+ 经 SearchExtraTools/ExecuteExtraTool 发现与调用。
@@ -66,7 +67,7 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 var progressiveBuiltins = map[string]bool{
 	"bench_vpn_check": true, "bench_challenges": true, "bench_start": true,
 	"bench_hint": true, "bench_submit": true, "bench_close": true,
-	"wait_task": true,
+	"wait_task":      true,
 	"traffic_search": true, "traffic_get": true,
 }
 

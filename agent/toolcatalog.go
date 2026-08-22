@@ -90,7 +90,7 @@ func BuiltinToolSeeds() []ToolSeed {
 // and wraps the rest so the model sees the DB-overridden description/schema and
 // 缺省入参 get injected. Tools with no matching DB row (MCP/skill/host tools like
 // traffic) pass through untouched. nil = tools unchanged. Wired in server/assembly.go.
-var ToolResolve func(ctx context.Context, agentKey string, tools []actool.CoreTool) []actool.CoreTool
+var ToolResolve func(ctx context.Context, agentKey string, tools []actool.CoreTool, info DeferredInfo) []actool.CoreTool
 
 // DecorateTool wraps t so Description()/InputSchema() report the DB overrides and
 // Call() injects scalar parameter defaults (from schema's "default" props) whenever
