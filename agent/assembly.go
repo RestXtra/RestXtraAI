@@ -12,9 +12,10 @@ import (
 // UnlockSkill unlocks a named skill's MCPs — hosts call it to rebuild the unlock set
 // from history on a resumed session (design doc C2).
 type DeferredInfo struct {
-	Deferred         []string          // all MCP tool names (schema withheld)
-	GlobalNames      []string          // MCP names to list in the system-prompt block
-	Unlock           *actool.UnlockSet // shared call-gate; nil when no MCP tools
+	Deferred         []string              // all MCP tool names (schema withheld)
+	GlobalNames      []string              // MCP names to list in the system-prompt block
+	GlobalCatalog    []actool.CatalogEntry // bounded metadata; full schemas stay deferred
+	Unlock           *actool.UnlockSet     // shared call-gate; nil when no MCP tools
 	UnlockSkill      func(skillName string)
 	InteractiveShell bool // runtime flag from the same agent assembly snapshot
 }
@@ -60,6 +61,20 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 	// 模型只看到名字（system 块）+ 经 SearchExtraTools/ExecuteExtraTool 发现与调用。
 	// 节省每回合工具 schema token。可用 ProgressiveDisclosure 开关关闭（默认开）。
 	applyProgressiveDisclosure(&def, out)
+	def.GlobalCatalog = actool.CatalogForNames(out, def.GlobalNames, actool.TierCatalog, false)
+	if def.Unlock != nil {
+		global := make(map[string]bool, len(def.GlobalNames))
+		for _, name := range def.GlobalNames {
+			global[name] = true
+		}
+		var privileged []string
+		for _, name := range def.Deferred {
+			if !global[name] {
+				privileged = append(privileged, name)
+			}
+		}
+		def.Unlock.MarkPrivileged(privileged...)
+	}
 	return out, def, cleanup
 }
 

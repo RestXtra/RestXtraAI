@@ -294,8 +294,14 @@ func (s *Server) buildCustomTool(t *db.Tool) actool.CoreTool {
 			return actool.Errorf("未知自定义工具类型: " + kind), nil
 		}
 	}
+	metadata := actool.CatalogMetadata{LatencyClass: "slow", SideEffect: "write_or_execute",
+		ConcurrencyClass: "exclusive", ArtifactPolicy: "spill_if_large"}
+	if kind == "http" {
+		metadata.SideEffect = "network"
+	}
 	return actool.Build(actool.Spec{
 		Name: key, Description: t.Description, Schema: schema,
+		Metadata: metadata,
 		Permissions: func(context.Context, json.RawMessage, permission.Context) permission.Decision {
 			return permission.Allowed()
 		},

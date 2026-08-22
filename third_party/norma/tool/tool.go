@@ -96,6 +96,7 @@ type Spec struct {
 	Description string
 	Prompt      string
 	Schema      map[string]any
+	Metadata    CatalogMetadata
 	ReadOnly    func(json.RawMessage) bool
 	Concurrent  func(json.RawMessage) bool
 	Permissions func(ctx context.Context, input json.RawMessage, pc permission.Context) permission.Decision
@@ -107,10 +108,11 @@ func Build(s Spec) CoreTool { return &builtTool{spec: s} }
 
 type builtTool struct{ spec Spec }
 
-func (t *builtTool) Name() string                { return t.spec.Name }
-func (t *builtTool) Description() string         { return t.spec.Description }
-func (t *builtTool) Prompt() string              { return t.spec.Prompt }
-func (t *builtTool) InputSchema() map[string]any { return t.spec.Schema }
+func (t *builtTool) Name() string                     { return t.spec.Name }
+func (t *builtTool) Description() string              { return t.spec.Description }
+func (t *builtTool) Prompt() string                   { return t.spec.Prompt }
+func (t *builtTool) InputSchema() map[string]any      { return t.spec.Schema }
+func (t *builtTool) CatalogMetadata() CatalogMetadata { return t.spec.Metadata }
 
 func (t *builtTool) IsReadOnly(in json.RawMessage) bool {
 	if t.spec.ReadOnly == nil {

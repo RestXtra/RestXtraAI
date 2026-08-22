@@ -22,12 +22,15 @@ func TestDeferredSystem_WithGlobal(t *testing.T) {
 	def := DeferredInfo{
 		Deferred:    []string{"mcp__browser__navigate", "mcp__browser__click"},
 		GlobalNames: []string{"mcp__browser__navigate", "mcp__browser__click"},
+		GlobalCatalog: []actool.CatalogEntry{{Name: "mcp__browser__navigate", Description: "Navigate",
+			Tier: actool.TierCatalog, Metadata: actool.CatalogMetadata{TokenCostEstimate: 80, LatencyClass: "medium",
+				SideEffect: "network", ConcurrencyClass: "exclusive", ArtifactPolicy: "spill_if_large"}}},
 	}
 	sys, boundary := deferredSystem("SYS", def)
 	if len(sys) != 2 || sys[0] != "SYS" {
 		t.Fatalf("expected [SYS, block], got %v", sys)
 	}
-	if !strings.Contains(sys[1], "<available-deferred-tools>") ||
+	if !strings.Contains(sys[1], "<tool-catalog>") ||
 		!strings.Contains(sys[1], "mcp__browser__navigate") {
 		t.Fatalf("block missing names:\n%s", sys[1])
 	}

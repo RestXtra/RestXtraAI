@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/Autumn-27/norma/permission"
 )
 
 // echoTool is a trivial deferred tool that echoes its "msg" param.
@@ -16,6 +18,11 @@ func echoTool() CoreTool {
 			"type":       "object",
 			"properties": map[string]any{"msg": map[string]any{"type": "string"}},
 			"required":   []any{"msg"},
+		},
+		ReadOnly:   func(json.RawMessage) bool { return true },
+		Concurrent: func(json.RawMessage) bool { return true },
+		Permissions: func(context.Context, json.RawMessage, permission.Context) permission.Decision {
+			return permission.Allowed()
 		},
 		Run: func(_ context.Context, in json.RawMessage, _ *ToolContext) (Result, error) {
 			var a struct {
@@ -57,6 +64,16 @@ func TestRenderDeferredToolsBlock(t *testing.T) {
 	}
 }
 
+func TestRenderToolCatalogBlockIncludesBoundedDecisionMetadata(t *testing.T) {
+	entries := CatalogForNames([]CoreTool{echoTool()}, []string{"echo"}, TierCatalog, false)
+	out := RenderToolCatalogBlock(entries)
+	for _, want := range []string{"<tool-catalog>", "echo | tier=catalog", "schema_tokens~", "concurrency=parallel", "side_effect=read"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("catalog missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestSearchExtraTools(t *testing.T) {
 	reg := NewRegistry(echoTool())
 	search := NewSearchExtraTools(reg, []string{"echo"})
@@ -81,10 +98,45 @@ func TestSearchExtraTools(t *testing.T) {
 	}
 }
 
+func TestPrivilegedToolSchemaHiddenUntilUnlocked(t *testing.T) {
+	reg := NewRegistry(echoTool())
+	unlock := NewUnlockSet()
+	unlock.MarkPrivileged("echo")
+	search := NewSearchExtraTools(reg, []string{"echo"}, unlock)
+
+	r, _ := search.Call(context.Background(), json.RawMessage(`{"query":"select:echo"}`), nil)
+	if !strings.Contains(r.Flatten(), "No matching") {
+		t.Fatalf("locked privileged schema leaked: %s", r.Flatten())
+	}
+	unlock.Add("echo")
+	r, _ = search.Call(context.Background(), json.RawMessage(`{"query":"select:echo"}`), nil)
+	if !strings.Contains(r.Flatten(), "tier: privileged") || !strings.Contains(r.Flatten(), "token_cost_estimate") {
+		t.Fatalf("unlocked privileged metadata missing: %s", r.Flatten())
+	}
+}
+
+func TestRegistryCatalogClassifiesAllTiers(t *testing.T) {
+	reg := NewRegistry(echoTool(), NewSleep())
+	unlock := NewUnlockSet()
+	unlock.MarkPrivileged("echo")
+	entries := reg.Catalog([]string{"echo"}, unlock)
+	if len(entries) != 2 || entries[0].Tier != TierPrivileged || !entries[0].Locked || entries[1].Tier != TierCore {
+		t.Fatalf("unexpected tier classification: %+v", entries)
+	}
+}
+
 func TestExecuteExtraTool(t *testing.T) {
 	reg := NewRegistry(echoTool())
 	unlock := NewUnlockSet("echo")
 	exec := NewExecuteExtraTool(reg, unlock)
+	wrapped := json.RawMessage(`{"tool_name":"echo","params":{"msg":"hi"}}`)
+	if !exec.IsReadOnly(wrapped) || !exec.IsConcurrencySafe(wrapped) {
+		t.Fatal("deferred wrapper did not preserve target scheduling metadata")
+	}
+	decision := exec.CheckPermissions(context.Background(), wrapped, permission.Context{Disallowed: []string{"echo"}})
+	if decision.Behavior != permission.Deny {
+		t.Fatalf("target deny policy was not preserved: %+v", decision)
+	}
 
 	// unlocked → runs
 	r, _ := exec.Call(context.Background(), json.RawMessage(`{"tool_name":"echo","params":{"msg":"hi"}}`), nil)

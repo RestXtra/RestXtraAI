@@ -30,17 +30,40 @@ const (
 // skill loads. Withholding the schema (deferred) is separate from gating the call
 // (unlock): a name may be listed yet locked until its skill is invoked.
 type UnlockSet struct {
-	mu    sync.RWMutex
-	names map[string]bool
+	mu         sync.RWMutex
+	names      map[string]bool
+	privileged map[string]bool
 }
 
 // NewUnlockSet builds an unlock set seeded with the given tool names.
 func NewUnlockSet(initial ...string) *UnlockSet {
-	s := &UnlockSet{names: make(map[string]bool, len(initial))}
+	s := &UnlockSet{names: make(map[string]bool, len(initial)), privileged: map[string]bool{}}
 	for _, n := range initial {
 		s.names[n] = true
 	}
 	return s
+}
+
+// MarkPrivileged records tools whose schemas must stay hidden until a skill
+// unlocks them. The marker remains after unlock so catalog results preserve tier.
+func (s *UnlockSet) MarkPrivileged(names ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.privileged == nil {
+		s.privileged = map[string]bool{}
+	}
+	for _, name := range names {
+		s.privileged[name] = true
+	}
+}
+
+func (s *UnlockSet) Tier(name string) CatalogTier {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.privileged[name] {
+		return TierPrivileged
+	}
+	return TierCatalog
 }
 
 // Add unlocks the given tool names (idempotent).
@@ -96,10 +119,34 @@ func RenderDeferredToolsBlock(names []string) string {
 	return b.String()
 }
 
+// RenderToolCatalogBlock advertises deferred tools without paying their schema
+// cost. Descriptions are bounded so large MCP catalogs remain prompt-cacheable.
+func RenderToolCatalogBlock(entries []CatalogEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	entries = append([]CatalogEntry(nil), entries...)
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	var b strings.Builder
+	b.WriteString("<tool-catalog>\n")
+	for _, entry := range entries {
+		m := entry.Metadata
+		fmt.Fprintf(&b, "%s | tier=%s | schema_tokens~%d | latency=%s | side_effect=%s | concurrency=%s | artifact=%s | %s\n",
+			entry.Name, entry.Tier, m.TokenCostEstimate, m.LatencyClass, m.SideEffect, m.ConcurrencyClass, m.ArtifactPolicy, entry.Description)
+	}
+	b.WriteString("</tool-catalog>\n")
+	b.WriteString("Schemas are deferred. Use " + SearchExtraToolsName + " only for tools needed by the current objective, then invoke with " + ExecuteExtraToolName + ".")
+	return b.String()
+}
+
 // NewSearchExtraTools builds the always-loaded discovery tool. deferred is the set
 // of tool names whose schemas are withheld; the tool searches those names in reg
 // and returns each match's name + description + params schema.
-func NewSearchExtraTools(reg *Registry, deferred []string) CoreTool {
+func NewSearchExtraTools(reg *Registry, deferred []string, gates ...*UnlockSet) CoreTool {
+	var unlock *UnlockSet
+	if len(gates) > 0 {
+		unlock = gates[0]
+	}
 	deferredSet := make(map[string]bool, len(deferred))
 	for _, n := range deferred {
 		deferredSet[n] = true
@@ -137,6 +184,9 @@ func NewSearchExtraTools(reg *Registry, deferred []string) CoreTool {
 			seen := map[string]bool{}
 			addByFullName := func(name string) {
 				if seen[name] || !deferredSet[name] {
+					return
+				}
+				if unlock != nil && !unlock.Has(name) {
 					return
 				}
 				if t, ok := reg.Get(name); ok {
@@ -207,7 +257,13 @@ func NewSearchExtraTools(reg *Registry, deferred []string) CoreTool {
 				len(matches), ExecuteExtraToolName)
 			for _, t := range matches {
 				schemaJSON, _ := json.Marshal(t.InputSchema())
-				fmt.Fprintf(&b, "\n## %s\n%s\nparams schema: %s\n", t.Name(), t.Description(), string(schemaJSON))
+				tier := TierCatalog
+				if unlock != nil {
+					tier = unlock.Tier(t.Name())
+				}
+				metadataJSON, _ := json.Marshal(MetadataFor(t))
+				fmt.Fprintf(&b, "\n## %s\ntier: %s\nmetadata: %s\n%s\nparams schema: %s\n",
+					t.Name(), tier, string(metadataJSON), t.Description(), string(schemaJSON))
 			}
 			return Text(b.String()), nil
 		},
@@ -219,6 +275,23 @@ func NewSearchExtraTools(reg *Registry, deferred []string) CoreTool {
 // validated before the call. unlock may be nil (then every registry tool is
 // callable — no gating).
 func NewExecuteExtraTool(reg *Registry, unlock *UnlockSet) CoreTool {
+	parse := func(in json.RawMessage) (string, json.RawMessage, CoreTool, bool) {
+		var args struct {
+			ToolName string          `json:"tool_name"`
+			Params   json.RawMessage `json:"params"`
+		}
+		if json.Unmarshal(in, &args) != nil || args.ToolName == "" {
+			return "", nil, nil, false
+		}
+		t, ok := reg.Get(args.ToolName)
+		if !ok || (unlock != nil && !unlock.Has(args.ToolName)) {
+			return args.ToolName, args.Params, nil, false
+		}
+		if len(args.Params) == 0 {
+			args.Params = json.RawMessage(`{}`)
+		}
+		return args.ToolName, args.Params, t, true
+	}
 	return Build(Spec{
 		Name: ExecuteExtraToolName,
 		Description: "Invoke a deferred tool discovered via " + SearchExtraToolsName +
@@ -237,8 +310,39 @@ func NewExecuteExtraTool(reg *Registry, unlock *UnlockSet) CoreTool {
 			},
 			"required": []any{"tool_name"},
 		},
-		Permissions: func(context.Context, json.RawMessage, permission.Context) permission.Decision {
-			return permission.Allowed()
+		ReadOnly: func(in json.RawMessage) bool {
+			_, params, t, ok := parse(in)
+			return ok && t.IsReadOnly(params)
+		},
+		Concurrent: func(in json.RawMessage) bool {
+			_, params, t, ok := parse(in)
+			return ok && t.IsConcurrencySafe(params)
+		},
+		Permissions: func(ctx context.Context, in json.RawMessage, pc permission.Context) permission.Decision {
+			name, params, t, ok := parse(in)
+			if !ok {
+				return permission.Denied("deferred tool is unknown or locked")
+			}
+			for _, rule := range pc.Disallowed {
+				if toolRuleMatches(rule, name) {
+					return permission.Denied("denied: deferred tool '" + name + "' is disallowed by policy")
+				}
+			}
+			decision := t.CheckPermissions(ctx, params, pc)
+			if decision.Behavior != permission.Deny {
+				for _, rule := range pc.Allowed {
+					if toolRuleMatches(rule, name) {
+						decision.Behavior = permission.Allow
+						decision.Message = ""
+						break
+					}
+				}
+			}
+			if len(decision.UpdatedInput) > 0 {
+				wrapped, _ := json.Marshal(map[string]any{"tool_name": name, "params": json.RawMessage(decision.UpdatedInput)})
+				decision.UpdatedInput = wrapped
+			}
+			return decision
 		},
 		Run: func(ctx context.Context, in json.RawMessage, tc *ToolContext) (Result, error) {
 			var args struct {
@@ -269,4 +373,9 @@ func NewExecuteExtraTool(reg *Registry, unlock *UnlockSet) CoreTool {
 			return t.Call(ctx, params, tc)
 		},
 	})
+}
+
+func toolRuleMatches(rule, name string) bool {
+	rule = strings.TrimSpace(rule)
+	return rule == "*" || rule == name || strings.HasPrefix(rule, name+"(")
 }

@@ -147,7 +147,7 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 						}
 					}
 				}
-				return actool.RenderDeferredToolsBlock(reveal)
+				return actool.RenderToolCatalogBlock(actool.CatalogForNames(extra, reveal, actool.TierPrivileged, false))
 			}
 			extra = append(extra, reg.Tool())
 		}
