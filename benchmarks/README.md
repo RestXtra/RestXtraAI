@@ -85,3 +85,26 @@ tools, and skills API responses. It writes a checkpoint after environment captur
 task creation, and each completed baseline, so interrupted runs retain created
 task IDs. A valid comparison requires `complete: true`, identical scenario and
 environment hashes, and a freshly reset authorized dataset.
+
+Generate a strict comparison after collecting both cohorts:
+
+```powershell
+go run ./benchmarks/compare `
+  -before benchmarks/results/before.json `
+  -after benchmarks/results/after.json `
+  -out benchmarks/results/comparison.json
+```
+
+The comparison refuses incomplete runs, scenario/dataset drift, live environment
+drift, or different case/repetition sets. It reports mean, nearest-rank p50/p95,
+raw deltas and direction-aware improvement percentages for timing, result yield,
+coverage, token/tool use, retries, zero-yield work and fuse activity. Metrics whose
+direction is contextual are marked `informational`. When a nullable metric has a
+different valid sample count, both sample counts remain visible and no percentage
+claim is produced for that metric.
+
+If an optimization intentionally changes a fingerprinted subsystem, name every
+changed endpoint explicitly, for example
+`-allow-environment-drift /api/tools,/api/agents`. Strict comparison remains the
+default; there is no wildcard, and allowed differences are preserved in
+`environment_drift` instead of being hidden.
