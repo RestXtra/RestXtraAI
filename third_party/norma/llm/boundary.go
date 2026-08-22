@@ -20,11 +20,17 @@ type BoundaryMeta struct {
 	Trigger string `json:"trigger,omitempty"`
 	// PreTokens is the token count just before compaction.
 	PreTokens int `json:"pre_tokens"`
+	// PostTokens is recomputed from the exact API-visible replacement history.
+	PostTokens int `json:"post_tokens,omitempty"`
 	// MessagesSummarized is how many messages were condensed into the summary.
 	MessagesSummarized int `json:"messages_summarized,omitempty"`
 	// ActiveSkills names the invoked skills re-injected verbatim after this
 	// boundary (diagnostics; the instructions themselves ride in the messages).
 	ActiveSkills []string `json:"active_skills,omitempty"`
+	// WorkingSetVersion identifies the deterministic replacement-history schema.
+	WorkingSetVersion int `json:"working_set_version,omitempty"`
+	// WorkingSetHash makes replay drift detectable without retaining another copy.
+	WorkingSetHash string `json:"working_set_hash,omitempty"`
 }
 
 // BoundaryMessage builds a compact-boundary marker carrying its metadata. It

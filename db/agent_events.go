@@ -166,6 +166,11 @@ ON CONFLICT (source_key) DO NOTHING`,
 			return 0, err
 		}
 	}
+	if eventTypeForActivity(a) == EventSummaryCreated {
+		if _, err := projectWorkingSet(tx, scope, eventID, a.Detail); err != nil {
+			return 0, err
+		}
+	}
 	return eventID, nil
 }
 

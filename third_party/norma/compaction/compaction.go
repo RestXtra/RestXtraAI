@@ -16,6 +16,9 @@ package compaction
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"sort"
 	"strings"
 
@@ -325,12 +328,14 @@ func (c *Compactor) autoCompact(ctx context.Context, msgs []llm.Message, preTok 
 	// (post-boundary → sent to the model). Retained history keeps the originals; we
 	// only re-surface skills that fell behind the new boundary.
 	reinjected := reinjectSkills(msgs, tailStart)
-	boundary := llm.BoundaryMessage(llm.BoundaryMeta{
+	meta := llm.BoundaryMeta{
 		Trigger:            trigger,
 		PreTokens:          preTok,
 		MessagesSummarized: len(toSummarize),
 		ActiveSkills:       skillNames(reinjected),
-	})
+		WorkingSetVersion:  1,
+	}
+	boundary := llm.BoundaryMessage(meta)
 	summaryMsg := llm.Message{Role: llm.RoleUser, Content: []llm.ContentBlock{
 		llm.TextBlock("[conversation summarized to save context]\n\n" + summary),
 	}}
@@ -341,6 +346,13 @@ func (c *Compactor) autoCompact(ctx context.Context, msgs []llm.Message, preTok 
 	out = append(out, boundary, summaryMsg)
 	out = append(out, reinjected...)
 	out = append(out, msgs[tailStart:]...)
+	visible := llm.MessagesForAPI(out)
+	meta.PostTokens = c.count(ctx, visible)
+	if encoded, err := json.Marshal(visible); err == nil {
+		digest := sha256.Sum256(encoded)
+		meta.WorkingSetHash = "sha256:" + hex.EncodeToString(digest[:])
+	}
+	out[tailStart] = llm.BoundaryMessage(meta)
 	return out, true
 }
 

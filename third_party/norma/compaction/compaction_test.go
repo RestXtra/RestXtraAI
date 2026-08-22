@@ -34,8 +34,13 @@ func TestAutoCompactIsNonDestructive(t *testing.T) {
 	if len(out) != len(msgs)+2 {
 		t.Fatalf("len(out)=%d, want %d (history + boundary + summary)", len(out), len(msgs)+2)
 	}
-	if llm.LastBoundaryIndex(out) < 0 {
+	boundaryIndex := llm.LastBoundaryIndex(out)
+	if boundaryIndex < 0 {
 		t.Fatal("no boundary marker inserted")
+	}
+	meta, parsed := llm.ParseBoundaryMeta(out[boundaryIndex])
+	if !parsed || meta.PostTokens <= 0 || meta.WorkingSetVersion != 1 || meta.WorkingSetHash == "" {
+		t.Fatalf("missing replacement-history diagnostics: %+v", meta)
 	}
 	// API view = summary + recent tail (boundary stripped).
 	api := llm.MessagesForAPI(out)

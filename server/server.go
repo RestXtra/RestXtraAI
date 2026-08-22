@@ -577,6 +577,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/tasks/{id}/coverage-graph", s.taskCoverageGraph)
 	mux.HandleFunc("GET /api/tasks/{id}/costs", s.taskRoundCosts)
 	mux.HandleFunc("GET /api/tasks/{id}/events", s.taskAgentEvents)
+	mux.HandleFunc("GET /api/tasks/{id}/working-set", s.taskWorkingSet)
+	mux.HandleFunc("GET /api/tasks/{id}/working-sets", s.taskWorkingSets)
 	mux.HandleFunc("GET /api/tasks/{id}/artifacts", s.taskArtifacts)
 	mux.HandleFunc("GET /api/tasks/{id}/artifacts/{artifactID}", s.taskArtifactPage)
 	mux.HandleFunc("GET /api/tasks/{id}/overview", s.taskOverview)

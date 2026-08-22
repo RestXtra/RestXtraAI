@@ -482,6 +482,32 @@ CREATE INDEX IF NOT EXISTS idx_agent_events_conversation ON agent_events(convers
 CREATE INDEX IF NOT EXISTS idx_agent_events_turn ON agent_events(turn_id, id) WHERE turn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type, id);
 
+-- Versioned deterministic context projection. Full event/artifact history stays
+-- external; this table stores only the bounded fixed + sliding working set.
+CREATE TABLE IF NOT EXISTS agent_working_sets (
+    id                 BIGSERIAL PRIMARY KEY,
+    exploration_id     BIGINT REFERENCES explorations(id) ON DELETE CASCADE,
+    conversation_id    BIGINT REFERENCES conversations(id) ON DELETE CASCADE,
+    source_event_id    BIGINT NOT NULL UNIQUE REFERENCES agent_events(id) ON DELETE CASCADE,
+    version            INTEGER NOT NULL,
+    schema_version     INTEGER NOT NULL DEFAULT 1,
+    content_hash       TEXT NOT NULL,
+    fixed_layer        JSONB NOT NULL DEFAULT '{}',
+    sliding_layer      JSONB NOT NULL DEFAULT '{}',
+    external_layer     JSONB NOT NULL DEFAULT '{}',
+    model_summary      TEXT NOT NULL DEFAULT '',
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK ((exploration_id IS NOT NULL) <> (conversation_id IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_working_set_exploration_version
+    ON agent_working_sets(exploration_id, version) WHERE exploration_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_working_set_conversation_version
+    ON agent_working_sets(conversation_id, version) WHERE conversation_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_working_set_exploration_latest
+    ON agent_working_sets(exploration_id, version DESC) WHERE exploration_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_working_set_conversation_latest
+    ON agent_working_sets(conversation_id, version DESC) WHERE conversation_id IS NOT NULL;
+
 ALTER TABLE activity ADD COLUMN IF NOT EXISTS event_id BIGINT REFERENCES agent_events(id) ON DELETE SET NULL;
 ALTER TABLE conversation_activities ADD COLUMN IF NOT EXISTS event_id BIGINT REFERENCES agent_events(id) ON DELETE SET NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_activity_event ON activity(event_id) WHERE event_id IS NOT NULL;
