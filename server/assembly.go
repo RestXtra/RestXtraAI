@@ -25,16 +25,17 @@ import (
 // filters them per-agent binding. Empty/nil → no host tools this run (capture off).
 func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.CoreTool, map[string][]string), catalog *agentAssemblyCache) {
 	agent.ToolAugment = func(ctx context.Context, agentKey string) ([]actool.CoreTool, agent.DeferredInfo, func()) {
-		a, err := pg.GetAgentByKey(agentKey)
-		if err != nil || a == nil {
+		snapshot, err := pg.AgentAssemblyByKey(agentKey)
+		if err != nil || snapshot == nil || snapshot.Agent == nil {
 			return nil, agent.DeferredInfo{}, nil
 		}
+		a := snapshot.Agent
 		var extra []actool.CoreTool
 
 		// --- skills: load visible skills into reg (used for the Skill meta-tool
 		// and to know which MCP servers are skill-gated). ---
 		var reg *skill.Registry
-		if names, _ := pg.AgentSkillNames(a.ID); len(names) > 0 {
+		if names := snapshot.SkillNames; len(names) > 0 {
 			nameSet := make(map[string]bool, len(names))
 			for _, n := range names {
 				nameSet[n] = true
@@ -79,8 +80,7 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 		var allNames, globalNames []string
 		globalSet := map[string]bool{}
 		{
-			mcpIDs, _ := pg.AgentVisible(a.ID, "mcp")
-			want := idSet(mcpIDs)
+			want := idSet(snapshot.MCPIDs)
 			all, _ := catalog.mcps(pg.ListMCP)
 			for _, m := range all {
 				if !m.Enabled {

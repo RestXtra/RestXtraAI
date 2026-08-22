@@ -94,6 +94,18 @@ func TestConfigStores(t *testing.T) {
 	if len(vm) != 1 || vm[0] != mid {
 		t.Fatalf("agent visible mcp: %+v", vm)
 	}
+	assembly, err := d.AgentAssemblyByKey("planner")
+	if err != nil || assembly == nil || assembly.Agent == nil {
+		t.Fatalf("agent assembly snapshot: %+v err=%v", assembly, err)
+	}
+	if assembly.Agent.ID != ag.ID || len(assembly.MCPIDs) != 1 || assembly.MCPIDs[0] != mid ||
+		len(assembly.SkillNames) != 1 || assembly.SkillNames[0] != "t-skill" {
+		t.Fatalf("agent assembly snapshot mismatch: %+v", assembly)
+	}
+	missing, err := d.AgentAssemblyByKey("does_not_exist")
+	if err != nil || missing != nil {
+		t.Fatalf("missing agent assembly=%+v err=%v", missing, err)
+	}
 	// resource-side read (same join row) → bidirectional
 	ra, _ := d.ResourceAgents("mcp", mid)
 	if len(ra) != 1 || ra[0] != ag.ID {

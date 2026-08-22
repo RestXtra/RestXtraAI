@@ -6,7 +6,7 @@ import (
 
 // testDSN returns the configured DSN, skipping the test when neither the env var
 // nor a config file supplies one (DSN no longer has a built-in default).
-func testDSN(t *testing.T) string {
+func testDSN(t testing.TB) string {
 	t.Helper()
 	dsn, _, err := DSN()
 	if err != nil {

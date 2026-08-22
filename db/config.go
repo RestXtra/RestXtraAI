@@ -179,8 +179,14 @@ const agentCols = `id,key,name,COALESCE(description,''),role,builtin,enabled,COA
 
 func scanAgent(sc interface{ Scan(...any) error }) (*Agent, error) {
 	var a Agent
-	err := sc.Scan(&a.ID, &a.Key, &a.Name, &a.Description, &a.Role, &a.Builtin, &a.Enabled, &a.MaxTurns, &a.RunSecs, &a.WebSearch, &a.InteractiveShell, &a.WrapupPrompt, &a.WrapupMaxTurns, &a.TaskTimeoutWrapupPrompt, &a.TaskTimeoutWrapupMaxTurns)
+	err := sc.Scan(agentScanDest(&a)...)
 	return &a, err
+}
+
+func agentScanDest(a *Agent) []any {
+	return []any{&a.ID, &a.Key, &a.Name, &a.Description, &a.Role, &a.Builtin, &a.Enabled,
+		&a.MaxTurns, &a.RunSecs, &a.WebSearch, &a.InteractiveShell, &a.WrapupPrompt,
+		&a.WrapupMaxTurns, &a.TaskTimeoutWrapupPrompt, &a.TaskTimeoutWrapupMaxTurns}
 }
 
 func (d *DB) ListAgents() ([]*Agent, error) {
@@ -209,6 +215,46 @@ func (d *DB) GetAgentByKey(key string) (*Agent, error) {
 		return nil, err
 	}
 	return a, nil
+}
+
+// AgentAssembly is the consistent, read-only configuration snapshot needed to
+// assemble one fresh agent session.
+type AgentAssembly struct {
+	Agent      *Agent
+	SkillNames []string
+	MCPIDs     []int64
+}
+
+// AgentAssemblyByKey returns the agent row and both visibility sets in one
+// PostgreSQL round trip. The previous assembly path queried these independently,
+// adding latency and allowing visibility edits between reads to produce a mixed
+// snapshot.
+func (d *DB) AgentAssemblyByKey(key string) (*AgentAssembly, error) {
+	var a Agent
+	var skillsJSON, mcpJSON []byte
+	dest := append(agentScanDest(&a), &skillsJSON, &mcpJSON)
+	err := d.QueryRow(`SELECT `+agentCols+`,
+COALESCE((SELECT jsonb_agg(skill_name ORDER BY skill_name)
+          FROM agent_skill_visibility
+          WHERE agent_id=agents.id AND enabled), '[]'::jsonb),
+COALESCE((SELECT jsonb_agg(resource_id ORDER BY resource_id)
+          FROM agent_visibility
+          WHERE agent_id=agents.id AND resource_kind='mcp' AND enabled), '[]'::jsonb)
+FROM agents WHERE key=$1`, key).Scan(dest...)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	result := &AgentAssembly{Agent: &a}
+	if err := json.Unmarshal(skillsJSON, &result.SkillNames); err != nil {
+		return nil, fmt.Errorf("decode agent skill visibility: %w", err)
+	}
+	if err := json.Unmarshal(mcpJSON, &result.MCPIDs); err != nil {
+		return nil, fmt.Errorf("decode agent MCP visibility: %w", err)
+	}
+	return result, nil
 }
 
 // AgentBindingCounts returns per-agent binding counts in a few grouped queries
