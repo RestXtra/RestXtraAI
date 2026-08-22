@@ -1,0 +1,37 @@
+{
+  "schema_version": "restxtra.benchmark-scenario.v1",
+  "dataset": {
+    "name": "local-authorized-fixture",
+    "version": "replace-with-immutable-version",
+    "authorization_reference": "replace-with-scope-or-approval-reference",
+    "reset_reference": "replace-with-snapshot-or-reset-procedure-version"
+  },
+  "environment": {
+    "model": "replace-with-provider-and-model",
+    "skills_revision": "replace-with-skills-revision",
+    "tool_catalog_revision": "replace-with-tool-catalog-revision",
+    "workers": 3
+  },
+  "repetitions": 5,
+  "poll_interval_seconds": 5,
+  "max_wait_seconds": 1200,
+  "tasks": [
+    {
+      "id": "local-web-baseline",
+      "description": "Authorized local benchmark target http://127.0.0.1:3000",
+      "goal": "Enumerate the authorized local fixture and report evidence-backed findings.",
+      "timeout_seconds": 900,
+      "workflow": {
+        "steps": [
+          {
+            "summary": "Enumerate the local fixture attack surface and record verified assets.",
+            "priority": 100
+          }
+        ],
+        "hints": [
+          "Only test the explicitly authorized local fixture."
+        ]
+      }
+    }
+  ]
+}

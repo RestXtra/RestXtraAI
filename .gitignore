@@ -16,6 +16,7 @@ web/tsconfig.tsbuildinfo
 web/next-env.d.ts
 *.local
 /benchmarks/results/
+/benchmarks/scenarios/*.local.json
 
 # development tools
 .playwright-mcp/

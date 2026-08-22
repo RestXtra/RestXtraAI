@@ -52,3 +52,36 @@ not silently converted to zero. Cohorts are explicit rather than “latest N” 
 later tasks cannot change an already saved comparison. Save the JSON response as
 the baseline record; later manual changes to a task's persisted graph will be
 reflected by a new export.
+
+## Automated task replay
+
+The replay runner creates repeated tasks from one immutable scenario, waits for
+terminal state, and exports every baseline plus the cohort in one checkpointed
+JSON file. It requires an authenticated token but never writes that token to the
+result:
+
+```powershell
+Copy-Item benchmarks/scenarios/local-example.json benchmarks/scenarios/baseline.local.json
+# Edit baseline.local.json with the authorized target and immutable dataset metadata.
+$env:RESTXTRA_BENCH_TOKEN = "<bearer token>"
+go run ./benchmarks/replay `
+  -scenario benchmarks/scenarios/baseline.local.json `
+  -out benchmarks/results/before.json `
+  -base-url http://localhost:8787
+Remove-Item Env:RESTXTRA_BENCH_TOKEN
+```
+
+Copy the example scenario to a `*.local.json` file (ignored by Git) and replace every descriptive
+value before running it. `authorization_reference`, immutable dataset `version`,
+and `reset_reference` are mandatory. Each task must have a positive timeout, and
+one invocation is capped at 100 task runs. The runner does not reset or delete a
+target; reset it through the procedure named by `reset_reference` before every
+repeat when the dataset is stateful.
+
+The result records the exact scenario SHA-256, Git revision/dirty flag and tracked
+diff SHA-256, user
+environment metadata, and hashes of the live settings, LLM profiles, agents,
+tools, and skills API responses. It writes a checkpoint after environment capture,
+task creation, and each completed baseline, so interrupted runs retain created
+task IDs. A valid comparison requires `complete: true`, identical scenario and
+environment hashes, and a freshly reset authorized dataset.
