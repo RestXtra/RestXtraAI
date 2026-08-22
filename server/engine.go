@@ -15,6 +15,7 @@ import (
 	"github.com/RestXtra/RestXtraAI/db"
 	"github.com/RestXtra/RestXtraAI/intercept"
 	"github.com/RestXtra/RestXtraAI/metrics"
+	"github.com/google/uuid"
 )
 
 // model_error（provider/API 故障：LLM 层瞬时重试耗尽，或流已开始后中途断流）
@@ -357,6 +358,10 @@ func (e *Engine) emitActivity(t *Task, r db.Activity) {
 		e.touch(t.ID)
 		return
 	}
+	if r.EventOnly {
+		e.touch(t.ID)
+		return
+	}
 	r.ID = id
 	if r.CreatedAt.IsZero() {
 		r.CreatedAt = time.Now()
@@ -371,6 +376,9 @@ func (e *Engine) emitActivity(t *Task, r db.Activity) {
 // failure is now LOGGED (it used to be swallowed by an `if err == nil`), so the
 // underlying DB error is finally visible for diagnosis.
 func (e *Engine) appendActivity(t *Task, r db.Activity) (int64, error) {
+	if r.EventKey == "" {
+		r.EventKey = uuid.NewString()
+	}
 	var id int64
 	var err error
 	for attempt := 1; attempt <= 3; attempt++ {

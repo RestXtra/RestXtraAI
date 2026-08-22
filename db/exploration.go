@@ -53,6 +53,14 @@ type Activity struct {
 	OutputTokens     *int `json:"output_tokens,omitempty"`
 	CacheReadTokens  *int `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens *int `json:"cache_write_tokens,omitempty"`
+	// Canonical event metadata. EventOnly records lifecycle facts without adding
+	// a compatibility activity row (and therefore without changing the current UI).
+	EventType string              `json:"-"`
+	EventKey  string              `json:"-"`
+	TurnID    string              `json:"-"`
+	Payload   json.RawMessage     `json:"-"`
+	EventOnly bool                `json:"-"`
+	Artifacts []ArtifactCandidate `json:"-"`
 }
 
 // TokenUsage is a per-worker token aggregate (TokenStatsByWorker).
@@ -536,16 +544,33 @@ WHERE src_id=$1 AND exploration_id=$2 AND rel='yields'`, p.id, s.expID).Scan(&n)
 
 // ClaimIntent atomically moves an open intent to running. Returns true if claimed.
 func (s *ExplorationStore) ClaimIntent(id int64, owner string) (bool, error) {
-	res, err := s.db.Exec(`UPDATE exploration_nodes SET state='running', owner=$1
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	res, err := tx.Exec(`UPDATE exploration_nodes SET state='running', owner=$1
 WHERE id=$2 AND exploration_id=$3 AND kind='intent' AND state='open'`, owner, id, s.expID)
 	if err != nil {
+		_ = tx.Rollback()
 		return false, err
 	}
 	n, _ := res.RowsAffected()
 	if n == 1 {
+		payload, _ := json.Marshal(map[string]any{"intent_id": id, "owner": owner})
+		if _, err := appendCanonicalEvent(tx, eventScope{explorationID: &s.expID}, Activity{
+			NodeID: &id, Worker: owner, EventType: EventIntentClaimed, EventOnly: true, Payload: payload,
+		}, nil); err != nil {
+			_ = tx.Rollback()
+			return false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
 		s.BumpVersion() // P2.6: intent → running 也影响 overview(running_intents)
+		return true, nil
 	}
-	return n == 1, nil
+	_ = tx.Rollback()
+	return false, nil
 }
 
 // Stats returns node counts grouped by kind (for dashboard).
@@ -571,13 +596,31 @@ func (s *ExplorationStore) Stats() (map[string]int, error) {
 
 // AppendActivity records one worker step and returns its id.
 func (s *ExplorationStore) AppendActivity(a Activity) (int64, error) {
+	prepared := prepareArtifacts(a.Artifacts)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	eventID, err := appendCanonicalEvent(tx, eventScope{explorationID: &s.expID}, a, prepared)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	if a.EventOnly {
+		return 0, tx.Commit()
+	}
 	var id int64
-	err := s.db.QueryRow(`
-INSERT INTO activity(exploration_id, node_id, worker, kind, tool, tool_use_id, is_error, summary, detail, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
-VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),$7,NULLIF($8,''),NULLIF($9,''),$10,$11,$12,$13)
+	err = tx.QueryRow(`
+INSERT INTO activity(exploration_id, node_id, worker, kind, tool, tool_use_id, is_error, summary, detail, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_id)
+VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),$7,NULLIF($8,''),NULLIF($9,''),$10,$11,$12,$13,$14)
+ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO UPDATE SET event_id=EXCLUDED.event_id
 RETURNING id`, s.expID, a.NodeID, utf8Clean(a.Worker), utf8Clean(a.Kind), utf8Clean(a.Tool), utf8Clean(a.ToolUseID), a.IsError, utf8Clean(a.Summary), utf8Clean(a.Detail),
-		a.InputTokens, a.OutputTokens, a.CacheReadTokens, a.CacheWriteTokens).Scan(&id)
-	return id, err
+		a.InputTokens, a.OutputTokens, a.CacheReadTokens, a.CacheWriteTokens, eventID).Scan(&id)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	return id, tx.Commit()
 }
 
 // TokenTotal sums token usage across ALL workers for this exploration (whole-task

@@ -430,6 +430,63 @@ CREATE TABLE IF NOT EXISTS conversation_activities (
 );
 CREATE INDEX IF NOT EXISTS idx_conv_act ON conversation_activities(conversation_id, id);
 
+-- Canonical append-only agent history. activity / conversation_activities are
+-- compatibility projections for the current UI; every new projection row is
+-- written in the same transaction as its source event.
+CREATE TABLE IF NOT EXISTS artifacts (
+    id              BIGSERIAL PRIMARY KEY,
+    exploration_id  BIGINT REFERENCES explorations(id) ON DELETE CASCADE,
+    conversation_id BIGINT REFERENCES conversations(id) ON DELETE CASCADE,
+    node_id         BIGINT REFERENCES exploration_nodes(id) ON DELETE SET NULL,
+    agent           TEXT,
+    source_tool     TEXT,
+    correlation_id  TEXT,
+    storage_path    TEXT NOT NULL,
+    content_hash    TEXT NOT NULL,
+    mime_type       TEXT NOT NULL DEFAULT 'application/octet-stream',
+    byte_size       BIGINT NOT NULL DEFAULT 0,
+    line_count      BIGINT NOT NULL DEFAULT 0,
+    summary         TEXT,
+    permission_label TEXT NOT NULL DEFAULT 'task',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK ((exploration_id IS NOT NULL) <> (conversation_id IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_artifact_exploration_hash_path
+    ON artifacts(exploration_id, content_hash, storage_path) WHERE exploration_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_artifact_conversation_hash_path
+    ON artifacts(conversation_id, content_hash, storage_path) WHERE conversation_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_artifacts_exploration ON artifacts(exploration_id, id) WHERE exploration_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_artifacts_conversation ON artifacts(conversation_id, id) WHERE conversation_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS agent_events (
+    id                 BIGSERIAL PRIMARY KEY,
+    exploration_id     BIGINT REFERENCES explorations(id) ON DELETE CASCADE,
+    conversation_id    BIGINT REFERENCES conversations(id) ON DELETE CASCADE,
+    turn_id             TEXT,
+    node_id             BIGINT REFERENCES exploration_nodes(id) ON DELETE SET NULL,
+    agent               TEXT,
+    event_type          TEXT NOT NULL,
+    correlation_id      TEXT,
+    artifact_id         BIGINT REFERENCES artifacts(id) ON DELETE SET NULL,
+    payload             JSONB NOT NULL DEFAULT '{}',
+    input_tokens        INTEGER,
+    output_tokens       INTEGER,
+    cache_read_tokens   INTEGER,
+    cache_write_tokens  INTEGER,
+    source_key          TEXT UNIQUE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK ((exploration_id IS NOT NULL) <> (conversation_id IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_agent_events_exploration ON agent_events(exploration_id, id) WHERE exploration_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_events_conversation ON agent_events(conversation_id, id) WHERE conversation_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_events_turn ON agent_events(turn_id, id) WHERE turn_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type, id);
+
+ALTER TABLE activity ADD COLUMN IF NOT EXISTS event_id BIGINT REFERENCES agent_events(id) ON DELETE SET NULL;
+ALTER TABLE conversation_activities ADD COLUMN IF NOT EXISTS event_id BIGINT REFERENCES agent_events(id) ON DELETE SET NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_activity_event ON activity(event_id) WHERE event_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_conv_activity_event ON conversation_activities(event_id) WHERE event_id IS NOT NULL;
+
 -- =====================================================================
 -- J. Agent 触发器
 -- =====================================================================

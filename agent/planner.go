@@ -277,6 +277,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		settle = wrapupSettlementForTask("planner", nil, clamped)
 	}
 	opts := agentcore.Options{
+		EmitPromptEvents: true,
 		Provider:        p.prov,
 		SystemPrompt:    system,
 		DynamicBoundary: boundary,

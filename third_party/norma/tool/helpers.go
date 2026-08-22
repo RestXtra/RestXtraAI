@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,6 +20,15 @@ func maxOut(tc *ToolContext) int {
 }
 
 var spillSeq atomic.Int64
+
+// PersistedOutput is the machine-readable pointer emitted when Capture spills a
+// large result. Hosts can register the file as an artifact without parsing prose.
+type PersistedOutput struct {
+	Path  string `json:"path"`
+	Bytes int64  `json:"bytes"`
+	Lines int64  `json:"lines"`
+	MIME  string `json:"mime"`
+}
 
 // Capture bounds a tool's textual output for the model. When the output exceeds
 // the limit (ToolContext.MaxOutputChars, default 30000) and the host configured
@@ -42,12 +52,35 @@ func Capture(tc *ToolContext, s string) string {
 				}
 			}
 			lines := strings.Count(s, "\n") + 1
-			return s[:max] + fmt.Sprintf(
-				"\n\n... <persisted-output>[Output too large: full %d bytes / %d lines.Full output saved to  %s </persisted-output>",
-				len(s), lines, ref)
+			meta, _ := json.Marshal(PersistedOutput{Path: ref, Bytes: int64(len(s)), Lines: int64(lines), MIME: "text/plain; charset=utf-8"})
+			return s[:max] + "\n\n... Full output saved as an artifact: <persisted-output>" + string(meta) + "</persisted-output>"
 		}
 	}
 	return truncate(s, max)
+}
+
+// ParsePersistedOutputs extracts Capture's stable metadata envelopes. Invalid
+// or incomplete envelopes are ignored so untrusted tool text cannot fabricate
+// an artifact without also resolving to a real file at the host boundary.
+func ParsePersistedOutputs(s string) []PersistedOutput {
+	const open, close = "<persisted-output>", "</persisted-output>"
+	var out []PersistedOutput
+	for {
+		start := strings.Index(s, open)
+		if start < 0 {
+			return out
+		}
+		s = s[start+len(open):]
+		end := strings.Index(s, close)
+		if end < 0 {
+			return out
+		}
+		var ref PersistedOutput
+		if json.Unmarshal([]byte(s[:end]), &ref) == nil && ref.Path != "" {
+			out = append(out, ref)
+		}
+		s = s[end+len(close):]
+	}
 }
 
 func spillOutput(dir, s string) (string, error) {

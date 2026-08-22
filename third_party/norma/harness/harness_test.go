@@ -88,6 +88,32 @@ func TestLoopRunsToolThenCompletes(t *testing.T) {
 	}
 }
 
+func TestPromptEventCarriesExactAssembledRequest(t *testing.T) {
+	m := &scriptedModel{turns: [][]llm.StreamEvent{textTurn("done")}}
+	in := QueryInput{
+		System:           []string{"system"},
+		Messages:         []llm.Message{llm.UserText("go")},
+		Tools:            tool.NewRegistry(),
+		PermissionMode:   permission.ModeBypass,
+		EmitPromptEvents: true,
+	}
+	var prompt *llm.CompletionRequest
+	for event, err := range Query(context.Background(), in, QueryDeps{CallModel: m.call}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if event.Kind == KindPrompt {
+			prompt = event.Request
+		}
+	}
+	if prompt == nil || len(prompt.System) != 1 || prompt.System[0] != "system" {
+		t.Fatalf("missing exact prompt event: %+v", prompt)
+	}
+	if len(prompt.Messages) != 1 || prompt.Messages[0].Text() != "go" {
+		t.Fatalf("unexpected prompt messages: %+v", prompt.Messages)
+	}
+}
+
 func TestPermissionDenyPairsSyntheticResult(t *testing.T) {
 	m := &scriptedModel{turns: [][]llm.StreamEvent{
 		toolTurn("c1", "Write", `{"file_path":"x","content":"y"}`),
@@ -192,7 +218,19 @@ func TestCompactionWorkingSetIsPersisted(t *testing.T) {
 		Compactor:      &fakeCompactor{},
 		Recorder:       rec,
 	}
-	drain(t, in, QueryDeps{CallModel: m.call})
+	var summaryEvent *Event
+	for event, err := range Query(context.Background(), in, QueryDeps{CallModel: m.call}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if event.Kind == KindSummary {
+			copy := event
+			summaryEvent = &copy
+		}
+	}
+	if summaryEvent == nil || summaryEvent.Boundary == nil || !strings.Contains(summaryEvent.Text, "DIGEST") {
+		t.Fatalf("missing summary event: %+v", summaryEvent)
+	}
 
 	if rec.boundaries != 1 {
 		t.Fatalf("RecordBoundary calls=%d, want 1 (observability marker)", rec.boundaries)

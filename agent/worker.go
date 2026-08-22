@@ -280,6 +280,7 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 		settle.Prompt += "\n\n【收尾时请记得你的意图（P4.3 重注入）】\n" + renderIntentTask(intent)
 	}
 	opts := agentcore.Options{
+		EmitPromptEvents: true,
 		Provider:        w.prov,
 		SystemPrompt:    system,
 		DynamicBoundary: boundary,
@@ -375,7 +376,7 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 		runCtx, runCancel = context.WithTimeout(ctx, maxDur+settleHardGrace)
 		defer runCancel()
 	}
-	finalText, reason, err := captureRunSession(runCtx, s, input, emitWrap)
+	finalText, reason, err := captureRunSession(runCtx, s, input, w.workDir, emitWrap)
 	// P4.1 Reflector：正常完成(ReasonCompleted)但没有写回任何东西 → 回注一次"把结论落地"，
 	// 避免模型空转一轮就收尾（pentagi reflector 思路）。仅在确实零产出时触发，最多 1 次。
 	if err == nil && ctx.Err() == nil && runCtx.Err() == nil &&
@@ -385,7 +386,7 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 		metrics.M.Inc(&metrics.M.ReflectorHints) // P5.4
 		finalText, reason, err = captureRunSession(runCtx, s,
 			"你已正常结束，但【没有写回任何东西】。若你实际得到了一些结论——哪怕是“端口关闭/参数不可注入/未发现登录入口”这类**否定结论**——请用 record_fact 把它们落地（否定结论记得标 confidence，弱证据标 inferred）；有新资产用 insert_assets；确认为漏洞用 report_finding。若确实还什么都没得到，就先做一次最小推进（换参数/换路径/再探一层）再写回。完成后给出最终总结。"+
-				"\n\n【再次提醒你的意图】"+renderIntentTask(intent), emitWrap)
+				"\n\n【再次提醒你的意图】"+renderIntentTask(intent), w.workDir, emitWrap)
 	}
 	// 证据闸门：正常完成时校验最终总结——引用的证据 id 必须真实、声称的 flag 必须
 	// 逐字出现在工具输出。不通过则把拒绝原因回注给模型修正后重答（P2.3：最多 1 次，
@@ -406,7 +407,7 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 			finalText, reason, err = captureRunSession(runCtx, s,
 				"完成闸门拒绝："+why+
 					"\n【本修正轮禁止调用任何工具】。只对照上面已有的工具输出与证据：核对你引用的证据 id 是否真实存在、声称的 flag 是否逐字出现在工具输出里；然后直接改写你的最终总结。若证据确实不足，就如实说明哪些结论没有证据支撑，不要编造。",
-				emitWrap)
+				w.workDir, emitWrap)
 			if err != nil {
 				break
 			}

@@ -18,6 +18,8 @@ const (
 	KindToolResult EventKind = "tool_result" // a tool finished
 	KindProgress   EventKind = "progress"    // mid-tool progress
 	KindUsage      EventKind = "usage"       // cumulative token usage so far (per model turn)
+	KindSummary    EventKind = "summary"     // compaction created a model-visible replacement history
+	KindPrompt     EventKind = "prompt"      // exact provider-neutral request sent to the model
 	KindResult     EventKind = "result"      // terminal event (loop finished)
 )
 
@@ -29,6 +31,8 @@ type Event struct {
 	ToolResult *llm.ContentBlock // KindToolResult
 	Terminal   *Terminal         // KindResult
 	Usage      *llm.Usage        // KindUsage: cumulative usage after the latest model turn
+	Boundary   *llm.BoundaryMeta // KindSummary: compaction diagnostics
+	Request    *llm.CompletionRequest // KindPrompt: exact assembled request
 }
 
 // TerminalReason explains why the loop stopped.

@@ -2,12 +2,17 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
+	actool "github.com/Autumn-27/norma/tool"
 	"github.com/RestXtra/RestXtraAI/db"
+	"github.com/google/uuid"
 )
 
 // captureRun drives one agent turn-to-completion over Session.Prompt and emits a
@@ -24,19 +29,30 @@ import (
 func captureRun(ctx context.Context, opts agentcore.Options, input string, emit func(db.Activity)) (string, harness.TerminalReason, error) {
 	s := agentcore.NewSession(opts)
 	defer s.Close() // release the session's background-task manager (temp dir + processes)
-	return captureRunSession(ctx, s, input, emit)
+	return captureRunSession(ctx, s, input, opts.WorkingDir, emit)
 }
 
 // captureRunSession is captureRun over an existing session, so a caller can run
 // multiple prompts on the SAME conversation (e.g. a settlement round that reuses
 // the worker's accumulated context after the main run hit max_turns).
-func captureRunSession(ctx context.Context, s *agentcore.Session, input string, emit func(db.Activity)) (string, harness.TerminalReason, error) {
+func captureRunSession(ctx context.Context, s *agentcore.Session, input, workDir string, emit func(db.Activity)) (string, harness.TerminalReason, error) {
 	var reason harness.TerminalReason
+	turnID := uuid.NewString()
+	eventSeq := 0
 	rec := func(r db.Activity) {
 		if emit != nil {
+			eventSeq++
+			if r.TurnID == "" {
+				r.TurnID = turnID
+			}
+			if r.EventKey == "" {
+				r.EventKey = turnID + ":" + fmt.Sprint(eventSeq)
+			}
 			emit(r)
 		}
 	}
+	started, _ := json.Marshal(map[string]any{"input_chars": len(input)})
+	rec(db.Activity{EventType: db.EventTurnStarted, EventOnly: true, Payload: started})
 	toolNames := map[string]string{} // tool_use id -> name, to label results
 
 	var tbuf strings.Builder
@@ -50,7 +66,11 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 		tbuf.Reset()
 		tkind = ""
 		if s != "" {
-			rec(db.Activity{Kind: k, Summary: firstLine(s, 200), Detail: s})
+			eventType := db.EventAssistantText
+			if k == "thinking" {
+				eventType = db.EventAssistantThinking
+			}
+			rec(db.Activity{Kind: k, EventType: eventType, Summary: firstLine(s, 200), Detail: s})
 		}
 	}
 	addDelta := func(kind, text string) {
@@ -70,13 +90,18 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 		if err != nil {
 			flush()
 			if ctx.Err() != nil { // ctx cancelled = manual stop, not a failure
-				rec(db.Activity{Kind: "result", Summary: "（已手动停止本次运行）"})
+				payload, _ := json.Marshal(map[string]any{"reason": "cancelled"})
+				rec(db.Activity{Kind: "result", EventType: db.EventTurnFinished, Summary: "（已手动停止本次运行）", Payload: payload})
 				return finalText, reason, ctx.Err()
 			}
-			rec(db.Activity{Kind: "result", IsError: true, Summary: "执行出错: " + err.Error(), Detail: err.Error()})
+			payload, _ := json.Marshal(map[string]any{"reason": "stream_error", "error": err.Error()})
+			rec(db.Activity{Kind: "result", EventType: db.EventTurnFinished, IsError: true, Summary: "执行出错: " + err.Error(), Detail: err.Error(), Payload: payload})
 			return finalText, reason, err
 		}
 		switch ev.Kind {
+		case harness.KindPrompt:
+			payload, _ := json.Marshal(ev.Request)
+			rec(db.Activity{EventType: db.EventPromptAssembled, EventOnly: true, Payload: payload})
 		case harness.KindToolUse:
 			if ev.ToolUse == nil {
 				continue
@@ -84,7 +109,7 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			flush()
 			toolNames[ev.ToolUse.ID] = ev.ToolUse.Name
 			in := string(ev.ToolUse.Input)
-			rec(db.Activity{Kind: "tool_use", Tool: ev.ToolUse.Name, ToolUseID: ev.ToolUse.ID,
+			rec(db.Activity{Kind: "tool_use", EventType: db.EventToolCalled, Tool: ev.ToolUse.Name, ToolUseID: ev.ToolUse.ID,
 				Summary: ev.ToolUse.Name + " " + firstLine(in, 200), Detail: in})
 		case harness.KindToolResult:
 			if ev.ToolResult == nil {
@@ -92,8 +117,17 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			}
 			flush()
 			out := blocksText(ev.ToolResult.Content)
-			rec(db.Activity{Kind: "tool_result", Tool: toolNames[ev.ToolResult.ToolUseID], ToolUseID: ev.ToolResult.ToolUseID,
-				IsError: ev.ToolResult.IsError, Summary: firstLine(out, 200), Detail: out})
+			var artifacts []db.ArtifactCandidate
+			for _, ref := range actool.ParsePersistedOutputs(out) {
+				path, ok := resolvePersistedArtifact(workDir, ref.Path)
+				if !ok {
+					continue
+				}
+				artifacts = append(artifacts, db.ArtifactCandidate{Path: path, MIMEType: ref.MIME,
+					ByteSize: ref.Bytes, LineCount: ref.Lines, Summary: "Full output from " + toolNames[ev.ToolResult.ToolUseID]})
+			}
+			rec(db.Activity{Kind: "tool_result", EventType: db.EventToolResult, Tool: toolNames[ev.ToolResult.ToolUseID], ToolUseID: ev.ToolResult.ToolUseID,
+				IsError: ev.ToolResult.IsError, Summary: firstLine(out, 200), Detail: out, Artifacts: artifacts})
 		case harness.KindText:
 			addDelta("text", ev.Text)
 		case harness.KindThinking:
@@ -105,10 +139,15 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			// buffered final-answer text must stay for the KindResult de-dup.
 			if ev.Usage != nil {
 				u := *ev.Usage
-				rec(db.Activity{Kind: "usage",
+				rec(db.Activity{Kind: "usage", EventType: db.EventBudgetChanged,
 					InputTokens: &u.InputTokens, OutputTokens: &u.OutputTokens,
 					CacheReadTokens: &u.CacheReadTokens, CacheWriteTokens: &u.CacheWriteTokens})
 			}
+		case harness.KindSummary:
+			flush()
+			payload, _ := json.Marshal(ev.Boundary)
+			rec(db.Activity{EventType: db.EventSummaryCreated, EventOnly: true, Payload: payload,
+				Summary: firstLine(ev.Text, 200), Detail: ev.Text})
 		case harness.KindResult:
 			if ev.Terminal != nil {
 				finalText = ev.Terminal.Text
@@ -137,7 +176,8 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 					}
 				}
 				u := ev.Terminal.Usage // cumulative token usage for this session
-				rec(db.Activity{Kind: "result", IsError: ev.Terminal.Err != nil,
+				payload, _ := json.Marshal(map[string]any{"reason": ev.Terminal.Reason, "turns": ev.Terminal.Turns})
+				rec(db.Activity{Kind: "result", EventType: db.EventTurnFinished, IsError: ev.Terminal.Err != nil, Payload: payload,
 					Summary: firstLine(sum, 400), Detail: sum,
 					InputTokens: &u.InputTokens, OutputTokens: &u.OutputTokens,
 					CacheReadTokens: &u.CacheReadTokens, CacheWriteTokens: &u.CacheWriteTokens})
@@ -149,6 +189,31 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 	}
 	flush() // safety: any unflushed text if the stream ended without KindResult
 	return finalText, reason, rerr
+}
+
+// resolvePersistedArtifact accepts only Capture-managed files below this
+// session's cmd-output directory. Tool text is untrusted and may contain a
+// forged <persisted-output> envelope pointing elsewhere on the host.
+func resolvePersistedArtifact(workDir, path string) (string, bool) {
+	if workDir == "" || path == "" {
+		return "", false
+	}
+	root, err := filepath.Abs(filepath.Join(workDir, "cmd-output"))
+	if err != nil {
+		return "", false
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(workDir, path)
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.Clean(path), true
 }
 
 // blocksText concatenates the text of a tool-result's content blocks.

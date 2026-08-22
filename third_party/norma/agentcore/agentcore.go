@@ -136,6 +136,9 @@ type Options struct {
 	Temperature    *float64
 	MaxConcurrency int
 	WorkingDir     string
+	// EmitPromptEvents surfaces the exact provider-neutral request before each
+	// model call so a host can persist a reconstructable event stream.
+	EmitPromptEvents bool
 
 	// ToolOutputDir, when set, makes oversized tool output spill to a file there
 	// (full content preserved) and the tool return a head + pointer instead of
@@ -469,6 +472,7 @@ func (s *Session) Prompt(ctx context.Context, input string) iter.Seq2[harness.Ev
 		Disallowed:         s.opts.DisallowedTools,
 		CanUseTool:         s.opts.CanUseTool,
 		Hooks:              s.opts.Hooks,
+		EmitPromptEvents:   s.opts.EmitPromptEvents,
 		Compactor:          s.compactor,
 		TokenBudget:        s.opts.TokenBudget,
 		EscalateMaxTokens:  s.opts.EscalateMaxTokens,

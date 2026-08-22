@@ -37,6 +37,75 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		Version: 3,
+		Name:    "canonical_agent_events",
+		Apply: func(tx *sql.Tx) error {
+			// schema.sql creates the tables and columns before migrations run. This
+			// migration gives pre-existing UI projection rows a stable source event.
+			if _, err := tx.Exec(`
+INSERT INTO agent_events(
+    exploration_id, turn_id, node_id, agent, event_type, correlation_id, payload,
+    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, source_key, created_at)
+SELECT exploration_id, NULL, node_id, worker,
+       CASE kind
+         WHEN 'tool_use' THEN 'tool_called'
+         WHEN 'tool_result' THEN 'tool_result'
+         WHEN 'usage' THEN 'budget_changed'
+         WHEN 'result' THEN 'turn_finished'
+         WHEN 'text' THEN 'assistant_text'
+         WHEN 'thinking' THEN 'assistant_thinking'
+         WHEN 'user' THEN 'user_message'
+         ELSE 'activity_recorded'
+       END,
+       tool_use_id,
+       jsonb_strip_nulls(jsonb_build_object(
+         'kind', kind, 'tool', tool, 'is_error', is_error,
+         'summary', summary, 'detail', detail)),
+       input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+       'activity:' || id::text, created_at
+FROM activity
+ON CONFLICT (source_key) DO NOTHING`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`
+UPDATE activity a SET event_id=e.id
+FROM agent_events e
+WHERE a.event_id IS NULL AND e.source_key='activity:' || a.id::text`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`
+INSERT INTO agent_events(
+    conversation_id, turn_id, agent, event_type, correlation_id, payload,
+    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, source_key, created_at)
+SELECT conversation_id, NULL, worker,
+       CASE kind
+         WHEN 'tool_use' THEN 'tool_called'
+         WHEN 'tool_result' THEN 'tool_result'
+         WHEN 'usage' THEN 'budget_changed'
+         WHEN 'result' THEN 'turn_finished'
+         WHEN 'text' THEN 'assistant_text'
+         WHEN 'thinking' THEN 'assistant_thinking'
+         WHEN 'user' THEN 'user_message'
+         ELSE 'activity_recorded'
+       END,
+       tool_use_id,
+       jsonb_strip_nulls(jsonb_build_object(
+         'kind', kind, 'tool', tool, 'is_error', is_error,
+         'summary', summary, 'detail', detail)),
+       input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+       'conversation_activity:' || id::text, created_at
+FROM conversation_activities
+ON CONFLICT (source_key) DO NOTHING`); err != nil {
+				return err
+			}
+			_, err := tx.Exec(`
+UPDATE conversation_activities a SET event_id=e.id
+FROM agent_events e
+WHERE a.event_id IS NULL AND e.source_key='conversation_activity:' || a.id::text`)
+			return err
+		},
+	},
 }
 
 func applyMigrations(db *sql.DB) error {

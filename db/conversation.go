@@ -164,13 +164,31 @@ func (d *DB) DeleteAllConversations() (int64, error) {
 // execution step) and returns its id. Mirrors ExplorationStore.AppendActivity but
 // keyed by conversation_id. Reuses the Activity struct (NodeID is ignored here).
 func (d *DB) AppendConvActivity(convID int64, a Activity) (int64, error) {
+	prepared := prepareArtifacts(a.Artifacts)
+	tx, err := d.Begin()
+	if err != nil {
+		return 0, err
+	}
+	eventID, err := appendCanonicalEvent(tx, eventScope{conversationID: &convID}, a, prepared)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	if a.EventOnly {
+		return 0, tx.Commit()
+	}
 	var id int64
-	err := d.QueryRow(`
-INSERT INTO conversation_activities(conversation_id, worker, kind, tool, tool_use_id, is_error, summary, detail, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
-VALUES ($1,NULLIF($2,''),NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),$6,NULLIF($7,''),NULLIF($8,''),$9,$10,$11,$12)
+	err = tx.QueryRow(`
+INSERT INTO conversation_activities(conversation_id, worker, kind, tool, tool_use_id, is_error, summary, detail, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_id)
+VALUES ($1,NULLIF($2,''),NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),$6,NULLIF($7,''),NULLIF($8,''),$9,$10,$11,$12,$13)
+ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO UPDATE SET event_id=EXCLUDED.event_id
 RETURNING id`, convID, utf8Clean(a.Worker), utf8Clean(a.Kind), utf8Clean(a.Tool), utf8Clean(a.ToolUseID), a.IsError,
-		utf8Clean(a.Summary), utf8Clean(a.Detail), a.InputTokens, a.OutputTokens, a.CacheReadTokens, a.CacheWriteTokens).Scan(&id)
-	return id, err
+		utf8Clean(a.Summary), utf8Clean(a.Detail), a.InputTokens, a.OutputTokens, a.CacheReadTokens, a.CacheWriteTokens, eventID).Scan(&id)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	return id, tx.Commit()
 }
 
 // ConvActivityList returns a conversation's steps after sinceID (exclusive) with

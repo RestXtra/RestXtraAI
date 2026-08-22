@@ -103,6 +103,7 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 
 	system, boundary := deferredSystem(chatSystem(agentKey, sessionWorkDir), def)
 	opts := agentcore.Options{
+		EmitPromptEvents: true,
 		Provider:        c.prov,
 		SystemPrompt:    system,
 		DynamicBoundary: boundary,
@@ -150,7 +151,7 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	// re-unlock skill-gated MCPs from prior Skill() calls in the reloaded history so
 	// revealed tools stay callable across the fresh session.
 	seedUnlockFromHistory(s.Messages(), def.UnlockSkill)
-	text, _, err := captureRunSession(ctx, s, message, func(r db.Activity) {
+	text, _, err := captureRunSession(ctx, s, message, sessionWorkDir, func(r db.Activity) {
 		if emit != nil {
 			r.Worker = agentKey
 			emit(r)

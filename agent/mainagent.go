@@ -76,6 +76,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, as *db.AssetStore, t
 	defer cleanup()
 	system, boundary := deferredSystem(mainAgentSystem(goal, m.workDir), def)
 	opts := agentcore.Options{
+		EmitPromptEvents: true,
 		Provider:        m.prov,
 		SystemPrompt:    system,
 		DynamicBoundary: boundary,
@@ -115,7 +116,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, as *db.AssetStore, t
 	// C2: this session is fresh each turn; re-unlock skill-gated MCPs from prior
 	// Skill() calls in the reloaded history so revealed tools stay callable.
 	seedUnlockFromHistory(s.Messages(), def.UnlockSkill)
-	text, _, err := captureRunSession(ctx, s, message, func(r db.Activity) {
+	text, _, err := captureRunSession(ctx, s, message, m.workDir, func(r db.Activity) {
 		if emit != nil {
 			r.Worker = "mainagent"
 			emit(r)

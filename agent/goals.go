@@ -92,6 +92,7 @@ func DecomposeGoals(ctx context.Context, c Config, goalText, desc string, emit f
 		}
 	}
 	captureRun(ctx, agentcore.Options{
+		EmitPromptEvents:       true,
 		Provider:               prov,
 		SystemPrompt:           []string{sys},
 		Tools:                  []actool.CoreTool{submitTool},

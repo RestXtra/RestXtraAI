@@ -39,6 +39,7 @@ type QueryInput struct {
 	MaxConcurrency  int
 	WorkingDir      string
 	AgentID         string
+	EmitPromptEvents bool
 	// ToolOutputDir, when set, makes oversized tool output spill to a file there
 	// (full content kept) instead of being discarded; MaxToolOutputChars sets the
 	// per-tool output budget (head size; 0 = default 30000). See tool.Capture.
@@ -268,23 +269,32 @@ func (l *loop) injectTaskNotifications() bool {
 // after the boundary (it also exists earlier as births); only the post-boundary
 // copy is sent to the model. RecordBoundary keeps the observability-only marker
 // (a Type:"boundary" record, skipped during reconstruction).
-func (l *loop) recordNewBoundary() {
-	if l.in.Recorder == nil {
-		return
-	}
+func (l *loop) recordNewBoundary() bool {
 	c := countBoundaries(l.messages)
 	if c <= l.boundaryCount {
-		return
+		return true
 	}
 	if i := llm.LastBoundaryIndex(l.messages); i >= 0 {
 		if meta, ok := llm.ParseBoundaryMeta(l.messages[i]); ok {
-			l.in.Recorder.RecordBoundary(meta)
+			if l.in.Recorder != nil {
+				l.in.Recorder.RecordBoundary(meta)
+			}
+			summary := ""
+			if i+1 < len(l.messages) {
+				summary = l.messages[i+1].Text()
+			}
+			if !l.emit(Event{Kind: KindSummary, Text: summary, Boundary: &meta}) {
+				return false
+			}
 		}
-		for _, m := range l.messages[i:] { // boundary marker + summary + kept tail
-			l.in.Recorder.RecordMessage(m, llm.Usage{})
+		if l.in.Recorder != nil {
+			for _, m := range l.messages[i:] { // boundary marker + summary + kept tail
+				l.in.Recorder.RecordMessage(m, llm.Usage{})
+			}
 		}
 	}
 	l.boundaryCount = c
+	return true
 }
 
 func usageDelta(before, after llm.Usage) llm.Usage {
@@ -358,7 +368,9 @@ func (l *loop) run() {
 		// Non-destructive proactive compaction (snip/micro/collapse/auto).
 		if l.in.Compactor != nil {
 			l.messages = l.in.Compactor.Pre(l.ctx, l.messages)
-			l.recordNewBoundary()
+			if !l.recordNewBoundary() {
+				return
+			}
 		}
 
 		usageBefore := l.usage
@@ -376,7 +388,9 @@ func (l *loop) run() {
 				l.hasAttemptedReactiveCompact = true
 				if msgs, ok := l.in.Compactor.Reactive(l.ctx, l.messages); ok {
 					l.messages = msgs
-					l.recordNewBoundary()
+					if !l.recordNewBoundary() {
+						return
+					}
 					l.lastContinue = ContinueReactiveCompactRetry
 					continue
 				}
@@ -709,6 +723,9 @@ func (l *loop) streamAndExecute(schemas []llm.ToolSchema) (asst llm.Message, exe
 		Tools:           schemas,
 		MaxTokens:       l.maxTokens(),
 		Temperature:     l.in.Temperature,
+	}
+	if l.in.EmitPromptEvents && !l.emit(Event{Kind: KindPrompt, Request: &req}) {
+		return llm.Message{}, nil, "", nil, true, false
 	}
 	exec = newStreamExec(l)
 	acc := llm.NewAccumulator()
