@@ -2,6 +2,27 @@ package db
 
 import "testing"
 
+func BenchmarkTaskPerformanceCohort(b *testing.B) {
+	value := func(n int64) *int64 { return &n }
+	items := make([]*TaskPerformanceBaseline, 100)
+	for i := range items {
+		items[i] = &TaskPerformanceBaseline{
+			TaskID: int64(i + 1), Repeatable: true,
+			TimeToFirstConfirmedFactSeconds:    value(int64(10 + i)),
+			TimeToFirstEvidenceFactSeconds:     value(int64(15 + i)),
+			TimeToFirstConfirmedFindingSeconds: value(int64(30 + i)),
+			TaskCompletionSeconds:              value(int64(100 + i)),
+		}
+	}
+	b.ReportAllocs()
+	for range b.N {
+		result := SummarizeTaskPerformanceBaselines(items)
+		if result.RepeatableTasks != len(items) || result.TaskCompletion.P95 == nil {
+			b.Fatal("invalid cohort summary")
+		}
+	}
+}
+
 func BenchmarkAssetDSLParseAndBuild(b *testing.B) {
 	query := `(domain==example.com OR root_domain==example.org) AND technology=nginx AND status_code>=200 AND status_code<500`
 	b.ReportAllocs()

@@ -572,10 +572,12 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/tasks", s.listTasks)
 	mux.HandleFunc("POST /api/tasks", s.createTask)
+	mux.HandleFunc("GET /api/tasks/performance-baselines", s.taskPerformanceBaselines)
 	mux.HandleFunc("GET /api/tasks/{id}", s.getTask)
 	mux.HandleFunc("GET /api/tasks/{id}/attack-chain", s.taskAttackChain)
 	mux.HandleFunc("GET /api/tasks/{id}/coverage-graph", s.taskCoverageGraph)
 	mux.HandleFunc("GET /api/tasks/{id}/costs", s.taskRoundCosts)
+	mux.HandleFunc("GET /api/tasks/{id}/performance-baseline", s.taskPerformanceBaseline)
 	mux.HandleFunc("GET /api/tasks/{id}/events", s.taskAgentEvents)
 	mux.HandleFunc("GET /api/tasks/{id}/working-set", s.taskWorkingSet)
 	mux.HandleFunc("GET /api/tasks/{id}/working-sets", s.taskWorkingSets)
@@ -1531,6 +1533,81 @@ func (s *Server) taskRoundCosts(w http.ResponseWriter, r *http.Request) {
 	}
 	total := sumRoundCosts(workers)
 	writeJSON(w, http.StatusOK, map[string]any{"unit": "tokens", "workers": workers, "total": total})
+}
+
+// taskPerformanceBaseline exports a versioned result-efficiency snapshot. For
+// terminal tasks every field comes from persisted timestamps/counters without a
+// now-relative duration, making unchanged task records directly comparable.
+func (s *Server) taskPerformanceBaseline(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeErr(w, http.StatusBadRequest, "无效的任务 ID")
+		return
+	}
+	baseline, err := s.m.pg.TaskPerformanceBaseline(id)
+	if err != nil {
+		log.Printf("[performance-baseline] task %d: %v", id, err)
+		writeErr(w, http.StatusInternalServerError, "生成任务性能基线失败")
+		return
+	}
+	if baseline == nil {
+		writeErr(w, http.StatusNotFound, "任务不存在")
+		return
+	}
+	writeJSON(w, http.StatusOK, baseline)
+}
+
+func parsePerformanceTaskIDs(raw string) ([]int64, error) {
+	parts := strings.Split(raw, ",")
+	seen := map[int64]bool{}
+	ids := make([]int64, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		id, err := strconv.ParseInt(part, 10, 64)
+		if err != nil || id <= 0 {
+			return nil, fmt.Errorf("无效的任务 ID: %q", part)
+		}
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("task_ids 至少包含一个有效任务 ID")
+	}
+	if len(ids) > 100 {
+		return nil, fmt.Errorf("task_ids 一次最多 100 个")
+	}
+	return ids, nil
+}
+
+// taskPerformanceBaselines exports individual snapshots plus p50/p95 timing for
+// an explicit repeat-run cohort. Explicit IDs keep datasets from drifting as new
+// tasks are created.
+func (s *Server) taskPerformanceBaselines(w http.ResponseWriter, r *http.Request) {
+	ids, err := parsePerformanceTaskIDs(r.URL.Query().Get("task_ids"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	snapshots := make([]*db.TaskPerformanceBaseline, 0, len(ids))
+	for _, id := range ids {
+		baseline, err := s.m.pg.TaskPerformanceBaseline(id)
+		if err != nil {
+			log.Printf("[performance-baselines] task %d: %v", id, err)
+			writeErr(w, http.StatusInternalServerError, "生成任务性能基线失败")
+			return
+		}
+		if baseline == nil {
+			writeErr(w, http.StatusNotFound, fmt.Sprintf("任务 %d 不存在", id))
+			return
+		}
+		snapshots = append(snapshots, baseline)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"summary":   db.SummarizeTaskPerformanceBaselines(snapshots),
+		"snapshots": snapshots,
+	})
 }
 
 func sumRoundCosts(workers []db.AgentRoundCost) db.AgentRoundCost {
