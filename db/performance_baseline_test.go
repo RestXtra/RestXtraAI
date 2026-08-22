@@ -32,6 +32,13 @@ func TestTaskPerformanceBaselineMeasuresResultEfficiency(t *testing.T) {
 		}
 		intentIDs = append(intentIDs, id)
 	}
+	if _, created, err := store.AddIntentWithLineage(map[string]any{"summary": "Check Login"}, 1, nil, nil, "planner"); err != nil || created {
+		t.Fatalf("expected duplicate rejection: created=%v err=%v", created, err)
+	}
+	if _, err := store.AppendActivity(Activity{EventType: EventIntentRejected, EventOnly: true,
+		Payload: []byte(`{"reason":"zero_yield_scope_fuse"}`)}); err != nil {
+		t.Fatal(err)
+	}
 	factID, err := store.AddNode(KindFact, map[string]any{"summary": "login exists", "evidence": "GET /login -> 200"}, 5, "confirmed", "worker", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -78,6 +85,9 @@ func TestTaskPerformanceBaselineMeasuresResultEfficiency(t *testing.T) {
 	if got.Intents.Total != 2 || got.Intents.Attempts != 4 || got.Intents.RepeatedAttempts != 2 ||
 		got.Intents.DuplicateIntents != 1 || got.Intents.ZeroYieldIntents != 1 {
 		t.Fatalf("unexpected intent metrics: %+v", got.Intents)
+	}
+	if got.Intents.DuplicateIntentRejections != 1 || got.Intents.ZeroYieldScopeRejections != 1 {
+		t.Fatalf("unexpected rejection metrics: %+v", got.Intents)
 	}
 	if got.Usage.InputTokens != 100 || got.Usage.ToolCalls != 1 || got.Usage.ToolErrors != 1 {
 		t.Fatalf("unexpected usage: %+v", got.Usage)

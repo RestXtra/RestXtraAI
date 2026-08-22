@@ -19,11 +19,13 @@ type TaskResultYield struct {
 }
 
 type TaskIntentEfficiency struct {
-	Total            int `json:"total"`
-	Attempts         int `json:"attempts"`
-	RepeatedAttempts int `json:"repeated_attempts"`
-	DuplicateIntents int `json:"duplicate_intents"`
-	ZeroYieldIntents int `json:"zero_yield_intents"`
+	Total                     int `json:"total"`
+	Attempts                  int `json:"attempts"`
+	RepeatedAttempts          int `json:"repeated_attempts"`
+	DuplicateIntents          int `json:"duplicate_intents"`
+	ZeroYieldIntents          int `json:"zero_yield_intents"`
+	DuplicateIntentRejections int `json:"duplicate_intent_rejections"`
+	ZeroYieldScopeRejections  int `json:"zero_yield_scope_rejections"`
 }
 
 type TaskCoverageBaseline struct {
@@ -84,11 +86,12 @@ type TaskPerformanceCohort struct {
 }
 
 type taskPerformanceNodeStats struct {
-	confirmedFacts, negativeResults, evidenceFacts  int
-	confirmedFindings, evidenceFindings, artifacts  int
-	intents, attempts, repeatedAttempts, duplicates int
-	zeroYieldIntents                                int
-	firstFact, firstEvidenceFact, firstFinding      sql.NullTime
+	confirmedFacts, negativeResults, evidenceFacts      int
+	confirmedFindings, evidenceFindings, artifacts      int
+	intents, attempts, repeatedAttempts, duplicates     int
+	zeroYieldIntents                                    int
+	duplicateIntentRejections, zeroYieldScopeRejections int
+	firstFact, firstEvidenceFact, firstFinding          sql.NullTime
 }
 
 func secondsFrom(start time.Time, end sql.NullTime) *int64 {
@@ -188,6 +191,11 @@ func (d *DB) taskPerformanceNodeStats(explorationID int64) (taskPerformanceNodeS
             'legacy:' || LOWER(REGEXP_REPLACE(BTRIM(payload->>'summary'), '\s+', ' ', 'g')))
         HAVING COUNT(*) > 1
     ) grouped
+), rejection_events AS (
+    SELECT
+        COUNT(*) FILTER (WHERE payload->>'reason'='duplicate_intent')::int AS duplicate_rejections,
+        COUNT(*) FILTER (WHERE payload->>'reason'='zero_yield_scope_fuse')::int AS scope_rejections
+    FROM agent_events WHERE exploration_id=$1 AND event_type='intent_rejected'
 )
 SELECT
     COUNT(*) FILTER (WHERE kind='fact' AND state='confirmed'),
@@ -203,6 +211,8 @@ SELECT
     COUNT(*) FILTER (WHERE kind='intent' AND state IN ('done','blocked','exhausted','stopped')
         AND NOT EXISTS (SELECT 1 FROM exploration_edges e
             WHERE e.exploration_id=$1 AND e.src_id=nodes.id AND e.rel='yields')),
+	(SELECT duplicate_rejections FROM rejection_events),
+	(SELECT scope_rejections FROM rejection_events),
     MIN(created_at) FILTER (WHERE kind='fact' AND state='confirmed'),
     MIN(created_at) FILTER (WHERE kind='fact' AND state='confirmed' AND NULLIF(BTRIM(payload->>'evidence'),'') IS NOT NULL),
     MIN(created_at) FILTER (WHERE kind='finding' AND state='confirmed')
@@ -211,6 +221,7 @@ FROM nodes`, explorationID).Scan(
 		&stats.confirmedFindings, &stats.evidenceFindings, &stats.artifacts,
 		&stats.intents, &stats.attempts, &stats.repeatedAttempts, &stats.duplicates,
 		&stats.zeroYieldIntents,
+		&stats.duplicateIntentRejections, &stats.zeroYieldScopeRejections,
 		&stats.firstFact, &stats.firstEvidenceFact, &stats.firstFinding,
 	)
 	return stats, err
@@ -273,7 +284,8 @@ func (d *DB) TaskPerformanceBaseline(taskID int64) (*TaskPerformanceBaseline, er
 			EvidenceBackedFindings: stats.evidenceFindings, Artifacts: stats.artifacts},
 		Intents: TaskIntentEfficiency{Total: stats.intents, Attempts: stats.attempts,
 			RepeatedAttempts: stats.repeatedAttempts, DuplicateIntents: stats.duplicates,
-			ZeroYieldIntents: stats.zeroYieldIntents},
+			ZeroYieldIntents: stats.zeroYieldIntents, DuplicateIntentRejections: stats.duplicateIntentRejections,
+			ZeroYieldScopeRejections: stats.zeroYieldScopeRejections},
 		Coverage: TaskCoverageBaseline{Total: coverage.Total, Verified: coverage.Tested, Vulnerable: coverage.Vulnerable,
 			VerifiedRate: ratio(coverage.Tested, coverage.Total), VulnerableRate: ratio(coverage.Vulnerable, coverage.Total)},
 		Usage: usage,

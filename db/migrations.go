@@ -162,6 +162,16 @@ WHERE kind='intent' AND payload ? 'dedupe_key'`)
 			return err
 		},
 	},
+	{
+		Version: 7,
+		Name:    "intent_scope_fuse",
+		Apply: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_expnodes_intent_scope
+ON exploration_nodes(exploration_id, (payload->>'intent_scope_key'), completed_at DESC, id DESC)
+WHERE kind='intent' AND payload ? 'intent_scope_key'`)
+			return err
+		},
+	},
 }
 
 func applyMigrations(db *sql.DB) error {

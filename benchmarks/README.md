@@ -30,6 +30,9 @@ first evidence-backed fact, first confirmed finding and completion; token/tool
 costs; duplicate/retried intents; evidence coverage; cache-read rate; and asset
 verification coverage. It also reports terminal intents that produced no fact or
 finding (`zero_yield_intents`), making no-result exploration directly comparable.
+Rejected exact duplicates and repeated zero-yield scopes are reported separately
+as `duplicate_intent_rejections` and `zero_yield_scope_rejections`, so prevented
+planner work is measurable rather than inferred from the surviving graph.
 Keep the task inputs, target dataset version, model/profile,
 skills, tool catalog, concurrency and budget identical when comparing two runs.
 

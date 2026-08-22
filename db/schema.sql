@@ -158,6 +158,9 @@ CREATE INDEX IF NOT EXISTS idx_expnodes_lease ON exploration_nodes(exploration_i
 CREATE UNIQUE INDEX IF NOT EXISTS uq_expnodes_intent_dedupe
     ON exploration_nodes(exploration_id, (payload->>'dedupe_key'))
     WHERE kind='intent' AND payload ? 'dedupe_key';
+CREATE INDEX IF NOT EXISTS idx_expnodes_intent_scope
+    ON exploration_nodes(exploration_id, (payload->>'intent_scope_key'), completed_at DESC, id DESC)
+    WHERE kind='intent' AND payload ? 'intent_scope_key';
 DROP TRIGGER IF EXISTS trg_expnodes_upd ON exploration_nodes;
 CREATE TRIGGER trg_expnodes_upd BEFORE UPDATE ON exploration_nodes
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();

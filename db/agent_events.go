@@ -22,6 +22,7 @@ const (
 	EventArtifactCreated   = "artifact_created"
 	EventSummaryCreated    = "summary_created"
 	EventIntentClaimed     = "intent_claimed"
+	EventIntentRejected    = "intent_rejected"
 	EventBudgetChanged     = "budget_changed"
 	EventTurnFinished      = "turn_finished"
 	EventAssistantText     = "assistant_text"
