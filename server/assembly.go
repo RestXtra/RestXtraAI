@@ -23,7 +23,7 @@ import (
 // hostTools, if set, returns runtime host tools (currently the traffic tools when
 // capture is on) to add to EVERY agent's base list — the DB tools table then
 // filters them per-agent binding. Empty/nil → no host tools this run (capture off).
-func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.CoreTool, map[string][]string)) {
+func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.CoreTool, map[string][]string), catalog *agentAssemblyCache) {
 	agent.ToolAugment = func(ctx context.Context, agentKey string) ([]actool.CoreTool, agent.DeferredInfo, func()) {
 		a, err := pg.GetAgentByKey(agentKey)
 		if err != nil || a == nil {
@@ -39,9 +39,16 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 			for _, n := range names {
 				nameSet[n] = true
 			}
-			if allReg, err := skill.LoadDir(skillDir); err == nil && allReg != nil {
+			allSkills, err := catalog.skills(func() ([]skill.Skill, error) {
+				allReg, err := skill.LoadDir(skillDir)
+				if err != nil || allReg == nil {
+					return nil, err
+				}
+				return allReg.List(), nil
+			})
+			if err == nil {
 				reg = skill.NewRegistry()
-				for _, s := range allReg.List() {
+				for _, s := range allSkills {
 					// match by directory name (Base of Dir), not by skill display Name
 					if s.Dir != "" && nameSet[filepath.Base(s.Dir)] {
 						reg.Add(s)
@@ -74,7 +81,7 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 		{
 			mcpIDs, _ := pg.AgentVisible(a.ID, "mcp")
 			want := idSet(mcpIDs)
-			all, _ := pg.ListMCP()
+			all, _ := catalog.mcps(pg.ListMCP)
 			for _, m := range all {
 				if !m.Enabled {
 					continue
@@ -173,6 +180,82 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 			UnlockSkill: unlockSkill,
 		}
 		return extra, def, cleanup
+	}
+}
+
+// assemblyValueCache single-flights the cold load for immutable assembly metadata.
+// Failed loads are not cached, so a transient filesystem/DB error is retried by the
+// next session. Writers explicitly invalidate the affected catalog.
+type assemblyValueCache[T any] struct {
+	mu   sync.RWMutex
+	rows []T
+	ok   bool
+}
+
+func (c *assemblyValueCache[T]) get(load func() ([]T, error)) ([]T, error) {
+	if c == nil {
+		return load()
+	}
+	c.mu.RLock()
+	if c.ok {
+		rows := c.rows
+		c.mu.RUnlock()
+		return rows, nil
+	}
+	c.mu.RUnlock()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ok {
+		return c.rows, nil
+	}
+	rows, err := load()
+	if err != nil {
+		return nil, err
+	}
+	c.rows, c.ok = rows, true
+	return rows, nil
+}
+
+func (c *assemblyValueCache[T]) Invalidate() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.rows, c.ok = nil, false
+	c.mu.Unlock()
+}
+
+// agentAssemblyCache avoids re-scanning every skill and re-reading/decrypting all
+// MCP configs for each fresh agent session. The two catalogs invalidate independently.
+type agentAssemblyCache struct {
+	skillRows assemblyValueCache[skill.Skill]
+	mcpRows   assemblyValueCache[*db.MCPServer]
+}
+
+func (c *agentAssemblyCache) skills(load func() ([]skill.Skill, error)) ([]skill.Skill, error) {
+	if c == nil {
+		return load()
+	}
+	return c.skillRows.get(load)
+}
+
+func (c *agentAssemblyCache) mcps(load func() ([]*db.MCPServer, error)) ([]*db.MCPServer, error) {
+	if c == nil {
+		return load()
+	}
+	return c.mcpRows.get(load)
+}
+
+func (c *agentAssemblyCache) InvalidateSkills() {
+	if c != nil {
+		c.skillRows.Invalidate()
+	}
+}
+
+func (c *agentAssemblyCache) InvalidateMCPs() {
+	if c != nil {
+		c.mcpRows.Invalidate()
 	}
 }
 

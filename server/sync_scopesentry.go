@@ -152,6 +152,7 @@ func (s *Server) syncSSDatasource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m.ID = id
+	s.assemblyCatalog.InvalidateMCPs()
 	// Best-effort tool discovery so the status card shows tools right away.
 	if m.Enabled {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)

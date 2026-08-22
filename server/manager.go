@@ -124,6 +124,22 @@ type Manager struct {
 	braveKey         string
 	tavilyKey        string
 	webSearchProxy   string
+	mcpConfigChanged func()
+}
+
+func (m *Manager) setMCPConfigChanged(fn func()) {
+	m.mu.Lock()
+	m.mcpConfigChanged = fn
+	m.mu.Unlock()
+}
+
+func (m *Manager) notifyMCPConfigChanged() {
+	m.mu.RLock()
+	fn := m.mcpConfigChanged
+	m.mu.RUnlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 // Settings keys the UI toggles at runtime.
@@ -412,6 +428,7 @@ func (m *Manager) syncBrowserMCPProxy() {
 		log.Printf("[mcp] browser 代理同步失败: %v", err)
 		return
 	}
+	m.notifyMCPConfigChanged()
 	if proxy != "" {
 		log.Printf("[mcp] browser MCP 已挂捕获代理 %s (CA %s)", proxy, cert)
 	} else {

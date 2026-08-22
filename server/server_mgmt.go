@@ -741,6 +741,7 @@ func (s *Server) pgSaveMCP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.assemblyCatalog.InvalidateMCPs()
 	// On initial add, auto-discover + cache the tool list so the UI shows it right
 	// away (bounded so a slow/broken server can't hang the request). Skipped on
 	// plain updates (e.g. enable toggles) to avoid re-spawning the server each time.
@@ -765,6 +766,7 @@ func (s *Server) pgDeleteMCP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.assemblyCatalog.InvalidateMCPs()
 	writeJSON(w, 200, map[string]any{"deleted": id})
 }
 
@@ -942,6 +944,7 @@ func (s *Server) fsCreateSkill(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.assemblyCatalog.InvalidateSkills()
 	writeJSON(w, 201, map[string]any{"name": body.Name})
 }
 
@@ -981,6 +984,7 @@ func (s *Server) fsUpdateSkillMeta(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.assemblyCatalog.InvalidateSkills()
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -1238,6 +1242,7 @@ func (s *Server) fsUploadSkill(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "安装失败："+err.Error())
 		return
 	}
+	s.assemblyCatalog.InvalidateSkills()
 	writeJSON(w, 201, map[string]any{"name": name, "files": entries})
 }
 
@@ -1269,6 +1274,7 @@ func (s *Server) fsDeleteSkill(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.assemblyCatalog.InvalidateSkills()
 	writeJSON(w, 200, map[string]any{"deleted": name})
 }
 
@@ -1412,6 +1418,7 @@ func (s *Server) fsWriteFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.assemblyCatalog.InvalidateSkills()
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -1442,6 +1449,7 @@ func (s *Server) fsCreateDir(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.assemblyCatalog.InvalidateSkills()
 	writeJSON(w, 201, map[string]any{"dir": dir})
 }
 
@@ -1465,6 +1473,7 @@ func (s *Server) fsDeletePath(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.assemblyCatalog.InvalidateSkills()
 	writeJSON(w, 200, map[string]any{"deleted": file})
 }
 

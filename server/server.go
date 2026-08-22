@@ -76,10 +76,11 @@ type Server struct {
 	// provider (and its rate limiter). Built lazily on first use; invalidated when any
 	// profile is saved/activated/deleted so edits take effect. The active-profile path
 	// stays on the global engine planner/worker (applyLLM).
-	profMu         sync.Mutex
-	profAgents     map[int64]*profBundle
-	profChatAgents map[int64]*agent.ChatAgent // per-profile ChatAgent cache (chat page)
-	toolCatalog    toolCatalogCache           // invalidated by tool/binding writers
+	profMu          sync.Mutex
+	profAgents      map[int64]*profBundle
+	profChatAgents  map[int64]*agent.ChatAgent // per-profile ChatAgent cache (chat page)
+	toolCatalog     toolCatalogCache           // invalidated by tool/binding writers
+	assemblyCatalog agentAssemblyCache         // immutable skill/MCP metadata for fresh sessions
 }
 
 // profBundle is a planner/worker pair built from one LLM profile.
@@ -107,6 +108,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, chatBusy: map[string]bool{},
 		chatCancel: map[string]context.CancelFunc{}, triggerQ: map[string][]triggeredRun{}, triggerRun: map[string]bool{},
 		profAgents: map[int64]*profBundle{}, profChatAgents: map[int64]*agent.ChatAgent{}}
+	m.setMCPConfigChanged(s.assemblyCatalog.InvalidateMCPs)
 	// per-task LLM: a task pinned to a specific profile runs on that profile's
 	// dedicated planner/worker; unpinned tasks fall back to the global active pair.
 	s.engine.SetAgentResolver(func(t *Task) (*agent.Planner, *agent.Worker) {
@@ -214,8 +216,8 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		}
 		// 六域智能体体系（幂等播种：创建领域 agent + 绑定技能/MCP/工具）。
 		s.seedSixDomainAgents()
-		s.seedAgentModelBindings()                      // P1.4 强/弱模型路由：按模型名把 planner 绑强模型、worker 绑弱模型(一次性)
-		wireAgentAugment(m.pg, s.skillDir, s.hostTools) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
+		s.seedAgentModelBindings()                                          // P1.4 强/弱模型路由：按模型名把 planner 绑强模型、worker 绑弱模型(一次性)
+		wireAgentAugment(m.pg, s.skillDir, s.hostTools, &s.assemblyCatalog) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
 		domainReg := buildDomainReg(m.Assets())
 		wireTools(m.pg, domainReg, &s.toolCatalog) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
 		seedPrompts(m.pg)                          // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)

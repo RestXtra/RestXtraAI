@@ -482,10 +482,26 @@ func (d *DB) ListMCP() ([]*MCPServer, error) {
 		rows.Close()
 		return nil, err
 	}
-	rows.Close() // free the connection before the per-server tool-cache queries below
-	// Attach each server's cached tool names (best-effort; empty until discovered).
+	rows.Close() // free the connection before loading all cached tool names at once
+	// Attach all cached tool names with one query. This keeps ListMCP at two queries
+	// regardless of server count instead of issuing one query per MCP server.
+	byID := make(map[int64]*MCPServer, len(out))
 	for _, m := range out {
-		m.Tools, _ = d.MCPToolNames(m.ID)
+		byID[m.ID] = m
+	}
+	toolRows, toolErr := d.Query(`SELECT server_id,tool_name FROM mcp_tools_cache ORDER BY server_id,tool_name`)
+	if toolErr == nil {
+		for toolRows.Next() {
+			var serverID int64
+			var name string
+			if err := toolRows.Scan(&serverID, &name); err != nil {
+				break // cached names are best-effort; server configs remain usable
+			}
+			if m := byID[serverID]; m != nil {
+				m.Tools = append(m.Tools, name)
+			}
+		}
+		toolRows.Close()
 	}
 	return out, nil
 }

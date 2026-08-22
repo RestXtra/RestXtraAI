@@ -57,6 +57,7 @@ func (s *Server) discoverAndCacheMCP(ctx context.Context, m *db.MCPServer) error
 	if err := s.m.pg.SaveMCPTools(m.ID, tools); err != nil {
 		return err
 	}
+	s.assemblyCatalog.InvalidateMCPs()
 	log.Printf("[mcp] %s 发现 %d 个工具并已缓存", m.Name, len(tools))
 	return nil
 }

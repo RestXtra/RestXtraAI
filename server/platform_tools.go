@@ -73,6 +73,7 @@ func (s *Server) toolCreateSkill() actool.CoreTool {
 				_ = os.RemoveAll(path)
 				return actool.Errorf(err.Error()), nil
 			}
+			s.assemblyCatalog.InvalidateSkills()
 			return actool.Text("skill created: " + a.Name), nil
 		})
 }
@@ -110,6 +111,7 @@ func (s *Server) toolUpdateSkillFile() actool.CoreTool {
 			if err := os.WriteFile(full, []byte(a.Content), 0o644); err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
+			s.assemblyCatalog.InvalidateSkills()
 			return actool.Text("skill file written: " + a.Name + "/" + clean), nil
 		})
 }
@@ -256,6 +258,7 @@ func (s *Server) toolCreateMCP() actool.CoreTool {
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
+			s.assemblyCatalog.InvalidateMCPs()
 			return actool.Text(fmt.Sprintf("mcp created: id=%d name=%s", id, a.Name)), nil
 		})
 }
@@ -272,6 +275,7 @@ func (s *Server) toolUpdateMCP() actool.CoreTool {
 			if _, err := s.m.pg.SaveMCP(a.toDB()); err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
+			s.assemblyCatalog.InvalidateMCPs()
 			return actool.Text(fmt.Sprintf("mcp updated: id=%d", a.ID)), nil
 		})
 }
