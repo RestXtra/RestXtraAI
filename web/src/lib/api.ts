@@ -794,12 +794,9 @@ export const api = {
       memory_mb?: number;
       cpus?: number;
       pids_limit?: number;
-      read_only?: boolean;
-      cap_drop_all?: boolean;
       network_mode?: string;
       auto_start?: boolean;
       env?: string[];
-      managed?: boolean;
     },
   ) => post<{ id: string }>(`/sandbox/hosts/${hostId}/containers`, req),
   sandboxContainerAction: (hostId: string, cid: string, action: "start" | "stop" | "restart" | "kill" | "remove") =>

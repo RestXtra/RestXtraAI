@@ -1,6 +1,8 @@
 services:
   postgres:
     image: postgres:16-alpine
+    labels:
+      restxtra.protected: "true"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-restxtra}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 设置 POSTGRES_PASSWORD}
@@ -20,6 +22,8 @@ services:
 
   restxtra:
     image: ghcr.io/RestXtra/RestXtraAI:${RESTXTRA_TAG:-latest}
+    labels:
+      restxtra.protected: "true"
     depends_on:
       postgres:
         condition: service_healthy

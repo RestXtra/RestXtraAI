@@ -64,9 +64,6 @@ function CreateContainerDialog({
   const [cpus, setCpus] = React.useState("2");
   const [pids, setPids] = React.useState("512");
   const [network, setNetwork] = React.useState("bridge");
-  const [readOnly, setReadOnly] = React.useState(true);
-  const [capDropAll, setCapDropAll] = React.useState(true);
-  const [managed, setManaged] = React.useState(true);
   const [autoStart, setAutoStart] = React.useState(true);
 
   const imageOptions = images.flatMap((im) => im.RepoTags ?? []);
@@ -84,9 +81,6 @@ function CreateContainerDialog({
         cpus: Number(cpus) || 0,
         pids_limit: Math.max(0, Number(pids) || 0),
         network_mode: network,
-        read_only: readOnly,
-        cap_drop_all: capDropAll,
-        managed,
         auto_start: autoStart,
       });
       toast.success("沙箱容器已创建");
@@ -110,7 +104,7 @@ function CreateContainerDialog({
         <DialogHeader>
           <DialogTitle>创建沙箱容器</DialogTitle>
           <DialogDescription>
-            默认只读根 + cap-drop ALL + 资源限额，勾选「受管」会打 sandbox.managed 标签。
+            容器固定使用只读根、cap-drop ALL、no-new-privileges 和受管标签，不能控制项目基础设施。
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
@@ -167,24 +161,11 @@ function CreateContainerDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="bridge">bridge（默认）</SelectItem>
-                <SelectItem value="host">host（共享宿主机网络）</SelectItem>
                 <SelectItem value="none">none（无网络）</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div className="grid gap-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-sm">只读根文件系统</Label>
-              <Switch checked={readOnly} onCheckedChange={setReadOnly} />
-            </div>
-            <div className="flex items-center justify-between">
-              <Label className="text-sm">cap-drop ALL</Label>
-              <Switch checked={capDropAll} onCheckedChange={setCapDropAll} />
-            </div>
-            <div className="flex items-center justify-between">
-              <Label className="text-sm">受管（sandbox.managed 标签）</Label>
-              <Switch checked={managed} onCheckedChange={setManaged} />
-            </div>
             <div className="flex items-center justify-between">
               <Label className="text-sm">创建后自动启动</Label>
               <Switch checked={autoStart} onCheckedChange={setAutoStart} />
@@ -358,8 +339,15 @@ export default function SandboxContainersPage() {
               <tr className="text-left text-muted-foreground text-xs">
                 <th className="w-8 px-3 py-2 font-medium">
                   <Checkbox
-                    checked={containers.length > 0 && containers.every((c) => checked.has(c.Id))}
-                    onCheckedChange={() => toggleCheckAll(containers.map((c) => c.Id))}
+                    checked={
+                      containers.some((c) => c.Labels?.["sandbox.managed"] === "true") &&
+                      containers.filter((c) => c.Labels?.["sandbox.managed"] === "true").every((c) => checked.has(c.Id))
+                    }
+                    onCheckedChange={() =>
+                      toggleCheckAll(
+                        containers.filter((c) => c.Labels?.["sandbox.managed"] === "true").map((c) => c.Id),
+                      )
+                    }
                     aria-label="全选"
                   />
                 </th>
@@ -394,6 +382,7 @@ export default function SandboxContainersPage() {
                       <td className="w-8 px-3 py-2">
                         <Checkbox
                           checked={checked.has(c.Id)}
+                          disabled={!isManaged}
                           onCheckedChange={() => toggleCheck(c.Id)}
                           aria-label={`选择 ${name}`}
                         />
@@ -422,44 +411,48 @@ export default function SandboxContainersPage() {
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            disabled={acting === c.Id || running}
-                            onClick={() => act(c.Id, "start")}
-                            aria-label="启动"
-                          >
-                            <PlayIcon />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            disabled={acting === c.Id || !running}
-                            onClick={() => act(c.Id, "stop")}
-                            aria-label="停止"
-                          >
-                            <SquareIcon />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            disabled={acting === c.Id}
-                            onClick={() => act(c.Id, "restart")}
-                            aria-label="重启"
-                          >
-                            <RotateCwIcon />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            disabled={acting === c.Id}
-                            onClick={() => act(c.Id, "remove")}
-                            aria-label="删除"
-                          >
-                            <Trash2Icon className="text-destructive" />
-                          </Button>
-                        </div>
+                        {isManaged ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              disabled={acting === c.Id || running}
+                              onClick={() => act(c.Id, "start")}
+                              aria-label="启动"
+                            >
+                              <PlayIcon />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              disabled={acting === c.Id || !running}
+                              onClick={() => act(c.Id, "stop")}
+                              aria-label="停止"
+                            >
+                              <SquareIcon />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              disabled={acting === c.Id}
+                              onClick={() => act(c.Id, "restart")}
+                              aria-label="重启"
+                            >
+                              <RotateCwIcon />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              disabled={acting === c.Id}
+                              onClick={() => act(c.Id, "remove")}
+                              aria-label="删除"
+                            >
+                              <Trash2Icon className="text-destructive" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">仅查看</span>
+                        )}
                       </td>
                     </tr>
                   );

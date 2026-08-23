@@ -1,4 +1,4 @@
-﻿package server
+package server
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -24,7 +25,12 @@ import (
 //
 // 通过 Docker Engine REST API 直连（零第三方依赖），API 版本兼容 1.41+。
 
-const sandboxManagedLabel = "sandbox.managed"
+const (
+	sandboxManagedLabel = "sandbox.managed"
+	protectedInfraLabel = "restxtra.protected"
+)
+
+var sandboxContainerID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
 // ---------- Docker HTTP 客户端 ----------
 
@@ -149,6 +155,9 @@ func (d *dockerAPI) doRaw(ctx context.Context, method, path string, body any, ex
 
 // dockerInspectInfo 是容器 inspect 的精简结构。
 type dockerInspectInfo struct {
+	Config struct {
+		Labels map[string]string `json:"Labels"`
+	} `json:"Config"`
 	State struct {
 		Running bool `json:"Running"`
 	} `json:"State"`
@@ -157,6 +166,36 @@ type dockerInspectInfo struct {
 			IPAddress string `json:"IPAddress"`
 		} `json:"Networks"`
 	} `json:"NetworkSettings"`
+}
+
+func managedContainerPath(id string) (string, error) {
+	id = strings.TrimSpace(id)
+	if !sandboxContainerID.MatchString(id) {
+		return "", fmt.Errorf("无效的容器 ID")
+	}
+	return "/containers/" + url.PathEscape(id), nil
+}
+
+// requireManagedContainer is the authorization boundary between sandbox
+// lifecycle operations and unrelated infrastructure on the same Docker host.
+// In particular, the application and PostgreSQL containers must never be
+// controllable through the sandbox API.
+func requireManagedContainer(ctx context.Context, api *dockerAPI, id string) (string, error) {
+	path, err := managedContainerPath(id)
+	if err != nil {
+		return "", err
+	}
+	var info dockerInspectInfo
+	if _, err := api.do(ctx, http.MethodGet, path+"/json", nil, &info); err != nil {
+		return "", err
+	}
+	if info.Config.Labels[protectedInfraLabel] == "true" {
+		return "", fmt.Errorf("拒绝管理受保护的项目基础设施容器")
+	}
+	if info.Config.Labels[sandboxManagedLabel] != "true" {
+		return "", fmt.Errorf("拒绝管理非沙箱容器")
+	}
+	return path, nil
 }
 
 func (d *dockerAPI) inspect(ctx context.Context, id string) (*dockerInspectInfo, error) {
@@ -345,7 +384,7 @@ func (s *Server) sandboxListContainers(w http.ResponseWriter, r *http.Request) {
 	}
 	if managed {
 		f, _ := json.Marshal(map[string][]string{"label": {sandboxManagedLabel + "=true"}})
-		params.Set("filters", url.QueryEscape(string(f)))
+		params.Set("filters", string(f))
 	}
 	path := "/containers/json"
 	if len(params) > 0 {
@@ -378,12 +417,51 @@ type sandboxCreateReq struct {
 	MemoryMB    int      `json:"memory_mb"`    // 0 = 默认 4096
 	CPUs        float64  `json:"cpus"`         // 0 = 默认 2
 	PidsLimit   int64    `json:"pids_limit"`   // 0 = 默认 512
-	ReadOnly    bool     `json:"read_only"`    // 默认 true（只读根）
-	CapDropAll  bool     `json:"cap_drop_all"` // 默认 true
-	NetworkMode string   `json:"network_mode"` // bridge|host|none|internal(专用)
+	ReadOnly    bool     `json:"read_only"`    // 兼容旧客户端；服务端始终强制 true
+	CapDropAll  bool     `json:"cap_drop_all"` // 兼容旧客户端；服务端始终强制 true
+	NetworkMode string   `json:"network_mode"` // 仅允许 bridge|none
 	AutoStart   bool     `json:"auto_start"`
 	Env         []string `json:"env"`
-	Managed     bool     `json:"managed"` // 打 sandbox.managed 标签（防误删）
+	Managed     bool     `json:"managed"` // 兼容旧客户端；服务端始终强制 true
+}
+
+var forbiddenSandboxEnv = regexp.MustCompile(`(?i)^(RESTXTRA_PG_DSN|DATABASE_URL|POSTGRES_.*|PG[A-Z0-9_]*|DOCKER_HOST|DOCKER_CONTEXT|DOCKER_TLS_VERIFY|DOCKER_CERT_PATH)$`)
+
+func validateSandboxCreate(req *sandboxCreateReq) error {
+	req.NetworkMode = strings.ToLower(strings.TrimSpace(req.NetworkMode))
+	if req.NetworkMode == "" {
+		req.NetworkMode = "bridge"
+	}
+	if req.NetworkMode != "bridge" && req.NetworkMode != "none" {
+		return fmt.Errorf("network_mode 仅允许 bridge|none；沙箱不得共享宿主机或项目内部网络")
+	}
+	for _, entry := range req.Env {
+		name := entry
+		if i := strings.IndexByte(name, '='); i >= 0 {
+			name = name[:i]
+		}
+		if forbiddenSandboxEnv.MatchString(strings.TrimSpace(name)) {
+			return fmt.Errorf("沙箱环境变量 %s 被安全策略禁止", strings.TrimSpace(name))
+		}
+	}
+	return nil
+}
+
+func sandboxContainerSpec(req sandboxCreateReq, memory int64, cpus float64, pids int64) map[string]any {
+	return map[string]any{
+		"Image":  req.Image,
+		"Labels": map[string]string{sandboxManagedLabel: "true"},
+		"Env":    req.Env,
+		"HostConfig": map[string]any{
+			"Memory":         memory,
+			"NanoCpus":       int64(cpus * 1e9),
+			"PidsLimit":      pids,
+			"ReadonlyRootfs": true,
+			"CapDrop":        []string{"ALL"},
+			"SecurityOpt":    []string{"no-new-privileges:true"},
+			"NetworkMode":    req.NetworkMode,
+		},
+	}
 }
 
 func (s *Server) sandboxCreateContainer(w http.ResponseWriter, r *http.Request) {
@@ -400,6 +478,10 @@ func (s *Server) sandboxCreateContainer(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, 400, "镜像必填")
 		return
 	}
+	if err := validateSandboxCreate(&req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	memory := int64(4096) * 1024 * 1024
 	if req.MemoryMB > 0 {
 		memory = int64(req.MemoryMB) * 1024 * 1024
@@ -412,31 +494,7 @@ func (s *Server) sandboxCreateContainer(w http.ResponseWriter, r *http.Request) 
 	if req.PidsLimit > 0 {
 		pids = req.PidsLimit
 	}
-	network := req.NetworkMode
-	if network == "" {
-		network = "bridge"
-	}
-	labels := map[string]string{}
-	if req.Managed {
-		labels[sandboxManagedLabel] = "true"
-	}
-	capDrop := []string(nil)
-	if req.CapDropAll {
-		capDrop = []string{"ALL"}
-	}
-	spec := map[string]any{
-		"Image":  req.Image,
-		"Labels": labels,
-		"Env":    req.Env,
-		"HostConfig": map[string]any{
-			"Memory":         memory,
-			"NanoCpus":       int64(cpus * 1e9),
-			"PidsLimit":      pids,
-			"ReadonlyRootfs": req.ReadOnly,
-			"CapDrop":        capDrop,
-			"NetworkMode":    network,
-		},
-	}
+	spec := sandboxContainerSpec(req, memory, cpus, pids)
 	path := "/containers/create"
 	if strings.TrimSpace(req.Name) != "" {
 		path += "?name=" + url.QueryEscape(req.Name)
@@ -464,12 +522,17 @@ func (s *Server) sandboxContainerAction(w http.ResponseWriter, r *http.Request) 
 	}
 	cid := r.PathValue("cid")
 	action := r.PathValue("action")
+	containerPath, err := requireManagedContainer(r.Context(), api, cid)
+	if err != nil {
+		writeErr(w, http.StatusForbidden, err.Error())
+		return
+	}
 	var path string
 	switch action {
 	case "start", "stop", "restart", "kill":
-		path = "/containers/" + cid + "/" + action
+		path = containerPath + "/" + action
 	case "remove":
-		path = "/containers/" + cid + "?force=1&v=1"
+		path = containerPath + "?force=1&v=1"
 	default:
 		writeErr(w, 400, "action 必须为 start|stop|restart|kill|remove")
 		return
@@ -502,7 +565,9 @@ func (s *Server) sandboxRemoveContainersBatch(w http.ResponseWriter, r *http.Req
 	ids := req.IDs
 	if req.All {
 		var all []dockerContainer
-		if _, err := api.do(r.Context(), http.MethodGet, "/containers/json?all=1", nil, &all); err != nil {
+		filters, _ := json.Marshal(map[string][]string{"label": {sandboxManagedLabel + "=true"}})
+		params := url.Values{"all": {"1"}, "filters": {string(filters)}}
+		if _, err := api.do(r.Context(), http.MethodGet, "/containers/json?"+params.Encode(), nil, &all); err != nil {
 			writeErr(w, 502, "Docker: "+err.Error())
 			return
 		}
@@ -514,7 +579,12 @@ func (s *Server) sandboxRemoveContainersBatch(w http.ResponseWriter, r *http.Req
 	var deleted []string
 	var failed []string
 	for _, cid := range ids {
-		if _, err := api.do(r.Context(), http.MethodDelete, "/containers/"+cid+"?force=1&v=1", nil, nil); err != nil {
+		containerPath, err := requireManagedContainer(r.Context(), api, cid)
+		if err != nil {
+			failed = append(failed, cid)
+			continue
+		}
+		if _, err := api.do(r.Context(), http.MethodDelete, containerPath+"?force=1&v=1", nil, nil); err != nil {
 			failed = append(failed, cid)
 			continue
 		}
