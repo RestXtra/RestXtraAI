@@ -425,16 +425,37 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     };
   if (seg[0] === "c2" && seg[1] === "generated" && seg.length === 3 && m === "DELETE") return { deleted: 1 };
   if (path === "/c2/postex" && m === "GET") return { modules: D.c2PostexModules };
-  if (seg[0] === "c2" && seg[2] === "postex" && m === "POST") return { id: 505, module: String(b.module ?? ""), session_id: seg[1], state: "queued" };
+  if (seg[0] === "c2" && seg[2] === "postex" && m === "POST")
+    return { id: 505, module: String(b.module ?? ""), session_id: seg[1], state: "queued" };
   if (seg[0] === "c2" && seg[1] === "sessions" && seg[2] === "tasks" && m === "GET") return { tasks: D.c2MockTasks };
   if (seg[0] === "c2" && seg[1] === "sessions" && seg[2] === "tasks" && m === "POST") return { id: 506 };
   if (seg[0] === "c2" && seg[1] === "sessions" && seg[2] === "analyze" && m === "GET") {
     const s = D.c2Sessions[0];
-    return { session: s, tasks: D.c2MockTasks, summary: { host: s.hostname, ip: s.host, remote_ip: s.remote_ip, os: `${s.os}/${s.arch}`, user: s.username, process: s.process_name, connection: s.connection, status: s.status, first_seen: s.first_seen, last_seen: s.last_seen, task_stats: { completed: 2, failed: 0, pending: 0 } } };
+    return {
+      session: s,
+      tasks: D.c2MockTasks,
+      summary: {
+        host: s.hostname,
+        ip: s.host,
+        remote_ip: s.remote_ip,
+        os: `${s.os}/${s.arch}`,
+        user: s.username,
+        process: s.process_name,
+        connection: s.connection,
+        status: s.status,
+        first_seen: s.first_seen,
+        last_seen: s.last_seen,
+        task_stats: { completed: 2, failed: 0, pending: 0 },
+      },
+    };
   }
   if (path === "/c2/ingest" && m === "POST") return { ok: true };
   if (path === "/c2/auto-postex" && m === "GET") return { enabled: true };
   if (path === "/c2/auto-postex" && m === "POST") return { enabled: Boolean(b.enabled) };
+  if (path === "/c2/hitl" && m === "GET") return { enabled: true };
+  if (path === "/c2/hitl" && m === "POST") return { enabled: Boolean(b.enabled) };
+  if (path === "/c2/approvals" && m === "GET") return { approvals: [] };
+  if (seg[0] === "c2" && seg[1] === "approvals" && m === "POST") return { ok: true, id: 1, approval: "approved" };
   if (path === "/c2/status" && m === "POST") return { ok: true };
   if (path === "/c2/note" && m === "POST") return { ok: true };
   if (seg[0] === "c2" && seg[2] === "result" && m === "POST") return { ok: true };

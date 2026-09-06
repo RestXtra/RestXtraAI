@@ -34,6 +34,10 @@ var TriggerWorkflow func(workflowID int64, listenerID int64, host string) error
 // skipped.
 var AutoPostex func(listenerID int64, sessionID, host string)
 
+// OnTaskCompleted is wired by the server package: fired after a beacon reports a
+// task result so the platform can auto-record findings ("边渗透边记录").
+var OnTaskCompleted func(t *db.C2Task)
+
 // Manager owns the running listeners and tunnels. It is tied to a *server.Server
 // lifetime and talks to the shared PostgreSQL via *db.DB.
 type Manager struct {

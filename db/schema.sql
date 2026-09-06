@@ -947,6 +947,7 @@ CREATE TABLE IF NOT EXISTS c2_tasks (
     command     TEXT NOT NULL DEFAULT '',
     request     JSONB NOT NULL DEFAULT '{}',
     state       TEXT NOT NULL DEFAULT 'queued', -- queued|sent|completed|failed
+    approval    TEXT NOT NULL DEFAULT 'approved', -- approved|pending|rejected
     description TEXT NOT NULL DEFAULT '',
     response    JSONB NOT NULL DEFAULT '{}',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),

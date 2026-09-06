@@ -1595,16 +1595,36 @@ function PostexTab({ sessions, onChanged }: { sessions: C2Session[]; onChanged: 
     module: string;
     session_id: string;
     state: string;
+    approval?: string;
+    message?: string;
   } | null>(null);
   const [taskResult, setTaskResult] = React.useState<string>("");
   const [running, setRunning] = React.useState(false);
+  const [hitl, setHitl] = React.useState(true);
+  const [approvals, setApprovals] = React.useState<C2Task[]>([]);
 
   React.useEffect(() => {
     api
       .c2Postex()
       .then((r) => setModules(r.modules ?? []))
       .catch(() => setModules([]));
+    api
+      .c2Hitl()
+      .then((r) => setHitl(r.enabled))
+      .catch(() => setHitl(true));
   }, []);
+
+  const loadApprovals = React.useCallback(() => {
+    api
+      .c2Approvals()
+      .then((r) => setApprovals(r.approvals ?? []))
+      .catch(() => setApprovals([]));
+  }, []);
+  React.useEffect(() => {
+    loadApprovals();
+    const i = setInterval(loadApprovals, 4000);
+    return () => clearInterval(i);
+  }, [loadApprovals]);
 
   // poll the executed task until it completes
   React.useEffect(() => {
@@ -1639,6 +1659,12 @@ function PostexTab({ sessions, onChanged }: { sessions: C2Session[]; onChanged: 
     try {
       const r = await api.c2PostexRun(target, selected.id, args.trim() || undefined);
       setResult(r);
+      if (r.approval === "pending") {
+        toast.info(r.message ?? "危险模块已进入待审批");
+        setRunning(false);
+        loadApprovals();
+        return;
+      }
     } catch (e) {
       toast.error(`执行失败：${(e as Error).message}`);
       setRunning(false);
@@ -1673,7 +1699,76 @@ function PostexTab({ sessions, onChanged }: { sessions: C2Session[]; onChanged: 
           <CrosshairIcon className="size-3.5" /> {running ? "执行中…" : "执行"}
         </Button>
         {result ? <Badge variant="outline">task_id: {result.id}</Badge> : null}
+        <div className="ml-auto flex items-center gap-1.5">
+          <Label htmlFor="hitl" className="text-muted-foreground text-xs">
+            危险任务审批
+          </Label>
+          <Switch
+            id="hitl"
+            checked={hitl}
+            onCheckedChange={async (v) => {
+              try {
+                await api.c2SetHitl(v);
+                setHitl(v);
+                toast.success(v ? "已开启危险任务审批（HITL）" : "已关闭审批（危险模块直接执行）");
+              } catch (e) {
+                toast.error(`操作失败：${(e as Error).message}`);
+              }
+            }}
+          />
+        </div>
       </div>
+
+      {approvals.length > 0 && (
+        <Card className="border-amber-500/40">
+          <CardContent className="grid gap-2">
+            <div className="flex items-center gap-2">
+              <CrosshairIcon className="size-4 text-amber-600" />
+              <h3 className="font-medium text-sm">待审批危险任务（{approvals.length}）</h3>
+            </div>
+            {approvals.map((a) => (
+              <div key={a.id} className="flex items-center justify-between gap-2 rounded border px-3 py-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-amber-600">
+                      待审批
+                    </Badge>
+                    <span className="font-mono text-sm">{a.command}</span>
+                  </div>
+                  <p className="mt-0.5 truncate text-muted-foreground text-xs">
+                    会话 {a.session_id} · 任务 #{a.id}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="default"
+                    onClick={async () => {
+                      await api.c2ApprovalDecide(a.id, "approve");
+                      loadApprovals();
+                      toast.success("已批准");
+                    }}
+                  >
+                    批准
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-destructive"
+                    onClick={async () => {
+                      await api.c2ApprovalDecide(a.id, "reject");
+                      loadApprovals();
+                      toast.success("已拒绝");
+                    }}
+                  >
+                    拒绝
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
         {modules.map((m) => (
@@ -1697,6 +1792,18 @@ function PostexTab({ sessions, onChanged }: { sessions: C2Session[]; onChanged: 
           </button>
         ))}
       </div>
+
+      {result?.approval === "pending" && (
+        <Card>
+          <CardContent className="flex items-center gap-2 py-3 text-sm">
+            <CrosshairIcon className="size-4 text-amber-600" />
+            <span>
+              危险模块 <Badge variant="outline">{result.module}</Badge> 已进入待审批队列（任务 #{result.id}
+              ），请在上方审批面板操作。
+            </span>
+          </CardContent>
+        </Card>
+      )}
 
       {taskResult && (
         <Card>

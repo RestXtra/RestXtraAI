@@ -349,6 +349,22 @@ ON CONFLICT (source_key) DO NOTHING`)
 			return nil
 		},
 	},
+	{
+		Version: 14,
+		Name:    "c2_task_approval",
+		Apply: func(tx *sql.Tx) error {
+			stmts := []string{
+				`ALTER TABLE c2_tasks ADD COLUMN IF NOT EXISTS approval TEXT NOT NULL DEFAULT 'approved'`,
+				`CREATE INDEX IF NOT EXISTS idx_c2_tasks_approval ON c2_tasks(approval, state)`,
+			}
+			for _, stmt := range stmts {
+				if _, err := tx.Exec(stmt); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 func applyMigrations(db *sql.DB) error {

@@ -979,12 +979,24 @@ export const api = {
   deleteC2Tunnel: (id: string) => del<{ deleted: number }>(`/c2/tunnels/${id}`),
   c2Postex: () => get<{ modules: C2PostexModule[] }>("/c2/postex"),
   c2PostexRun: (sid: string, module: string, args?: string) =>
-    post<{ id: number; module: string; session_id: string; state: string }>(`/c2/sessions/${sid}/postex`, {
+    post<{
+      id: number;
+      module: string;
+      session_id: string;
+      state: string;
+      approval?: string;
+      message?: string;
+    }>(`/c2/sessions/${sid}/postex`, {
       module,
       args,
     }),
   c2AutoPostex: () => get<{ enabled: boolean }>("/c2/auto-postex"),
   c2SetAutoPostex: (enabled: boolean) => post<{ enabled: boolean }>("/c2/auto-postex", { enabled }),
+  c2Approvals: () => get<{ approvals: C2Task[] }>("/c2/approvals"),
+  c2ApprovalDecide: (id: string, action: "approve" | "reject") =>
+    post<{ ok: boolean; id: number; approval: string }>(`/c2/approvals/${id}/${action}`, {}),
+  c2Hitl: () => get<{ enabled: boolean }>("/c2/hitl"),
+  c2SetHitl: (enabled: boolean) => post<{ enabled: boolean }>("/c2/hitl", { enabled }),
 
   // ---- 能力：空间测绘（FOFA / Hunter / Quake） ----
   spaceSearchConfigs: () => get<{ providers: SpaceSearchConfigItem[] }>("/spacesearch/config"),

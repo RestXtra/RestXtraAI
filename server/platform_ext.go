@@ -637,6 +637,9 @@ func (s *Server) c2TaskResult(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	if t, err := s.m.pg.GetC2TaskByID(id); err == nil && t != nil {
+		s.logPostexKnowledge(t)
+	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -1206,7 +1209,8 @@ func (s *Server) c2PostexList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"modules": c2PostexModules})
 }
 
-// c2PostexRun 将后渗透模块作为任务下发到指定会话。
+// c2PostexRun 将后渗透模块作为任务下发到指定会话。危险模块（upload/persist/
+// escalate）在开启 HITL 围栏时进入待审批状态。
 func (s *Server) c2PostexRun(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("sid")
 	var req struct {
@@ -1236,12 +1240,21 @@ func (s *Server) c2PostexRun(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.Args) != "" {
 		command += " " + strings.TrimSpace(req.Args)
 	}
-	id, err := s.m.pg.CreateC2Task(sid, command, "postex:"+req.Module, nil)
+	approval := "approved"
+	message := ""
+	if s.c2HitlEnabled() && c2DangerousPostex[req.Module] {
+		approval = "pending"
+		message = "危险后渗透模块，已进入待审批队列"
+	}
+	id, err := s.m.pg.CreateC2TaskApproval(sid, command, "postex:"+req.Module, nil, approval)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"id": id, "module": req.Module, "session_id": sid, "state": "queued"})
+	writeJSON(w, 200, map[string]any{
+		"id": id, "module": req.Module, "session_id": sid,
+		"state": "queued", "approval": approval, "message": message,
+	})
 }
 
 // c2AutoPostexGet 返回自动后渗透开关状态。

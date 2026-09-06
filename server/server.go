@@ -116,6 +116,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		c2.AutoPostex = func(listenerID int64, sessionID, host string) {
 			s.startAutoPostex(listenerID, sessionID, host)
 		}
+		c2.OnTaskCompleted = func(t *db.C2Task) {
+			s.logPostexKnowledge(t)
+		}
 		c2.TriggerWorkflow = func(workflowID int64, listenerID int64, sessionID string) error {
 			_ = m.pg.RecordAudit(db.AuditEntry{
 				Actor: "system", Category: "c2", Action: "workflow_auto",
@@ -864,6 +867,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/c2/sessions/{sid}/postex", s.c2PostexRun)
 	mux.HandleFunc("GET /api/c2/auto-postex", s.c2AutoPostexGet)
 	mux.HandleFunc("POST /api/c2/auto-postex", s.c2AutoPostexSet)
+	mux.HandleFunc("GET /api/c2/approvals", s.c2ApprovalsList)
+	mux.HandleFunc("POST /api/c2/approvals/{id}/{action}", s.c2ApprovalDecide)
+	mux.HandleFunc("GET /api/c2/hitl", s.c2HitlGet)
+	mux.HandleFunc("POST /api/c2/hitl", s.c2HitlSet)
 	mux.HandleFunc("POST /api/c2/tasks/{id}/result", s.c2TaskResult)
 	mux.HandleFunc("DELETE /api/c2/tasks/{id}", s.c2TaskDelete)
 	mux.HandleFunc("GET /api/c2/auto-tasks", s.c2AutoTasksList)

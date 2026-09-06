@@ -468,6 +468,7 @@ type C2Task struct {
 	Command     string          `json:"command"`
 	Request     json.RawMessage `json:"request"`
 	State       string          `json:"state"`
+	Approval    string          `json:"approval"`
 	Description string          `json:"description"`
 	Response    json.RawMessage `json:"response"`
 	CreatedAt   time.Time       `json:"created_at"`
@@ -480,7 +481,7 @@ func (d *DB) ListC2Tasks(sessionID string, limit int) ([]*C2Task, error) {
 		limit = 100
 	}
 	rows, err := d.Query(`SELECT id,session_id,COALESCE(command,''),COALESCE(request,'{}'),COALESCE(state,'queued'),
-		COALESCE(description,''),COALESCE(response,'{}'),created_at,sent_at,completed_at
+		COALESCE(approval,'approved'),COALESCE(description,''),COALESCE(response,'{}'),created_at,sent_at,completed_at
 		FROM c2_tasks WHERE session_id=$1 ORDER BY id DESC LIMIT $2`, sessionID, limit)
 	if err != nil {
 		return nil, err
@@ -489,7 +490,7 @@ func (d *DB) ListC2Tasks(sessionID string, limit int) ([]*C2Task, error) {
 	var out []*C2Task
 	for rows.Next() {
 		var t C2Task
-		if err := rows.Scan(&t.ID, &t.SessionID, &t.Command, &t.Request, &t.State, &t.Description,
+		if err := rows.Scan(&t.ID, &t.SessionID, &t.Command, &t.Request, &t.State, &t.Approval, &t.Description,
 			&t.Response, &t.CreatedAt, &t.SentAt, &t.CompletedAt); err != nil {
 			return nil, err
 		}
@@ -505,13 +506,22 @@ func (d *DB) ListC2Tasks(sessionID string, limit int) ([]*C2Task, error) {
 }
 
 func (d *DB) CreateC2Task(sessionID, command, description string, request json.RawMessage) (int64, error) {
+	return d.CreateC2TaskApproval(sessionID, command, description, request, "approved")
+}
+
+// CreateC2TaskApproval enqueues a task with an explicit approval state. Tasks
+// created with approval='pending' are held until an operator approves/rejects.
+func (d *DB) CreateC2TaskApproval(sessionID, command, description string, request json.RawMessage, approval string) (int64, error) {
 	req := request
 	if len(req) == 0 {
 		req = []byte("{}")
 	}
+	if approval == "" {
+		approval = "approved"
+	}
 	var id int64
-	err := d.QueryRow(`INSERT INTO c2_tasks(session_id,command,description,request,state) VALUES ($1,$2,$3,$4,'queued') RETURNING id`,
-		sessionID, command, description, req).Scan(&id)
+	err := d.QueryRow(`INSERT INTO c2_tasks(session_id,command,description,request,state,approval) VALUES ($1,$2,$3,$4,'queued',$5) RETURNING id`,
+		sessionID, command, description, req, approval).Scan(&id)
 	return id, err
 }
 
@@ -520,15 +530,16 @@ func (d *DB) SetC2TaskSent(id int64) error {
 	return err
 }
 
-// ClaimC2Tasks atomically claims the oldest queued tasks for a beacon session
-// (state -> sent) and returns them, so the listener can hand them out on poll.
+// ClaimC2Tasks atomically claims the oldest approved+queued tasks for a beacon
+// session (state -> sent) and returns them, so the listener can hand them out on
+// poll. Pending/rejected tasks are never handed to the beacon.
 func (d *DB) ClaimC2Tasks(sessionID string, limit int) ([]*C2Task, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 	rows, err := d.Query(`UPDATE c2_tasks SET state='sent',sent_at=now() WHERE id IN (
-		SELECT id FROM c2_tasks WHERE session_id=$1 AND state='queued' ORDER BY id LIMIT $2
-	) RETURNING id,session_id,COALESCE(command,''),COALESCE(request,'{}'),COALESCE(state,'sent'),COALESCE(description,''),COALESCE(response,'{}'),created_at,sent_at,completed_at`, sessionID, limit)
+		SELECT id FROM c2_tasks WHERE session_id=$1 AND state='queued' AND approval='approved' ORDER BY id LIMIT $2
+	) RETURNING id,session_id,COALESCE(command,''),COALESCE(request,'{}'),COALESCE(state,'sent'),COALESCE(approval,'approved'),COALESCE(description,''),COALESCE(response,'{}'),created_at,sent_at,completed_at`, sessionID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -536,7 +547,7 @@ func (d *DB) ClaimC2Tasks(sessionID string, limit int) ([]*C2Task, error) {
 	var out []*C2Task
 	for rows.Next() {
 		var t C2Task
-		if err := rows.Scan(&t.ID, &t.SessionID, &t.Command, &t.Request, &t.State, &t.Description, &t.Response, &t.CreatedAt, &t.SentAt, &t.CompletedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.SessionID, &t.Command, &t.Request, &t.State, &t.Approval, &t.Description, &t.Response, &t.CreatedAt, &t.SentAt, &t.CompletedAt); err != nil {
 			return nil, err
 		}
 		if len(t.Request) == 0 {
@@ -557,6 +568,64 @@ func (d *DB) UpdateC2TaskResult(id int64, state string, response json.RawMessage
 	}
 	_, err := d.Exec(`UPDATE c2_tasks SET state=$2,response=$3,completed_at=now() WHERE id=$1`, id, state, resp)
 	return err
+}
+
+// ListC2PendingApprovals returns tasks awaiting human approval (approval='pending').
+func (d *DB) ListC2PendingApprovals() ([]*C2Task, error) {
+	rows, err := d.Query(`SELECT id,session_id,COALESCE(command,''),COALESCE(request,'{}'),COALESCE(state,'queued'),
+		COALESCE(approval,'pending'),COALESCE(description,''),COALESCE(response,'{}'),created_at,sent_at,completed_at
+		FROM c2_tasks WHERE approval='pending' ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*C2Task
+	for rows.Next() {
+		var t C2Task
+		if err := rows.Scan(&t.ID, &t.SessionID, &t.Command, &t.Request, &t.State, &t.Approval, &t.Description,
+			&t.Response, &t.CreatedAt, &t.SentAt, &t.CompletedAt); err != nil {
+			return nil, err
+		}
+		if len(t.Request) == 0 {
+			t.Request = []byte("{}")
+		}
+		if len(t.Response) == 0 {
+			t.Response = []byte("{}")
+		}
+		out = append(out, &t)
+	}
+	return out, rows.Err()
+}
+
+// SetC2TaskApproval transitions a pending task to approved/rejected. Rejecting
+// also cancels the task so it is never claimed.
+func (d *DB) SetC2TaskApproval(id int64, approval string) error {
+	if approval == "rejected" {
+		_, err := d.Exec(`UPDATE c2_tasks SET approval=$2,state='failed' WHERE id=$1`, id, approval)
+		return err
+	}
+	_, err := d.Exec(`UPDATE c2_tasks SET approval=$2 WHERE id=$1`, id, approval)
+	return err
+}
+
+// GetC2TaskByID returns a single task by id.
+func (d *DB) GetC2TaskByID(id int64) (*C2Task, error) {
+	var t C2Task
+	err := d.QueryRow(`SELECT id,session_id,COALESCE(command,''),COALESCE(request,'{}'),COALESCE(state,'queued'),
+		COALESCE(approval,'approved'),COALESCE(description,''),COALESCE(response,'{}'),created_at,sent_at,completed_at
+		FROM c2_tasks WHERE id=$1`, id).
+		Scan(&t.ID, &t.SessionID, &t.Command, &t.Request, &t.State, &t.Approval, &t.Description,
+			&t.Response, &t.CreatedAt, &t.SentAt, &t.CompletedAt)
+	if err != nil {
+		return nil, err
+	}
+	if len(t.Request) == 0 {
+		t.Request = []byte("{}")
+	}
+	if len(t.Response) == 0 {
+		t.Response = []byte("{}")
+	}
+	return &t, nil
 }
 
 func (d *DB) DeleteC2Task(id int64) error {

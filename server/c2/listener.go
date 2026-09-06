@@ -139,6 +139,11 @@ func (rl *runningListener) handleResult(w http.ResponseWriter, r *http.Request) 
 	}
 	resp, _ := json.Marshal(map[string]string{"output": req.Output, "error": req.Error})
 	_ = rl.mgr.db.UpdateC2TaskResult(req.TaskID, state, resp)
+	if OnTaskCompleted != nil {
+		if t, err := rl.mgr.db.GetC2TaskByID(req.TaskID); err == nil && t != nil {
+			OnTaskCompleted(t)
+		}
+	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
