@@ -740,12 +740,18 @@ func (s *Server) seedOrchestrationTools() {
 	}
 	for _, t := range s.platformTools() {
 		schema, _ := json.Marshal(t.InputSchema())
-		_ = s.m.PG().SeedTool(t.Name(), t.Description(), schema, autoAgents)
+		agents := autoAgents
+		// C2 工具绑定到 worker：任务执行时 worker 用它驱动后渗透。
+		if t.Name() == "c2_postex" || t.Name() == "c2_task_result" {
+			agents, _ = json.Marshal([]string{"auto", "worker"})
+		}
+		_ = s.m.PG().SeedTool(t.Name(), t.Description(), schema, agents)
 	}
 	s.refreshBuiltinToolSchemas()
 	s.seedAutoDefaultBindings()
 	s.seedPlannerDefaultBindings()
 	s.seedAutoReportFindingBinding()
+	s.seedC2AgentBindings()
 	// 注：pentest 的默认工具绑定无需迁移——BuiltinToolSeeds 在全新初始化时就把
 	// list_assets/insert_assets/report_finding/list_findings/list_companies 连同
 	// pentest 一起 seed 好了（项目尚无旧库，不做迁移）。
@@ -795,6 +801,26 @@ func (s *Server) seedAutoReportFindingBinding() {
 		return
 	}
 	_ = s.m.pg.SetSetting(flag, "true")
+}
+
+// seedC2AgentBindings adds the C2 post-exploitation tools to the worker (and
+// auto) agent bindings once, so task workers can drive post-ex on existing DBs.
+func (s *Server) seedC2AgentBindings() {
+	const flag = "c2_agent_bindings_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	c2Keys := []string{"c2_postex", "c2_task_result"}
+	if err := s.m.pg.AddAgentToToolBinding("worker", c2Keys); err != nil {
+		log.Printf("[c2] worker 绑定 c2 工具失败: %v", err)
+		return
+	}
+	if err := s.m.pg.AddAgentToToolBinding("auto", c2Keys); err != nil {
+		log.Printf("[c2] auto 绑定 c2 工具失败: %v", err)
+		return
+	}
+	_ = s.m.pg.SetSetting(flag, "true")
+	s.toolCatalog.Invalidate()
 }
 
 // seedPlannerDefaultBindings adds "planner" to report_finding's binding ONCE

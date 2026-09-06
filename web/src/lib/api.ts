@@ -983,6 +983,8 @@ export const api = {
       module,
       args,
     }),
+  c2AutoPostex: () => get<{ enabled: boolean }>("/c2/auto-postex"),
+  c2SetAutoPostex: (enabled: boolean) => post<{ enabled: boolean }>("/c2/auto-postex", { enabled }),
 
   // ---- 能力：空间测绘（FOFA / Hunter / Quake） ----
   spaceSearchConfigs: () => get<{ providers: SpaceSearchConfigItem[] }>("/spacesearch/config"),

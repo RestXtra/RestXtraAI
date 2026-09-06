@@ -47,6 +47,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
@@ -742,6 +743,14 @@ function ListenersTab({
   const [autoName, setAutoName] = React.useState("");
   const [autoListener, setAutoListener] = React.useState<string>("");
   const [autoCmds, setAutoCmds] = React.useState('["shell ipconfig"]');
+  const [autoPostex, setAutoPostex] = React.useState(false);
+
+  React.useEffect(() => {
+    api
+      .c2AutoPostex()
+      .then((r) => setAutoPostex(r.enabled))
+      .catch(() => setAutoPostex(false));
+  }, []);
 
   const toggle = async (l: C2Listener) => {
     try {
@@ -867,7 +876,27 @@ function ListenersTab({
         <Card>
           <CardContent className="grid gap-2">
             <div className="flex items-center justify-between">
-              <h3 className="font-medium text-sm">自动执行（新会话上车即跑）</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-medium text-sm">自动执行（新会话上车即跑）</h3>
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="auto-postex" className="text-muted-foreground text-xs">
+                    AI 自动后渗透
+                  </Label>
+                  <Switch
+                    id="auto-postex"
+                    checked={autoPostex}
+                    onCheckedChange={async (v) => {
+                      try {
+                        await api.c2SetAutoPostex(v);
+                        setAutoPostex(v);
+                        toast.success(v ? "已开启 AI 自动后渗透" : "已关闭 AI 自动后渗透");
+                      } catch (e) {
+                        toast.error(`操作失败：${(e as Error).message}`);
+                      }
+                    }}
+                  />
+                </div>
+              </div>
               <Dialog open={autoOpen} onOpenChange={setAutoOpen}>
                 <DialogTrigger asChild>
                   <Button size="sm" variant="outline">

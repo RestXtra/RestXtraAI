@@ -27,6 +27,13 @@ func coreLogf(format string, a ...any) {
 // When nil, workflow auto-tasks are logged and skipped.
 var TriggerWorkflow func(workflowID int64, listenerID int64, host string) error
 
+// AutoPostex is wired by the server package: fired once when a brand-new beacon
+// session registers, so the platform's AI agent can automatically run the
+// post-exploitation flow (info → privilege → network → process → escalate/persist
+// recon → analysis) against the new host. When nil, auto post-exploitation is
+// skipped.
+var AutoPostex func(listenerID int64, sessionID, host string)
+
 // Manager owns the running listeners and tunnels. It is tied to a *server.Server
 // lifetime and talks to the shared PostgreSQL via *db.DB.
 type Manager struct {

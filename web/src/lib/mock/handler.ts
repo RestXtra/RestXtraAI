@@ -433,6 +433,8 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     return { session: s, tasks: D.c2MockTasks, summary: { host: s.hostname, ip: s.host, remote_ip: s.remote_ip, os: `${s.os}/${s.arch}`, user: s.username, process: s.process_name, connection: s.connection, status: s.status, first_seen: s.first_seen, last_seen: s.last_seen, task_stats: { completed: 2, failed: 0, pending: 0 } } };
   }
   if (path === "/c2/ingest" && m === "POST") return { ok: true };
+  if (path === "/c2/auto-postex" && m === "GET") return { enabled: true };
+  if (path === "/c2/auto-postex" && m === "POST") return { enabled: Boolean(b.enabled) };
   if (path === "/c2/status" && m === "POST") return { ok: true };
   if (path === "/c2/note" && m === "POST") return { ok: true };
   if (seg[0] === "c2" && seg[2] === "result" && m === "POST") return { ok: true };

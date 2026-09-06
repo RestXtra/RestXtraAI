@@ -113,6 +113,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		profAgents: map[int64]*profBundle{}, profChatAgents: map[int64]*agent.ChatAgent{}}
 	if m.pg != nil {
 		s.c2m = c2.New(m.pg)
+		c2.AutoPostex = func(listenerID int64, sessionID, host string) {
+			s.startAutoPostex(listenerID, sessionID, host)
+		}
 		c2.TriggerWorkflow = func(workflowID int64, listenerID int64, sessionID string) error {
 			_ = m.pg.RecordAudit(db.AuditEntry{
 				Actor: "system", Category: "c2", Action: "workflow_auto",
@@ -859,6 +862,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/c2/sessions/{sid}/analyze", s.c2SessionAnalyze)
 	mux.HandleFunc("GET /api/c2/postex", s.c2PostexList)
 	mux.HandleFunc("POST /api/c2/sessions/{sid}/postex", s.c2PostexRun)
+	mux.HandleFunc("GET /api/c2/auto-postex", s.c2AutoPostexGet)
+	mux.HandleFunc("POST /api/c2/auto-postex", s.c2AutoPostexSet)
 	mux.HandleFunc("POST /api/c2/tasks/{id}/result", s.c2TaskResult)
 	mux.HandleFunc("DELETE /api/c2/tasks/{id}", s.c2TaskDelete)
 	mux.HandleFunc("GET /api/c2/auto-tasks", s.c2AutoTasksList)

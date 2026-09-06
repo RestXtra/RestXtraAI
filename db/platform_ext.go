@@ -384,6 +384,13 @@ func (d *DB) TouchC2Session(sessionID string) error {
 	return err
 }
 
+// C2SessionExists reports whether a beacon session is already known.
+func (d *DB) C2SessionExists(sessionID string) (bool, error) {
+	var ok bool
+	err := d.QueryRow(`SELECT EXISTS(SELECT 1 FROM c2_sessions WHERE session_id=$1)`, sessionID).Scan(&ok)
+	return ok, err
+}
+
 // MarkStaleC2SessionsLost marks active sessions whose heartbeat is older than
 // the threshold as lost. Returns the number of sessions transitioned.
 func (d *DB) MarkStaleC2SessionsLost() (int64, error) {
