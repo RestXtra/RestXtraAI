@@ -8,8 +8,11 @@ import {
   Controls,
   type Edge as FlowEdge,
   type Node as FlowNode,
+  Handle,
   MarkerType,
   MiniMap,
+  type NodeProps,
+  Position,
   ReactFlow,
   ReactFlowProvider,
 } from "@xyflow/react";
@@ -27,6 +30,46 @@ const NODE_COLORS: Record<string, string> = {
   hint: "#8b5cf6",
 };
 
+type LineageNodeData = {
+  label: string;
+  color: string;
+};
+
+type LineageFlowNode = FlowNode<LineageNodeData, "lineage">;
+
+const SIDES = [Position.Top, Position.Right, Position.Bottom, Position.Left] as const;
+
+function LineageNode({ data }: NodeProps<LineageFlowNode>) {
+  return (
+    <div
+      className="flex min-h-12 w-[230px] items-center justify-center rounded-lg border-2 bg-card px-3 py-2 text-center text-card-foreground text-xs"
+      style={{ borderColor: data.color }}
+    >
+      {SIDES.map((side) => (
+        <React.Fragment key={side}>
+          <Handle
+            type="target"
+            position={side}
+            id={`target-${side}`}
+            isConnectable={false}
+            className="!size-2 !border-2 !border-background !bg-slate-700"
+          />
+          <Handle
+            type="source"
+            position={side}
+            id={`source-${side}`}
+            isConnectable={false}
+            className="!size-2 !border-2 !border-background !bg-slate-700"
+          />
+        </React.Fragment>
+      ))}
+      <span className="leading-5">{data.label}</span>
+    </div>
+  );
+}
+
+const NODE_TYPES = { lineage: LineageNode };
+
 function summary(node: TaskNode) {
   try {
     const payload = JSON.parse(node.payload ?? "") as Record<string, unknown>;
@@ -39,7 +82,7 @@ function summary(node: TaskNode) {
   return node.payload ? node.payload : `${node.type} #${node.id}`;
 }
 
-function layout(nodes: TaskNode[], edges: Edge[]) {
+function layout(nodes: TaskNode[], edges: Edge[]): LineageFlowNode[] {
   const ids = new Set(nodes.map((node) => node.id));
   const depth = new Map(nodes.map((node) => [node.id, 0]));
   const incoming = new Map(nodes.map((node) => [node.id, 0]));
@@ -66,23 +109,32 @@ function layout(nodes: TaskNode[], edges: Edge[]) {
     const color = NODE_COLORS[node.type] ?? "#64748b";
     return {
       id: node.id,
+      type: "lineage",
       position: { x: column * 300, y: row * 130 },
-      data: { label: summary(node) },
-      style: {
-        width: 230,
-        borderColor: color,
-        borderWidth: 2,
-        borderRadius: 8,
-        background: "var(--card)",
-        color: "var(--card-foreground)",
-        fontSize: 12,
-      },
-    } satisfies FlowNode;
+      data: { label: summary(node), color },
+    } satisfies LineageFlowNode;
   });
 }
 
+function edgeHandles(source: LineageFlowNode | undefined, target: LineageFlowNode | undefined) {
+  if (!source || !target) {
+    return { sourceHandle: `source-${Position.Bottom}`, targetHandle: `target-${Position.Top}` };
+  }
+
+  const deltaX = target.position.x - source.position.x;
+  const deltaY = target.position.y - source.position.y;
+  if (Math.abs(deltaX) >= Math.abs(deltaY)) {
+    return deltaX >= 0
+      ? { sourceHandle: `source-${Position.Right}`, targetHandle: `target-${Position.Left}` }
+      : { sourceHandle: `source-${Position.Left}`, targetHandle: `target-${Position.Right}` };
+  }
+  return deltaY >= 0
+    ? { sourceHandle: `source-${Position.Bottom}`, targetHandle: `target-${Position.Top}` }
+    : { sourceHandle: `source-${Position.Top}`, targetHandle: `target-${Position.Bottom}` };
+}
+
 export function FindingLineage({ findingId }: { findingId: string }) {
-  const [nodes, setNodes] = React.useState<FlowNode[]>([]);
+  const [nodes, setNodes] = React.useState<LineageFlowNode[]>([]);
   const [edges, setEdges] = React.useState<FlowEdge[]>([]);
   const [loaded, setLoaded] = React.useState(false);
 
@@ -92,18 +144,26 @@ export function FindingLineage({ findingId }: { findingId: string }) {
       .findingLineage(findingId)
       .then((graph) => {
         if (!alive) return;
-        setNodes(layout(graph.nodes ?? [], graph.edges ?? []));
+        const flowNodes = layout(graph.nodes ?? [], graph.edges ?? []);
+        const nodesById = new Map(flowNodes.map((node) => [node.id, node]));
+        setNodes(flowNodes);
         setEdges(
-          (graph.edges ?? []).map((edge, index) => ({
-            id: `${index}-${edge.src}-${edge.dst}`,
-            source: edge.src,
-            target: edge.dst,
-            label: edge.rel,
-            labelShowBg: false,
-            labelStyle: { fontSize: 10, fill: "#64748b" },
-            style: { stroke: "#94a3b8", strokeWidth: 1.5 },
-            markerEnd: { type: MarkerType.ArrowClosed, color: "#94a3b8" },
-          })),
+          (graph.edges ?? []).map((edge, index) => {
+            const handles = edgeHandles(nodesById.get(edge.src), nodesById.get(edge.dst));
+            return {
+              id: `${index}-${edge.src}-${edge.dst}`,
+              source: edge.src,
+              target: edge.dst,
+              sourceHandle: handles.sourceHandle,
+              targetHandle: handles.targetHandle,
+              type: "smoothstep",
+              label: edge.rel,
+              labelShowBg: false,
+              labelStyle: { fontSize: 10, fill: "#64748b" },
+              style: { stroke: "#94a3b8", strokeWidth: 1.5 },
+              markerEnd: { type: MarkerType.ArrowClosed, color: "#94a3b8" },
+            };
+          }),
         );
       })
       .catch(() => {
@@ -126,9 +186,17 @@ export function FindingLineage({ findingId }: { findingId: string }) {
   return (
     <div className="h-[65vh] min-h-[480px] overflow-hidden border bg-background">
       <ReactFlowProvider>
-        <ReactFlow nodes={nodes} edges={edges} fitView minZoom={0.25} maxZoom={1.6} nodesDraggable={false}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={NODE_TYPES}
+          fitView
+          minZoom={0.25}
+          maxZoom={1.6}
+          nodesDraggable={false}
+        >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-          <MiniMap pannable zoomable nodeColor={(node) => String(node.style?.borderColor ?? "#64748b")} />
+          <MiniMap pannable zoomable nodeColor={(node) => String((node.data as LineageNodeData).color ?? "#64748b")} />
           <Controls showInteractive={false} />
         </ReactFlow>
       </ReactFlowProvider>

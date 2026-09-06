@@ -80,7 +80,39 @@ type GraphProjectionVerification struct {
 	ProjectedAnchors int    `json:"projected_anchors"`
 }
 
+// VerifyGraphProjection returns a cached shadow-replay result when the graph
+// version is unchanged since it was last computed, avoiding a full graph replay
+// + full projected graph load on every dashboard poll. It recomputes only when
+// the graph version bumps.
 func (s *ExplorationStore) VerifyGraphProjection() (*GraphProjectionVerification, error) {
+	l := s.db.ovLock(s.expID)
+	l.Lock()
+	cached, ok := s.db.projCache[s.expID]
+	ver := s.db.ovVer[s.expID]
+	if ok && cached != nil && s.db.projVer[s.expID] == ver {
+		l.Unlock()
+		return cached, nil
+	}
+	l.Unlock()
+
+	verification, err := s.computeGraphProjection()
+	if err != nil {
+		return nil, err
+	}
+	l.Lock()
+	if s.db.projVer == nil {
+		s.db.projVer = map[int64]int64{}
+	}
+	if s.db.projCache == nil {
+		s.db.projCache = map[int64]*GraphProjectionVerification{}
+	}
+	s.db.projVer[s.expID] = s.db.ovVer[s.expID]
+	s.db.projCache[s.expID] = verification
+	l.Unlock()
+	return verification, nil
+}
+
+func (s *ExplorationStore) computeGraphProjection() (*GraphProjectionVerification, error) {
 	projected, err := s.loadProjectedGraph()
 	if err != nil {
 		return nil, err

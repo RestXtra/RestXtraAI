@@ -232,6 +232,123 @@ ON CONFLICT (source_key) DO NOTHING`)
 			return err
 		},
 	},
+	{
+		Version: 11,
+		Name:    "c2_operations_upgrade",
+		Apply: func(tx *sql.Tx) error {
+			stmts := []string{
+				`CREATE TABLE IF NOT EXISTS c2_profiles (
+					id BIGSERIAL PRIMARY KEY,
+					name TEXT NOT NULL,
+					kind TEXT NOT NULL DEFAULT 'http',
+					config JSONB NOT NULL DEFAULT '{}',
+					created_at TIMESTAMPTZ NOT NULL DEFAULT now())`,
+				`CREATE TABLE IF NOT EXISTS c2_tasks (
+					id BIGSERIAL PRIMARY KEY,
+					session_id TEXT NOT NULL REFERENCES c2_sessions(session_id) ON DELETE CASCADE,
+					command TEXT NOT NULL DEFAULT '',
+					request JSONB NOT NULL DEFAULT '{}',
+					state TEXT NOT NULL DEFAULT 'queued',
+					description TEXT NOT NULL DEFAULT '',
+					response JSONB NOT NULL DEFAULT '{}',
+					created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+					sent_at TIMESTAMPTZ,
+					completed_at TIMESTAMPTZ)`,
+				`CREATE INDEX IF NOT EXISTS idx_c2_tasks_sid ON c2_tasks(session_id, state)`,
+				`CREATE TABLE IF NOT EXISTS c2_auto_tasks (
+					id BIGSERIAL PRIMARY KEY,
+					listener_id BIGINT REFERENCES c2_listeners(id) ON DELETE CASCADE,
+					name TEXT NOT NULL,
+					enabled BOOLEAN NOT NULL DEFAULT true,
+					order_idx INTEGER NOT NULL DEFAULT 0,
+					target TEXT NOT NULL DEFAULT 'commands',
+					workflow_id BIGINT,
+					commands JSONB NOT NULL DEFAULT '[]',
+					conditions JSONB NOT NULL DEFAULT '{}',
+					created_at TIMESTAMPTZ NOT NULL DEFAULT now())`,
+				`ALTER TABLE c2_listeners ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'stopped'`,
+				`ALTER TABLE c2_listeners ADD COLUMN IF NOT EXISTS profile_id BIGINT REFERENCES c2_profiles(id) ON DELETE SET NULL`,
+				`ALTER TABLE c2_listeners ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '{}'`,
+				`ALTER TABLE c2_listeners ADD COLUMN IF NOT EXISTS disguise JSONB NOT NULL DEFAULT '{}'`,
+				`ALTER TABLE c2_listeners ADD COLUMN IF NOT EXISTS firewall JSONB NOT NULL DEFAULT '{}'`,
+				`ALTER TABLE c2_listeners ADD COLUMN IF NOT EXISTS error TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE c2_sessions ADD COLUMN IF NOT EXISTS remote_ip TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE c2_sessions ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE c2_sessions ADD COLUMN IF NOT EXISTS hostname TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE c2_sessions ADD COLUMN IF NOT EXISTS username TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE c2_sessions ADD COLUMN IF NOT EXISTS uid TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE c2_sessions ADD COLUMN IF NOT EXISTS gid TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE c2_sessions ADD COLUMN IF NOT EXISTS os TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE c2_sessions ADD COLUMN IF NOT EXISTS arch TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE c2_sessions ADD COLUMN IF NOT EXISTS pid INTEGER NOT NULL DEFAULT 0`,
+				`ALTER TABLE c2_sessions ADD COLUMN IF NOT EXISTS process_name TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE c2_sessions ADD COLUMN IF NOT EXISTS connection TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE c2_sessions ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE c2_sessions ADD COLUMN IF NOT EXISTS first_seen TIMESTAMPTZ NOT NULL DEFAULT now()`,
+			}
+			for _, stmt := range stmts {
+				if _, err := tx.Exec(stmt); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
+	{
+		Version: 12,
+		Name:    "c2_vshell_modules",
+		Apply: func(tx *sql.Tx) error {
+			stmts := []string{
+				`CREATE TABLE IF NOT EXISTS c2_plugins (
+					id BIGSERIAL PRIMARY KEY,
+					name TEXT NOT NULL,
+					description TEXT NOT NULL DEFAULT '',
+					commands JSONB NOT NULL DEFAULT '[]',
+					created_at TIMESTAMPTZ NOT NULL DEFAULT now())`,
+				`CREATE TABLE IF NOT EXISTS c2_generated (
+					id BIGSERIAL PRIMARY KEY,
+					name TEXT NOT NULL,
+					listener_id BIGINT REFERENCES c2_listeners(id) ON DELETE SET NULL,
+					os TEXT NOT NULL DEFAULT 'linux',
+					arch TEXT NOT NULL DEFAULT 'amd64',
+					config JSONB NOT NULL DEFAULT '{}',
+					created_at TIMESTAMPTZ NOT NULL DEFAULT now())`,
+				`CREATE TABLE IF NOT EXISTS c2_tunnels (
+					id BIGSERIAL PRIMARY KEY,
+					session_id TEXT NOT NULL,
+					kind TEXT NOT NULL DEFAULT 'socks5',
+					bind_host TEXT NOT NULL DEFAULT '127.0.0.1',
+					bind_port INTEGER NOT NULL DEFAULT 1080,
+					target TEXT NOT NULL DEFAULT '',
+					state TEXT NOT NULL DEFAULT 'stopped',
+					error TEXT NOT NULL DEFAULT '',
+					created_at TIMESTAMPTZ NOT NULL DEFAULT now())`,
+			}
+			for _, stmt := range stmts {
+				if _, err := tx.Exec(stmt); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
+	{
+		Version: 13,
+		Name:    "c2_generated_build_columns",
+		Apply: func(tx *sql.Tx) error {
+			stmts := []string{
+				`ALTER TABLE c2_generated ADD COLUMN IF NOT EXISTS format TEXT NOT NULL DEFAULT 'stageless'`,
+				`ALTER TABLE c2_generated ADD COLUMN IF NOT EXISTS artifact TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE c2_generated ADD COLUMN IF NOT EXISTS size INTEGER NOT NULL DEFAULT 0`,
+			}
+			for _, stmt := range stmts {
+				if _, err := tx.Exec(stmt); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 func applyMigrations(db *sql.DB) error {

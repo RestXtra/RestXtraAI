@@ -87,8 +87,12 @@ func main() {
 		Handler:           srv.Handler(),
 		ReadTimeout:       30 * time.Second,
 		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    1 << 20,
+		// Protect slow-client response-hold from pinning handler goroutines.
+		// SSE endpoints explicitly clear this deadline via ResponseController,
+		// so long-lived streams are unaffected.
+		WriteTimeout:   120 * time.Second,
+		IdleTimeout:    120 * time.Second,
+		MaxHeaderBytes: 1 << 20,
 	}
 
 	go func() {

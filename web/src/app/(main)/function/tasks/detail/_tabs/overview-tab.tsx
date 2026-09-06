@@ -48,6 +48,9 @@ export function OverviewTab({ taskId }: { taskId: string }) {
   const [intents, setIntents] = React.useState<TaskNode[]>([]);
   const [findings, setFindings] = React.useState<Finding[]>([]);
   const [costs, setCosts] = React.useState<TaskRoundCosts | null>(null);
+  const [intentCounts, setIntentCounts] = React.useState<
+    { total: number; open: number; running: number; blocked: number } | undefined
+  >(undefined);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -60,6 +63,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         setTask(snapshot.task);
         setEngineMode(snapshot.engine_mode);
         setIntents(snapshot.intents ?? []);
+        setIntentCounts(snapshot.intent_counts);
         setFindings(snapshot.findings ?? []);
         setCosts(snapshot.costs);
       } catch {
@@ -77,8 +81,6 @@ export function OverviewTab({ taskId }: { taskId: string }) {
   }, [taskId]);
 
   const running = intents.filter((i) => i.state === "running");
-  const open = intents.filter((i) => i.state === "open");
-  const blocked = intents.filter((i) => i.state === "blocked");
   const taskFindings = findings.filter((f) => f.task_id === taskId);
   const goalsPct = task?.goals_total ? Math.round(((task.goals_met ?? 0) / task.goals_total) * 100) : 0;
   const costWorkers = costs?.workers ?? [];
@@ -99,7 +101,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
           </div>
           <div>
             <div className="text-muted-foreground text-xs">运行中 Worker</div>
-            <div className="mt-1 font-semibold text-lg tabular-nums">{running.length}</div>
+            <div className="mt-1 font-semibold text-lg tabular-nums">{intentCounts?.running ?? 0}</div>
           </div>
           <div>
             <div className="text-muted-foreground text-xs">最近活动</div>
@@ -157,15 +159,15 @@ export function OverviewTab({ taskId }: { taskId: string }) {
               <div className="text-muted-foreground text-xs">确认漏洞</div>
             </div>
             <div>
-              <div className="font-semibold text-2xl text-blue-600 tabular-nums">{running.length}</div>
+              <div className="font-semibold text-2xl text-blue-600 tabular-nums">{intentCounts?.running ?? 0}</div>
               <div className="text-muted-foreground text-xs">执行中</div>
             </div>
             <div>
-              <div className="font-semibold text-2xl tabular-nums">{open.length}</div>
+              <div className="font-semibold text-2xl tabular-nums">{intentCounts?.open ?? 0}</div>
               <div className="text-muted-foreground text-xs">frontier 待领</div>
             </div>
             <div>
-              <div className="font-semibold text-2xl text-red-600 tabular-nums">{blocked.length}</div>
+              <div className="font-semibold text-2xl text-red-600 tabular-nums">{intentCounts?.blocked ?? 0}</div>
               <div className="text-muted-foreground text-xs">被拦意图</div>
             </div>
           </CardContent>
@@ -191,9 +193,9 @@ export function OverviewTab({ taskId }: { taskId: string }) {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
-        <StatCard label="待领意图" value={open.length} icon={ShieldCheckIcon} sub="frontier 开放" />
+        <StatCard label="待领意图" value={intentCounts?.open ?? 0} icon={ShieldCheckIcon} sub="frontier 开放" />
         <StatCard label="确认发现" value={taskFindings.length} icon={BugIcon} sub="本任务" />
-        <StatCard label="意图总数" value={intents.length} icon={AlertTriangleIcon} sub="本任务全部意图" />
+        <StatCard label="意图总数" value={intentCounts?.total ?? 0} icon={AlertTriangleIcon} sub="本任务全部意图" />
         <StatCard label="Agent 回合" value={costs?.total.rounds ?? 0} icon={ActivityIcon} sub="已完成模型回合" />
         <StatCard
           label="工具调用"

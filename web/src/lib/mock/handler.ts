@@ -48,6 +48,10 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       status: "created",
     };
   if (seg[0] === "tasks" && seg.length === 2 && m === "DELETE") return { deleted: 1 };
+  if (seg[0] === "tasks" && seg[2] === "coverage-graph" && m === "GET") return D.coverageGraph;
+  if (seg[0] === "tasks" && seg[2] === "costs" && m === "GET") return D.taskRoundCosts;
+  if (seg[0] === "tasks" && seg[2] === "operations-dashboard" && m === "GET") return D.operationsDashboard(seg[1]);
+  if (seg[0] === "tasks" && seg[2] === "overview" && m === "GET") return D.taskOverview(seg[1]);
   if (seg[0] === "tasks" && seg[2] === "control") return { id: seg[1], paused: b.action === "pause" };
   if (seg[0] === "tasks" && seg[2] === "chat" && seg[3] === "stop") return { status: "stopped" };
   if (path === "/active") return { active: String(b.id ?? D.ACTIVE_TASK) };
@@ -81,10 +85,44 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
 
   // ── exploration ──
   if (path === "/exploration/frontier") return D.frontier;
+  if (path === "/exploration/findings/stats") {
+    const cid = Number(q.get("company_id") ?? 0);
+    const list = cid > 0 ? D.findings.filter((f) => (f.company_ids ?? []).includes(cid)) : D.findings;
+    return {
+      total: list.length,
+      pending: list.filter((f) => f.status === "pending").length,
+      high: list.filter((f) => f.severity === "high").length,
+      medium: list.filter((f) => f.severity === "medium").length,
+      low: list.filter((f) => f.severity === "low").length,
+      tasks: new Set(list.map((f) => f.task_id).filter(Boolean)).size,
+      vulnclasses: Array.from(new Set(list.map((f) => f.vulnclass))).sort(),
+    };
+  }
+  if (seg[0] === "exploration" && seg[1] === "findings" && seg.length === 4 && seg[3] === "lineage") {
+    return D.explorationGraph;
+  }
+  if (seg[0] === "exploration" && seg[1] === "findings" && seg.length === 3) {
+    const finding = D.findings.find((item) => item.id === seg[2]);
+    if (!finding) return {};
+    if (m === "PATCH") return { ...finding, ...b };
+    return { ...finding, report: finding.report ?? "" };
+  }
   if (path === "/exploration/findings") {
     const cid = Number(q.get("company_id") ?? 0);
     let list = task ? D.findings.filter((f) => f.task_id === task) : D.findings;
     if (cid > 0) list = list.filter((f) => (f.company_ids ?? []).includes(cid));
+    const severity = q.get("severity");
+    const status = q.get("status");
+    const vulnclass = q.get("vulnclass");
+    if (severity) list = list.filter((f) => f.severity === severity);
+    if (status) list = list.filter((f) => f.status === status);
+    if (vulnclass) list = list.filter((f) => f.vulnclass === vulnclass);
+    if (q.has("page")) {
+      const page = Math.max(1, Number(q.get("page") ?? 1));
+      const limit = Math.max(1, Number(q.get("limit") ?? 20));
+      const offset = (page - 1) * limit;
+      return { items: list.slice(offset, offset + limit), total: list.length, page, limit };
+    }
     return list;
   }
   if (path === "/exploration/intents") return D.intents;
@@ -103,6 +141,21 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
 
   // ── traffic / audit / settings ──
   if (path === "/audit") return D.audit;
+  if (path === "/audit/logs" && m === "GET") {
+    let list = D.auditLogs;
+    const category = q.get("category");
+    const action = q.get("action");
+    const result = q.get("result");
+    const actor = q.get("actor");
+    if (category) list = list.filter((item) => item.category === category);
+    if (action) list = list.filter((item) => item.action === action);
+    if (result) list = list.filter((item) => item.result === result);
+    if (actor) list = list.filter((item) => item.actor.includes(actor));
+    const limit = Math.max(1, Number(q.get("limit") ?? 100));
+    const offset = Math.max(0, Number(q.get("offset") ?? 0));
+    return { items: list.slice(offset, offset + limit), total: list.length, limit, offset };
+  }
+  if (path === "/audit/stats" && m === "GET") return { total: D.auditLogs.length };
   if (path === "/traffic") return D.traffic;
   if (path === "/traffic" && m === "DELETE") return { deleted: (b.ids as unknown[])?.length ?? 0 };
   if (path === "/traffic" && m === "POST") return { removed: 1 };
@@ -190,6 +243,41 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/sync/scopesentry/projects") return { projects: [], tag: {} };
   if (path === "/sync/scopesentry/tasks") return { tasks: [] };
   if (path === "/sync/scopesentry/sync") return { synced: {}, companies: null, warnings: null, errors: null };
+
+  // ── platform / RBAC ──
+  if (path === "/platform/my" && m === "GET") return D.myProfile;
+  if (path === "/platform/permissions" && m === "GET") return { permissions: D.permissionPoints };
+  if (path === "/platform/users" && m === "GET") return { users: D.platformUsers };
+  if (path === "/platform/users" && m === "POST") return { id: D.platformUsers.length + 1 };
+  if (path === "/platform/roles" && m === "GET") return { roles: D.platformRoles };
+  if (path === "/platform/roles" && m === "POST") return { id: D.platformRoles.length + 1 };
+  if (seg[0] === "platform" && seg[1] === "roles" && seg[3] === "permissions") {
+    if (m === "GET") return { keys: D.permissionPoints.map((permission) => permission.key) };
+    return { ok: true };
+  }
+
+  // ── sandbox ──
+  if (path === "/sandbox/hosts" && m === "GET") return { hosts: D.sandboxHosts };
+  if (path === "/sandbox/hosts" && m === "POST") return { id: D.sandboxHosts.length + 1 };
+  if (seg[0] === "sandbox" && seg[1] === "hosts" && seg[3] === "ping")
+    return { ok: true, version: "27.1.1", api_version: "1.46", os: "linux", arch: "amd64" };
+  if (seg[0] === "sandbox" && seg[1] === "hosts" && seg[3] === "containers" && seg.length === 4 && m === "GET") {
+    const containers =
+      q.get("managed") === "1"
+        ? D.sandboxContainers.filter((container) => container.Labels?.["sandbox.managed"] === "true")
+        : D.sandboxContainers;
+    return { containers };
+  }
+  if (seg[0] === "sandbox" && seg[1] === "hosts" && seg[3] === "images" && m === "GET")
+    return { images: D.sandboxImages };
+  if (seg[0] === "sandbox" && seg[1] === "hosts" && seg[3] === "containers" && m === "DELETE") {
+    const ids = ((b.ids as string[]) ?? []).filter((id) =>
+      D.sandboxContainers.some((container) => container.Id === id && container.Labels?.["sandbox.managed"] === "true"),
+    );
+    return { deleted: ids, failed: [] };
+  }
+  if (path === "/sandbox/egress" && m === "GET") return { rules: D.sandboxEgress };
+  if (path === "/sandbox/egress" && m === "POST") return { id: D.sandboxEgress.length + 1 };
 
   // ── skills ──
   if (path === "/skills" && m === "GET") return { skills: D.skills };
@@ -302,6 +390,52 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       stats: { ip: 2, subdomain: 1, service: 1, skipped: 0 },
       errors: [],
     };
+
+  // ── C2 ──
+  if (path === "/c2" && m === "GET") return { listeners: D.c2Listeners, sessions: D.c2Sessions };
+  if (path === "/c2/listeners" && m === "POST") return { id: 99 };
+  if (seg[0] === "c2" && seg[1] === "listeners" && seg.length === 3) {
+    if (m === "DELETE") return { deleted: 1 };
+    if (m === "POST") return { ok: true, status: "running" };
+  }
+  if (path === "/c2/profiles" && m === "GET") return { profiles: D.c2Profiles };
+  if (path === "/c2/profiles" && m === "POST") return { id: 99 };
+  if (seg[0] === "c2" && seg[1] === "profiles" && seg.length === 3 && m === "DELETE") return { deleted: 1 };
+  if (path === "/c2/auto-tasks" && m === "GET") return { auto_tasks: D.c2AutoTasks };
+  if (path === "/c2/auto-tasks" && m === "POST") return { id: 99 };
+  if (seg[0] === "c2" && seg[1] === "auto-tasks" && seg.length === 3 && m === "DELETE") return { deleted: 1 };
+  if (path === "/c2/plugins" && m === "GET") return { plugins: D.c2Plugins };
+  if (path === "/c2/plugins" && m === "POST") return { id: 99 };
+  if (seg[0] === "c2" && seg[1] === "plugins" && seg.length === 3 && m === "DELETE") return { deleted: 1 };
+  if (seg[0] === "c2" && seg[1] === "plugins" && seg[3] === "run" && m === "POST") return { ok: true, enqueued: 2 };
+  if (path === "/c2/tunnels" && m === "GET") return { tunnels: D.c2Tunnels };
+  if (path === "/c2/tunnels" && m === "POST") return { id: 99, status: "running" };
+  if (seg[0] === "c2" && seg[1] === "tunnels" && seg.length === 3 && m === "DELETE") return { deleted: 1 };
+  if (path === "/c2/generated" && m === "GET") return { generated: D.c2Generated };
+  if (path === "/c2/generated" && m === "POST")
+    return {
+      id: 99,
+      session_id: "S-demo" + Math.random().toString(16).slice(2, 8),
+      format: String(b.format ?? "stageless"),
+      message: "演示模式：不实际编译，仅展示配置。",
+      download_url: "",
+      built: false,
+      build_command: `CGO_ENABLED=0 GOOS=${b.os ?? "linux"} GOARCH=${b.arch ?? "amd64"} go build -o beacon ./cmd/beacon`,
+      run_command: "./beacon",
+    };
+  if (seg[0] === "c2" && seg[1] === "generated" && seg.length === 3 && m === "DELETE") return { deleted: 1 };
+  if (path === "/c2/postex" && m === "GET") return { modules: D.c2PostexModules };
+  if (seg[0] === "c2" && seg[2] === "postex" && m === "POST") return { id: 505, module: String(b.module ?? ""), session_id: seg[1], state: "queued" };
+  if (seg[0] === "c2" && seg[1] === "sessions" && seg[2] === "tasks" && m === "GET") return { tasks: D.c2MockTasks };
+  if (seg[0] === "c2" && seg[1] === "sessions" && seg[2] === "tasks" && m === "POST") return { id: 506 };
+  if (seg[0] === "c2" && seg[1] === "sessions" && seg[2] === "analyze" && m === "GET") {
+    const s = D.c2Sessions[0];
+    return { session: s, tasks: D.c2MockTasks, summary: { host: s.hostname, ip: s.host, remote_ip: s.remote_ip, os: `${s.os}/${s.arch}`, user: s.username, process: s.process_name, connection: s.connection, status: s.status, first_seen: s.first_seen, last_seen: s.last_seen, task_stats: { completed: 2, failed: 0, pending: 0 } } };
+  }
+  if (path === "/c2/ingest" && m === "POST") return { ok: true };
+  if (path === "/c2/status" && m === "POST") return { ok: true };
+  if (path === "/c2/note" && m === "POST") return { ok: true };
+  if (seg[0] === "c2" && seg[2] === "result" && m === "POST") return { ok: true };
 
   // ── 写操作兜底：成功但不落库 ──
   if (["POST", "PUT", "PATCH", "DELETE"].includes(m)) return { ok: true };

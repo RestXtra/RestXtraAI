@@ -23,6 +23,8 @@ func (s *Server) platformTools() []actool.CoreTool {
 		s.toolUpdateCustomTool(),
 		s.toolCreateMCP(),
 		s.toolUpdateMCP(),
+		s.toolC2Postex(),
+		s.toolC2TaskResult(),
 	}
 }
 
@@ -31,6 +33,7 @@ var platformToolKeys = []string{
 	"create_skill", "update_skill_file",
 	"create_custom_tool", "update_custom_tool",
 	"create_mcp", "update_mcp",
+	"c2_postex", "c2_task_result",
 }
 
 // ---- skills ----
@@ -278,4 +281,89 @@ func (s *Server) toolUpdateMCP() actool.CoreTool {
 			s.assemblyCatalog.InvalidateMCPs()
 			return actool.Text(fmt.Sprintf("mcp updated: id=%d", a.ID)), nil
 		})
+}
+
+// toolC2Postex 让 AI agent 对指定 C2 会话执行后渗透模块。
+func (s *Server) toolC2Postex() actool.CoreTool {
+	return wrTool("c2_postex",
+		"在指定 C2 会话(客户端)上执行后渗透模块并下发为任务。模块: info/ps/netstat/whoami/users/env/ls/download/upload/screenshot/escalate/persist。执行后需用 c2_task_result 轮询结果。",
+		objSchema(map[string]any{
+			"session_id": strParam("C2 会话 ID(客户端管理中的 session_id)"),
+			"module":     strParam("后渗透模块名: info/ps/netstat/whoami/users/env/ls/download/upload/screenshot/escalate/persist"),
+			"args":       strParam("模块参数(如 ls 的路径、download 的文件路径、upload 的 'path b64data')"),
+		}, "session_id", "module"),
+		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+			var a struct {
+				SessionID string `json:"session_id"`
+				Module    string `json:"module"`
+				Args      string `json:"args"`
+			}
+			_ = json.Unmarshal(in, &a)
+			if strings.TrimSpace(a.SessionID) == "" || strings.TrimSpace(a.Module) == "" {
+				return actool.Errorf("session_id 与 module 必填"), nil
+			}
+			found := false
+			for _, m := range c2PostexModules {
+				if m["id"] == a.Module {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return actool.Errorf("未知模块: " + a.Module), nil
+			}
+			command := "postex " + a.Module
+			if strings.TrimSpace(a.Args) != "" {
+				command += " " + strings.TrimSpace(a.Args)
+			}
+			id, err := s.m.pg.CreateC2Task(a.SessionID, command, "agent:postex:"+a.Module, nil)
+			if err != nil {
+				return actool.Errorf("下发失败: " + err.Error()), nil
+			}
+			return actool.Text(fmt.Sprintf("已下发后渗透任务 %s → 会话 %s (task_id=%d)。用 c2_task_result 轮询 task_id 获取结果。", a.Module, a.SessionID, id)), nil
+		},
+	)
+}
+
+// toolC2TaskResult 让 AI agent 轮询 C2 任务结果。
+func (s *Server) toolC2TaskResult() actool.CoreTool {
+	return wrTool("c2_task_result",
+		"查询一个 C2 任务(通常由 c2_postex 下发)的状态与结果。",
+		objSchema(map[string]any{
+			"task_id": strParam("C2 任务 ID(c2_postex 返回的 task_id)"),
+		}, "task_id"),
+		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+			var a struct {
+				TaskID string `json:"task_id"`
+			}
+			_ = json.Unmarshal(in, &a)
+			if a.TaskID == "" {
+				return actool.Errorf("task_id 必填"), nil
+			}
+			var tid int64
+			fmt.Sscanf(a.TaskID, "%d", &tid)
+			sessions, _ := s.m.pg.ListC2Sessions(500)
+			var foundTask any
+			for _, sess := range sessions {
+				tasks, err := s.m.pg.ListC2Tasks(sess.SessionID, 100)
+				if err != nil {
+					continue
+				}
+				for _, t := range tasks {
+					if t.ID == tid {
+						foundTask = t
+						break
+					}
+				}
+				if foundTask != nil {
+					break
+				}
+			}
+			if foundTask == nil {
+				return actool.Errorf(fmt.Sprintf("任务 %d 不存在", tid)), nil
+			}
+			raw, _ := json.Marshal(foundTask)
+			return actool.Text(string(raw)), nil
+		},
+	)
 }

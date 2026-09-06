@@ -459,6 +459,7 @@ export interface TaskOverview {
   task: Task;
   engine_mode: EngineMode;
   intents: TaskNode[];
+  intent_counts?: { total: number; open: number; running: number; blocked: number };
   findings: Finding[];
   costs: TaskRoundCosts;
 }
@@ -989,6 +990,12 @@ export interface C2Listener {
   port: number;
   enabled: boolean;
   note?: string;
+  status?: string;
+  profile_id?: number | null;
+  options?: Record<string, unknown>;
+  disguise?: Record<string, unknown>;
+  firewall?: Record<string, unknown>;
+  error?: string;
   created_at: string;
 }
 export interface C2Session {
@@ -996,10 +1003,90 @@ export interface C2Session {
   listener_id: string | null;
   session_id: string;
   host: string;
+  remote_ip?: string;
+  location?: string;
+  hostname?: string;
+  username?: string;
+  uid?: string;
+  gid?: string;
+  os?: string;
+  arch?: string;
+  pid?: number;
+  process_name?: string;
+  connection?: string;
+  note?: string;
   meta?: string;
   status: string;
+  first_seen?: string;
   last_seen: string;
   created_at: string;
+}
+export interface C2Profile {
+  id: string;
+  name: string;
+  kind: string;
+  config: Record<string, unknown>;
+  created_at: string;
+}
+export interface C2Task {
+  id: string;
+  session_id: string;
+  command: string;
+  request?: Record<string, unknown>;
+  state: string;
+  description?: string;
+  response?: Record<string, unknown>;
+  created_at: string;
+  sent_at?: string | null;
+  completed_at?: string | null;
+}
+export interface C2AutoTask {
+  id: string;
+  listener_id?: number | null;
+  name: string;
+  enabled: boolean;
+  order_idx: number;
+  target: string;
+  workflow_id?: number | null;
+  commands?: string[];
+  conditions?: Record<string, unknown>;
+  created_at: string;
+}
+export interface C2Plugin {
+  id: string;
+  name: string;
+  description?: string;
+  commands?: string[];
+  created_at: string;
+}
+export interface C2Generated {
+  id: string;
+  name: string;
+  listener_id?: number | null;
+  os: string;
+  arch: string;
+  format?: string;
+  config: Record<string, unknown>;
+  artifact?: string;
+  size?: number;
+  created_at: string;
+}
+export interface C2Tunnel {
+  id: string;
+  session_id: string;
+  kind: string;
+  bind_host: string;
+  bind_port: number;
+  target?: string;
+  state: string;
+  error?: string;
+  created_at: string;
+}
+export interface C2PostexModule {
+  id: string;
+  name: string;
+  desc: string;
+  args: string;
 }
 export interface WorkspaceEntry {
   name: string;

@@ -16,8 +16,15 @@ import type {
   AuditLogEntry,
   BatchQueue,
   BatchTask,
+  C2AutoTask,
+  C2Generated,
   C2Listener,
+  C2Plugin,
+  C2PostexModule,
+  C2Profile,
   C2Session,
+  C2Task,
+  C2Tunnel,
   CommandRecord,
   Company,
   CompanyStat,
@@ -884,9 +891,98 @@ export const api = {
       method: "DELETE",
       body: JSON.stringify({ ids: ids.map(Number), all }),
     }),
-  c2Ingest: (p: { listener_id?: number; session_id: string; host?: string; meta?: string; status?: string }) =>
-    post<{ ok: boolean }>("/c2/ingest", p),
+  c2Ingest: (p: {
+    listener_id?: number;
+    session_id: string;
+    host?: string;
+    remote_ip?: string;
+    location?: string;
+    hostname?: string;
+    username?: string;
+    os?: string;
+    arch?: string;
+    pid?: number;
+    process_name?: string;
+    connection?: string;
+    note?: string;
+    meta?: string;
+    status?: string;
+  }) => post<{ ok: boolean }>("/c2/ingest", p),
   c2SetStatus: (session_id: string, status: string) => post<{ ok: boolean }>("/c2/status", { session_id, status }),
+  c2SetNote: (session_id: string, note: string) => post<{ ok: boolean }>("/c2/note", { session_id, note }),
+  c2ListenerSetStatus: (id: string, status: string, error?: string) =>
+    post<{ ok: boolean }>(`/c2/listeners/${id}/status`, { status, error }),
+  c2Profiles: () => get<{ profiles: C2Profile[] }>("/c2/profiles"),
+  saveC2Profile: (p: Partial<C2Profile>) => post<{ id: number }>("/c2/profiles", p),
+  deleteC2Profile: (id: string) => del<{ deleted: number }>(`/c2/profiles/${id}`),
+  c2Tasks: (sid: string) => get<{ tasks: C2Task[] }>(`/c2/sessions/${sid}/tasks`),
+  c2Analyze: (sid: string) =>
+    get<{
+      session: C2Session;
+      tasks: C2Task[];
+      summary: {
+        host: string;
+        ip: string;
+        remote_ip: string;
+        os: string;
+        user: string;
+        process: string;
+        connection: string;
+        status: string;
+        first_seen: string;
+        last_seen: string;
+        task_stats: { completed: number; failed: number; pending: number };
+      };
+    }>(`/c2/sessions/${sid}/analyze`),
+  c2CreateTask: (sid: string, p: { command: string; description?: string; request?: Record<string, unknown> }) =>
+    post<{ id: number }>(`/c2/sessions/${sid}/tasks`, p),
+  c2TaskResult: (id: string, p: { state?: string; response?: Record<string, unknown> }) =>
+    post<{ ok: boolean }>(`/c2/tasks/${id}/result`, p),
+  deleteC2Task: (id: string) => del<{ deleted: number }>(`/c2/tasks/${id}`),
+  c2AutoTasks: () => get<{ auto_tasks: C2AutoTask[] }>("/c2/auto-tasks"),
+  saveC2AutoTask: (a: Partial<C2AutoTask>) => post<{ id: number }>("/c2/auto-tasks", a),
+  deleteC2AutoTask: (id: string) => del<{ deleted: number }>(`/c2/auto-tasks/${id}`),
+  c2ListenerStart: (id: string) => post<{ ok: boolean; status: string }>(`/c2/listeners/${id}/start`, {}),
+  c2ListenerStop: (id: string) => post<{ ok: boolean; status: string }>(`/c2/listeners/${id}/stop`, {}),
+  c2Generated: () => get<{ generated: C2Generated[] }>("/c2/generated"),
+  c2Generate: (p: {
+    name: string;
+    listener_id: number;
+    os?: string;
+    arch?: string;
+    format?: string;
+    host?: string;
+    interval?: number;
+    jitter?: number;
+  }) =>
+    post<{
+      id: number;
+      session_id: string;
+      format?: string;
+      download_url?: string;
+      size?: number;
+      built?: boolean;
+      message?: string;
+      build_command: string;
+      run_command: string;
+    }>("/c2/generated", p),
+  deleteC2Generated: (id: string) => del<{ deleted: number }>(`/c2/generated/${id}`),
+  c2GeneratedDownloadUrl: (id: string) => `/c2/generated/${id}/download`,
+  c2Plugins: () => get<{ plugins: C2Plugin[] }>("/c2/plugins"),
+  saveC2Plugin: (p: Partial<C2Plugin>) => post<{ id: number }>("/c2/plugins", p),
+  deleteC2Plugin: (id: string) => del<{ deleted: number }>(`/c2/plugins/${id}`),
+  c2RunPlugin: (id: string, session_id: string) =>
+    post<{ ok: boolean; enqueued: number }>(`/c2/plugins/${id}/run`, { session_id }),
+  c2Tunnels: () => get<{ tunnels: C2Tunnel[] }>("/c2/tunnels"),
+  createC2Tunnel: (t: { session_id: string; kind?: string; bind_host?: string; bind_port?: number; target?: string }) =>
+    post<{ id: number; status: string }>("/c2/tunnels", t),
+  deleteC2Tunnel: (id: string) => del<{ deleted: number }>(`/c2/tunnels/${id}`),
+  c2Postex: () => get<{ modules: C2PostexModule[] }>("/c2/postex"),
+  c2PostexRun: (sid: string, module: string, args?: string) =>
+    post<{ id: number; module: string; session_id: string; state: string }>(`/c2/sessions/${sid}/postex`, {
+      module,
+      args,
+    }),
 
   // ---- 能力：空间测绘（FOFA / Hunter / Quake） ----
   spaceSearchConfigs: () => get<{ providers: SpaceSearchConfigItem[] }>("/spacesearch/config"),

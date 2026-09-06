@@ -20,6 +20,13 @@ import type { Activity, Agent, Company, Conversation, LLMProfile } from "@/lib/t
 import { cn } from "@/lib/utils";
 import { useChatNavStore } from "@/stores/chat-nav-store";
 
+// Per-conversation transcript cache. ChatView is keyed by selected.id (full
+// remount on switch), so without a cache every switch blanks the transcript and
+// re-fetches everything from the server. This module-level cache lets a switch
+// render the last-known messages instantly and reconcile fresh data in the
+// background, removing the blank-flash / pop-in on session switching.
+const convMessagesCache = new Map<number, { items: Activity[]; cursor: number }>();
+
 // fmtTokens renders a compact token count (1234 → 1.2k, 2_000_000 → 2M).
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
@@ -339,12 +346,12 @@ function ChatView({
   onTitleMaybeChanged: () => void;
   onConvUpdated: () => void;
 }) {
-  const [messages, setMessages] = React.useState<Activity[]>([]);
+  const [messages, setMessages] = React.useState<Activity[]>(() => convMessagesCache.get(conv.id)?.items ?? []);
   const [running, setRunning] = React.useState(false);
   const [input, setInput] = React.useState("");
   const [sending, setSending] = React.useState(false);
   const [stopping, setStopping] = React.useState(false);
-  const cursorRef = React.useRef(0);
+  const cursorRef = React.useRef(convMessagesCache.get(conv.id)?.cursor ?? 0);
   const agent = agents.find((a) => a.key === conv.agent_key);
   const agentPicker = (
     <Select value={conv.agent_key} onValueChange={changeAgent} disabled={running}>
@@ -404,8 +411,8 @@ function ChatView({
 
   // reset + load whenever the selected conversation changes.
   React.useEffect(() => {
-    cursorRef.current = 0;
-    setMessages([]);
+    cursorRef.current = convMessagesCache.get(conv.id)?.cursor ?? 0;
+    setMessages(convMessagesCache.get(conv.id)?.items ?? []);
     setRunning(false);
     let live = true;
     api
@@ -415,6 +422,7 @@ function ChatView({
         setMessages(r.items);
         cursorRef.current = r.cursor;
         setRunning(r.running);
+        convMessagesCache.set(conv.id, { items: r.items, cursor: r.cursor });
       })
       .catch(() => {});
     return () => {
@@ -431,7 +439,11 @@ function ChatView({
         const r = await api.conversationMessages(conv.id, cursorRef.current);
         if (!live) return;
         if (r.items.length) {
-          setMessages((prev) => [...prev, ...r.items]);
+          setMessages((prev) => {
+            const next = [...prev, ...r.items];
+            convMessagesCache.set(conv.id, { items: next, cursor: r.cursor });
+            return next;
+          });
           cursorRef.current = r.cursor;
         }
         setRunning(r.running);
@@ -517,7 +529,11 @@ function ChatView({
       setRunning(true);
       // pull the just-persisted human turn immediately.
       const r = await api.conversationMessages(conv.id, cursorRef.current);
-      setMessages((prev) => [...prev, ...r.items]);
+      setMessages((prev) => {
+        const next = [...prev, ...r.items];
+        convMessagesCache.set(conv.id, { items: next, cursor: r.cursor });
+        return next;
+      });
       cursorRef.current = r.cursor;
     } catch (e) {
       toast.error(`发送失败：${(e as Error).message}`);
@@ -639,6 +655,7 @@ function ChatPageInner() {
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [convs, setConvs] = React.useState<Conversation[]>([]);
   const [companies, setCompanies] = React.useState<Company[]>([]);
+  const [convsLoaded, setConvsLoaded] = React.useState(false);
   const _bump = useChatNavStore((s) => s.bump);
   const select = useChatNavStore((s) => s.select);
 
@@ -650,8 +667,14 @@ function ChatPageInner() {
   const reloadConvs = React.useCallback(() => {
     api
       .conversations()
-      .then(setConvs)
-      .catch(() => setConvs([]));
+      .then((list) => {
+        setConvs(list);
+        setConvsLoaded(true);
+      })
+      .catch(() => {
+        setConvs([]);
+        setConvsLoaded(true);
+      });
   }, []);
   React.useEffect(() => {
     api
@@ -669,40 +692,55 @@ function ChatPageInner() {
     reloadConvs();
   }, [reloadConvs]);
   const selected = selectedId != null ? (convs.find((c) => c.id === selectedId) ?? null) : null;
+  // A conversation is selected but convs hasn't finished its first load yet. Show
+  // a neutral placeholder instead of flashing the DraftChat landing state, which
+  // caused a flicker on session switch.
+  const resolvingConversation = selected == null && selectedId != null && !convsLoaded;
   // conversation agents: custom agents + conversational built-ins (role=assistant,
   // e.g. Auto / 渗透测试). The orchestration built-ins (goals/planner/mainagent/worker)
   // are task-specific and stay hidden from the chat page.
   const chatAgents = agents.filter((a) => !a.builtin || a.role === "assistant");
+
+  // Choose the right pane: resolved conversation → ChatView; selected but not yet
+  // resolved → neutral placeholder (avoids the DraftChat flash); otherwise DraftChat.
+  let pane: React.ReactNode;
+  if (selected) {
+    pane = (
+      <ChatView
+        key={selected.id}
+        conv={selected}
+        agents={agents}
+        profiles={profiles}
+        companies={companies}
+        onTitleMaybeChanged={reloadConvs}
+        onConvUpdated={reloadConvs}
+      />
+    );
+  } else if (resolvingConversation) {
+    pane = (
+      <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground text-sm">加载会话…</div>
+    );
+  } else {
+    pane = (
+      <DraftChat
+        agents={chatAgents}
+        profiles={profiles}
+        companies={companies}
+        onStarted={(c) => {
+          reloadConvs();
+          useChatNavStore.getState().refresh();
+          select(c.id);
+        }}
+      />
+    );
+  }
 
   return (
     <div
       data-content-padding="false"
       className="flex h-[calc(100svh-3rem)] flex-col overflow-hidden md:h-[calc(100svh-4rem)]"
     >
-      <div className="chat-surface flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-        {selected ? (
-          <ChatView
-            key={selected.id}
-            conv={selected}
-            agents={agents}
-            profiles={profiles}
-            companies={companies}
-            onTitleMaybeChanged={reloadConvs}
-            onConvUpdated={reloadConvs}
-          />
-        ) : (
-          <DraftChat
-            agents={chatAgents}
-            profiles={profiles}
-            companies={companies}
-            onStarted={(c) => {
-              reloadConvs();
-              useChatNavStore.getState().refresh();
-              select(c.id);
-            }}
-          />
-        )}
-      </div>
+      <div className="chat-surface flex min-h-0 flex-1 flex-col overflow-hidden bg-background">{pane}</div>
     </div>
   );
 }

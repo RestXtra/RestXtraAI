@@ -59,3 +59,10 @@ start.bat
 
 # Docker 部署生成的本地环境（含密码/密钥，不提交）
 .env
+
+# C2 产物与演示包（不提交二进制/压缩包）
+/beacon
+/beacon-linux
+/beacon.exe
+/restxtra-demo-*.zip
+/restxtra-demo-*.tar.gz

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/RestXtra/RestXtraAI/config"
 	_ "github.com/jackc/pgx/v5/stdlib" // pgx database/sql driver ("pgx")
@@ -30,9 +31,20 @@ type DB struct {
 	*sql.DB
 	// P2.6 graph_overview 版本缓存：per-exploration 图版本 + 最近一次 overview 的 JSON。
 	// 同一版本内多次读取（同 burst 的多次 planner 唤醒）直接复用，避免重复全量查询。
-	ovMu    sync.Mutex
-	ovVer   map[int64]int64
-	ovCache map[int64]*overviewCache
+	// 锁按 exploration id 分片，避免所有任务共享一个全局互斥锁造成跨任务争用。
+	ovStripes [64]sync.Mutex
+	ovVer     map[int64]int64
+	ovCache   map[int64]*overviewCache
+	// Shadow-replay 投影校验缓存：复用同一图版本号，仅在图版本变化时重算，
+	// 避免 ops-dashboard 轮询时每次都做全图 replay + 全图投影加载。
+	projVer   map[int64]int64
+	projCache map[int64]*GraphProjectionVerification
+}
+
+// ovLock returns the sharded lock guarding the version/cache maps for an
+// exploration id. Stripe hash spreads concurrent tasks across distinct mutexes.
+func (d *DB) ovLock(expID int64) *sync.Mutex {
+	return &d.ovStripes[uint64(expID)%uint64(len(d.ovStripes))]
 }
 
 // overviewCache caches one graph_overview snapshot at a specific graph version.
@@ -82,6 +94,13 @@ func Open(dsn string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Bound the connection pool. Agent-heavy workloads spawn many workers, and
+	// without limits pgx defaults to an unbounded pool that can exhaust
+	// PostgreSQL's max_connections and pile up idle sockets.
+	sqlDB.SetMaxOpenConns(32)
+	sqlDB.SetMaxIdleConns(16)
+	sqlDB.SetConnMaxLifetime(30 * time.Minute)
+	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 	if err := sqlDB.Ping(); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("ping postgres (%s): %w", config.Redact(dsn), err)
@@ -247,17 +266,38 @@ var builtinSkillVisibility = map[string][]string{
 // agents. Insert-if-absent (ON CONFLICT DO NOTHING) so a user's later toggle-off is
 // never resurrected on restart — matches the browser-MCP / intercept-rule seed policy.
 func (d *DB) seedBuiltinSkillVisibility() error {
+	// Bulk insert all skill→agent bindings in a single statement instead of one
+	// round-trip per pair (~36 execs per startup on cold start).
+	var b strings.Builder
+	b.WriteString(`INSERT INTO agent_skill_visibility(agent_id, skill_name, enabled)
+SELECT a.id, v.skill_name, true FROM (VALUES `)
+	first := true
 	for skillName, agentKeys := range builtinSkillVisibility {
 		for _, key := range agentKeys {
-			if _, err := d.Exec(`
-INSERT INTO agent_skill_visibility(agent_id, skill_name, enabled)
-SELECT id, $2, true FROM agents WHERE key=$1
-ON CONFLICT (agent_id, skill_name) DO NOTHING`, key, skillName); err != nil {
-				return fmt.Errorf("skill %s → agent %s: %w", skillName, key, err)
+			if !first {
+				b.WriteByte(',')
 			}
+			first = false
+			fmt.Fprintf(&b, "('%s','%s')", sqlEsc(skillName), sqlEsc(key))
 		}
 	}
+	b.WriteString(`) AS v(skill_name, agent_key)
+JOIN agents a ON a.key = v.agent_key
+ON CONFLICT (agent_id, skill_name) DO NOTHING`)
+	if first {
+		return nil // empty map — nothing to seed
+	}
+	if _, err := d.Exec(b.String()); err != nil {
+		return fmt.Errorf("seed skill visibility: %w", err)
+	}
 	return nil
+}
+
+// sqlEsc single-quotes a literal for the inline VALUES list above. Only used
+// with the fixed, source-controlled skill/agent key constants — never with
+// user input.
+func sqlEsc(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
 }
 
 // seedDefaultInterceptRules inserts built-in safety intercept rules once on

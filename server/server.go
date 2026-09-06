@@ -28,14 +28,17 @@ import (
 	"github.com/RestXtra/RestXtraAI/llmrec"
 	"github.com/RestXtra/RestXtraAI/metrics"
 	"github.com/RestXtra/RestXtraAI/report"
+	"github.com/RestXtra/RestXtraAI/server/c2"
 )
 
 // Server exposes the RestXtra AI backend over a JSON HTTP API for the shadcn/ui
 // frontend.
 type Server struct {
-	m      *Manager
-	engine *Engine
-	ctx    context.Context
+	m       *Manager
+	engine  *Engine
+	ctx     context.Context
+	c2m     *c2.Manager // teamserver runtime (listeners + tunnels)
+	dataDir string
 
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
@@ -105,9 +108,24 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 	if err != nil {
 		log.Fatalf("[auth] JWT key: %v", err)
 	}
-	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, chatBusy: map[string]bool{},
+	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, dataDir: dataDir, jwtKey: key, chatBusy: map[string]bool{},
 		chatCancel: map[string]context.CancelFunc{}, triggerQ: map[string][]triggeredRun{}, triggerRun: map[string]bool{},
 		profAgents: map[int64]*profBundle{}, profChatAgents: map[int64]*agent.ChatAgent{}}
+	if m.pg != nil {
+		s.c2m = c2.New(m.pg)
+		c2.TriggerWorkflow = func(workflowID int64, listenerID int64, sessionID string) error {
+			_ = m.pg.RecordAudit(db.AuditEntry{
+				Actor: "system", Category: "c2", Action: "workflow_auto",
+				Result: "triggered", Message: fmt.Sprintf("新会话 %s 触发 workflow #%d（监听器 #%d）", sessionID, workflowID, listenerID),
+			})
+			_, _ = m.pg.SaveKnowledge(&db.KnowledgeItem{
+				Title:   "C2 会话触发 Workflow",
+				Content: fmt.Sprintf("会话 %s（监听器 #%d）注册后触发 workflow #%d。AI 引擎执行待接入。", sessionID, listenerID, workflowID),
+				Tags:    "c2,workflow",
+			})
+			return nil
+		}
+	}
 	m.setMCPConfigChanged(s.assemblyCatalog.InvalidateMCPs)
 	// per-task LLM: a task pinned to a specific profile runs on that profile's
 	// dedicated planner/worker; unpinned tasks fall back to the global active pair.
@@ -826,9 +844,37 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/c2/listeners", s.c2SaveListener)
 	mux.HandleFunc("DELETE /api/c2/listeners/{id}", s.c2DeleteListener)
 	mux.HandleFunc("DELETE /api/c2/listeners", s.c2DeleteListenersBatch)
+	mux.HandleFunc("POST /api/c2/listeners/{id}/status", s.c2ListenerSetStatus)
+	mux.HandleFunc("POST /api/c2/listeners/{id}/start", s.c2ListenerStart)
+	mux.HandleFunc("POST /api/c2/listeners/{id}/stop", s.c2ListenerStop)
 	mux.HandleFunc("DELETE /api/c2/sessions", s.c2DeleteSessionsBatch)
 	mux.HandleFunc("POST /api/c2/ingest", s.c2Ingest)
 	mux.HandleFunc("POST /api/c2/status", s.c2SetStatus)
+	mux.HandleFunc("POST /api/c2/note", s.c2SetNote)
+	mux.HandleFunc("GET /api/c2/profiles", s.c2ProfilesList)
+	mux.HandleFunc("POST /api/c2/profiles", s.c2ProfileSave)
+	mux.HandleFunc("DELETE /api/c2/profiles/{id}", s.c2ProfileDelete)
+	mux.HandleFunc("GET /api/c2/sessions/{sid}/tasks", s.c2TasksList)
+	mux.HandleFunc("POST /api/c2/sessions/{sid}/tasks", s.c2TaskCreate)
+	mux.HandleFunc("GET /api/c2/sessions/{sid}/analyze", s.c2SessionAnalyze)
+	mux.HandleFunc("GET /api/c2/postex", s.c2PostexList)
+	mux.HandleFunc("POST /api/c2/sessions/{sid}/postex", s.c2PostexRun)
+	mux.HandleFunc("POST /api/c2/tasks/{id}/result", s.c2TaskResult)
+	mux.HandleFunc("DELETE /api/c2/tasks/{id}", s.c2TaskDelete)
+	mux.HandleFunc("GET /api/c2/auto-tasks", s.c2AutoTasksList)
+	mux.HandleFunc("POST /api/c2/auto-tasks", s.c2AutoTaskSave)
+	mux.HandleFunc("DELETE /api/c2/auto-tasks/{id}", s.c2AutoTaskDelete)
+	mux.HandleFunc("GET /api/c2/generated", s.c2GeneratedList)
+	mux.HandleFunc("POST /api/c2/generated", s.c2GeneratedCreate)
+	mux.HandleFunc("DELETE /api/c2/generated/{id}", s.c2GeneratedDelete)
+	mux.HandleFunc("GET /api/c2/generated/{id}/download", s.c2GeneratedDownload)
+	mux.HandleFunc("GET /api/c2/plugins", s.c2PluginsList)
+	mux.HandleFunc("POST /api/c2/plugins", s.c2PluginSave)
+	mux.HandleFunc("DELETE /api/c2/plugins/{id}", s.c2PluginDelete)
+	mux.HandleFunc("POST /api/c2/plugins/{id}/run", s.c2PluginRun)
+	mux.HandleFunc("GET /api/c2/tunnels", s.c2TunnelsList)
+	mux.HandleFunc("POST /api/c2/tunnels", s.c2TunnelCreate)
+	mux.HandleFunc("DELETE /api/c2/tunnels/{id}", s.c2TunnelDelete)
 
 	// 能力：代理池
 	mux.HandleFunc("GET /api/proxies", s.rbac("cap.proxy.read", s.proxyList))
@@ -1636,7 +1682,7 @@ func (s *Server) taskOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	intents, err := t.Store.ListByKind(db.KindIntent, 100000)
+	intentCounts, runningIntents, err := t.Store.IntentCounts(20)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "加载任务意图失败")
 		return
@@ -1662,12 +1708,7 @@ func (s *Server) taskOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inFlight := 0
-	for _, intent := range intents {
-		if intent.State == "running" {
-			inFlight++
-		}
-	}
+	inFlight := intentCounts.Running
 	last := persistedLast
 	if live := s.engine.LastActivity(id); live > last {
 		last = live
@@ -1703,7 +1744,8 @@ func (s *Server) taskOverview(w http.ResponseWriter, r *http.Request) {
 		findingDTOs = append(findingDTOs, findingFromDB(finding))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"task": dto, "engine_mode": engineMode, "intents": taskNodeDTOs(intents), "findings": findingDTOs,
+		"task": dto, "engine_mode": engineMode, "intents": taskNodeDTOs(runningIntents),
+		"intent_counts": intentCounts, "findings": findingDTOs,
 		"costs": map[string]any{"unit": "tokens", "workers": workers, "total": total},
 	})
 }
@@ -2044,6 +2086,9 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
+	// Long-lived stream: clear the server-level WriteTimeout so the connection
+	// is not killed while idle between events.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 
 	ch, unsub := logSink.subscribe()
 	defer unsub()
@@ -2107,6 +2152,9 @@ func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no") // disable proxy buffering
+	// Long-lived stream: clear the server-level WriteTimeout so the connection
+	// is not killed while idle between events.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 
 	// Subscribe BEFORE replaying history so events in between aren't lost; dedup the
 	// overlap by skipping channel events whose id was already replayed.

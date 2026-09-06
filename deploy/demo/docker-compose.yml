@@ -1,0 +1,23 @@
+services:
+  demo:
+    image: restxtra-demo:${DEMO_IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: deploy/demo/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${DEMO_PORT:-8080}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /var/cache/nginx:size=16m,mode=0755
+      - /var/run:size=1m,mode=0755
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

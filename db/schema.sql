@@ -151,6 +151,7 @@ ALTER TABLE exploration_nodes ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAM
 ALTER TABLE exploration_nodes ADD COLUMN IF NOT EXISTS attempt_count INT NOT NULL DEFAULT 0;
 ALTER TABLE exploration_nodes ADD COLUMN IF NOT EXISTS last_lease_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_expnodes_part     ON exploration_nodes(exploration_id, kind);
+CREATE INDEX IF NOT EXISTS idx_expnodes_kind_state ON exploration_nodes(exploration_id, kind, state);
 CREATE INDEX IF NOT EXISTS idx_expnodes_frontier ON exploration_nodes(exploration_id, priority DESC)
     WHERE kind='intent' AND state='open';
 CREATE INDEX IF NOT EXISTS idx_expnodes_lease ON exploration_nodes(exploration_id, lease_expires_at)
@@ -897,21 +898,108 @@ CREATE TABLE IF NOT EXISTS c2_listeners (
     port       INTEGER NOT NULL DEFAULT 0,
     enabled    BOOLEAN NOT NULL DEFAULT true,
     note       TEXT NOT NULL DEFAULT '',
+    status     TEXT NOT NULL DEFAULT 'stopped', -- running|stopped|error
+    profile_id BIGINT REFERENCES c2_profiles(id) ON DELETE SET NULL,
+    options    JSONB NOT NULL DEFAULT '{}',
+    disguise   JSONB NOT NULL DEFAULT '{}',
+    firewall   JSONB NOT NULL DEFAULT '{}',
+    error      TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS c2_sessions (
-    id          BIGSERIAL PRIMARY KEY,
-    listener_id BIGINT REFERENCES c2_listeners(id) ON DELETE SET NULL,
-    session_id  TEXT NOT NULL,
-    host        TEXT NOT NULL DEFAULT '',
-    meta        TEXT NOT NULL DEFAULT '',
-    status      TEXT NOT NULL DEFAULT 'active', -- active|lost|closed
-    last_seen   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    id           BIGSERIAL PRIMARY KEY,
+    listener_id  BIGINT REFERENCES c2_listeners(id) ON DELETE SET NULL,
+    session_id   TEXT NOT NULL,
+    host         TEXT NOT NULL DEFAULT '',      -- 内网IP
+    remote_ip    TEXT NOT NULL DEFAULT '',      -- 外网IP
+    location     TEXT NOT NULL DEFAULT '',      -- 归属地
+    hostname     TEXT NOT NULL DEFAULT '',
+    username     TEXT NOT NULL DEFAULT '',
+    uid          TEXT NOT NULL DEFAULT '',
+    gid          TEXT NOT NULL DEFAULT '',
+    os           TEXT NOT NULL DEFAULT '',
+    arch         TEXT NOT NULL DEFAULT '',
+    pid          INTEGER NOT NULL DEFAULT 0,
+    process_name TEXT NOT NULL DEFAULT '',
+    connection   TEXT NOT NULL DEFAULT '',      -- http|https|tcp|dns ...
+    note         TEXT NOT NULL DEFAULT '',      -- 备注
+    meta         TEXT NOT NULL DEFAULT '',
+    status       TEXT NOT NULL DEFAULT 'active', -- active|lost|closed
+    first_seen   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_c2_sessions_sid ON c2_sessions(session_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_c2_sessions_sid ON c2_sessions(session_id);
+
+CREATE TABLE IF NOT EXISTS c2_profiles (
+    id         BIGSERIAL PRIMARY KEY,
+    name       TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'http', -- http|dns|tcp
+    config     JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS c2_tasks (
+    id          BIGSERIAL PRIMARY KEY,
+    session_id  TEXT NOT NULL REFERENCES c2_sessions(session_id) ON DELETE CASCADE,
+    command     TEXT NOT NULL DEFAULT '',
+    request     JSONB NOT NULL DEFAULT '{}',
+    state       TEXT NOT NULL DEFAULT 'queued', -- queued|sent|completed|failed
+    description TEXT NOT NULL DEFAULT '',
+    response    JSONB NOT NULL DEFAULT '{}',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sent_at     TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_c2_tasks_sid ON c2_tasks(session_id, state);
+
+CREATE TABLE IF NOT EXISTS c2_auto_tasks (
+    id          BIGSERIAL PRIMARY KEY,
+    listener_id BIGINT REFERENCES c2_listeners(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    enabled     BOOLEAN NOT NULL DEFAULT true,
+    order_idx   INTEGER NOT NULL DEFAULT 0,
+    target      TEXT NOT NULL DEFAULT 'commands', -- commands|workflow
+    workflow_id BIGINT,
+    commands    JSONB NOT NULL DEFAULT '[]',
+    conditions  JSONB NOT NULL DEFAULT '{}',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS c2_plugins (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    commands    JSONB NOT NULL DEFAULT '[]',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS c2_generated (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    listener_id BIGINT REFERENCES c2_listeners(id) ON DELETE SET NULL,
+    os          TEXT NOT NULL DEFAULT 'linux',
+    arch        TEXT NOT NULL DEFAULT 'amd64',
+    format      TEXT NOT NULL DEFAULT 'stageless', -- stageless|dll|shellcode|config
+    config      JSONB NOT NULL DEFAULT '{}',
+    artifact    TEXT NOT NULL DEFAULT '',
+    size        INTEGER NOT NULL DEFAULT 0,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS c2_tunnels (
+    id          BIGSERIAL PRIMARY KEY,
+    session_id  TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT 'socks5', -- socks5|rportfwd
+    bind_host   TEXT NOT NULL DEFAULT '127.0.0.1',
+    bind_port   INTEGER NOT NULL DEFAULT 1080,
+    target      TEXT NOT NULL DEFAULT '',
+    state       TEXT NOT NULL DEFAULT 'stopped', -- running|stopped|error
+    error       TEXT NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- =====================================================================
 -- T. 优化项 P1.2：planner 心跳触发间隔（任务级，秒；0=不心跳）

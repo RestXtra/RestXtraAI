@@ -151,8 +151,9 @@ func (s *ExplorationStore) ID() int64 { return s.expID }
 // BumpVersion marks this exploration's graph as changed (P2.6). Called by every
 // write that graph_overview reflects; invalidates the cached overview snapshot.
 func (s *ExplorationStore) BumpVersion() {
-	s.db.ovMu.Lock()
-	defer s.db.ovMu.Unlock()
+	l := s.db.ovLock(s.expID)
+	l.Lock()
+	defer l.Unlock()
 	if s.db.ovVer == nil {
 		s.db.ovVer = map[int64]int64{}
 	}
@@ -162,8 +163,9 @@ func (s *ExplorationStore) BumpVersion() {
 // CachedOverview returns the cached overview JSON when the graph version is
 // unchanged since it was computed. (b, ok); ok=false → caller recomputes.
 func (s *ExplorationStore) CachedOverview() ([]byte, bool) {
-	s.db.ovMu.Lock()
-	defer s.db.ovMu.Unlock()
+	l := s.db.ovLock(s.expID)
+	l.Lock()
+	defer l.Unlock()
 	c, ok := s.db.ovCache[s.expID]
 	if !ok {
 		return nil, false
@@ -180,8 +182,9 @@ func (s *ExplorationStore) CacheOverview(data map[string]any) {
 	if err != nil {
 		return
 	}
-	s.db.ovMu.Lock()
-	defer s.db.ovMu.Unlock()
+	l := s.db.ovLock(s.expID)
+	l.Lock()
+	defer l.Unlock()
 	if s.db.ovCache == nil {
 		s.db.ovCache = map[int64]*overviewCache{}
 	}
@@ -436,6 +439,70 @@ WHERE exploration_id=$1 AND kind=$2 ORDER BY id DESC LIMIT $3`, s.expID, kind, l
 	}
 	defer rows.Close()
 	return scanNodes(rows)
+}
+
+// CountByKind returns the total number of nodes of a kind in this exploration.
+func (s *ExplorationStore) CountByKind(kind string) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT count(*) FROM exploration_nodes WHERE exploration_id=$1 AND kind=$2`, s.expID, kind).Scan(&n)
+	return n, err
+}
+
+// CountByKindState returns the number of nodes of a kind with a specific state.
+func (s *ExplorationStore) CountByKindState(kind, state string) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT count(*) FROM exploration_nodes WHERE exploration_id=$1 AND kind=$2 AND state=$3`, s.expID, kind, state).Scan(&n)
+	return n, err
+}
+
+// ListByKindState lists nodes of a kind filtered by state (newest first). Used
+// to fetch only the small recent window needed for display instead of loading
+// the full history.
+func (s *ExplorationStore) ListByKindState(kind, state string, limit int) ([]*Node, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`SELECT `+nodeCols+` FROM exploration_nodes
+WHERE exploration_id=$1 AND kind=$2 AND state=$3 ORDER BY id DESC LIMIT $4`, s.expID, kind, state, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanNodes(rows)
+}
+
+// IntentCounts is an aggregate snapshot of intent states, computed with indexed
+// count(*) queries instead of materializing the full intent history.
+type IntentCounts struct {
+	Total   int `json:"total"`
+	Open    int `json:"open"`
+	Running int `json:"running"`
+	Blocked int `json:"blocked"`
+}
+
+// IntentCounts returns aggregate intent state counts plus a bounded list of the
+// most recent running intents. This avoids loading up to tens of thousands of
+// intent nodes just to count states on the hot overview polling endpoint.
+func (s *ExplorationStore) IntentCounts(runningLimit int) (IntentCounts, []*Node, error) {
+	var c IntentCounts
+	var err error
+	if c.Total, err = s.CountByKind("intent"); err != nil {
+		return c, nil, err
+	}
+	if c.Open, err = s.CountByKindState("intent", "open"); err != nil {
+		return c, nil, err
+	}
+	if c.Running, err = s.CountByKindState("intent", "running"); err != nil {
+		return c, nil, err
+	}
+	if c.Blocked, err = s.CountByKindState("intent", "blocked"); err != nil {
+		return c, nil, err
+	}
+	running, err := s.ListByKindState("intent", "running", runningLimit)
+	if err != nil {
+		return c, nil, err
+	}
+	return c, running, nil
 }
 
 // GetNode returns one node of this exploration by id (nil, nil if not found).

@@ -115,6 +115,7 @@ CGO_ENABLED=0 go build -tags embedui -o restxtra ./cmd/restxtra
 - 前端：`cd web && npm run dev`（`/api` 反代到后端，带热更新）
 - 测试：`go test ./...`
 - Mock 预览（无后端）：`cd web && NEXT_PUBLIC_MOCK=1 npm run dev`
+- 公开 Demo 部署（纯静态、无数据库/密钥）：见 [DEMO_DEPLOYMENT.md](DEMO_DEPLOYMENT.md)
 
 ---
 

@@ -7,12 +7,16 @@ import type {
   Activity,
   Agent,
   AgentDetail,
+  AgentEvent,
   Asset,
   Audit,
+  AuditLogEntry,
   Company,
   Conversation,
   ConvTokenSummary,
+  CoverageGraphData,
   DailyTokenBucket,
+  DockerImage,
   Edge,
   Finding,
   InterceptApprovalRow,
@@ -21,11 +25,18 @@ import type {
   LLMProfile,
   MCPServer,
   MCPTool,
+  MyProfile,
+  PermissionPoint,
+  PlatformRole,
+  PlatformUser,
   PromptVar,
   PromptVersion,
   ProxyItem,
   ProxyPoolStats,
   ProxySourceItem,
+  SandboxContainer,
+  SandboxEgress,
+  SandboxHost,
   Settings,
   SkillItem,
   SpaceSearchConfigItem,
@@ -33,6 +44,9 @@ import type {
   Stats,
   Task,
   TaskNode,
+  TaskOperationsDashboard,
+  TaskOverview,
+  TaskRoundCosts,
   TokenTotal,
   TokenUsage,
   Tool,
@@ -406,14 +420,372 @@ export const assetCounts: Record<string, number> = assets.reduce<Record<string, 
   return m;
 }, {});
 
+export const coverageGraph: CoverageGraphData = {
+  nodes: [
+    { id: "asset-1", type: "root_domain", label: "acme.com", status: "verified", tested: true, findings: 0 },
+    {
+      id: "asset-2",
+      type: "subdomain",
+      label: "www.acme.com",
+      parent_id: "asset-1",
+      status: "vulnerable",
+      tested: true,
+      findings: 1,
+    },
+    {
+      id: "asset-6",
+      type: "subdomain",
+      label: "admin.acme.com",
+      parent_id: "asset-1",
+      status: "vulnerable",
+      tested: true,
+      findings: 1,
+    },
+    { id: "asset-7", type: "ip", label: "203.0.113.10", status: "verified", tested: true, findings: 0 },
+    {
+      id: "asset-10",
+      type: "service",
+      label: "203.0.113.10:443 · nginx/1.24.0",
+      parent_id: "asset-7",
+      status: "verified",
+      tested: true,
+      findings: 0,
+    },
+    {
+      id: "asset-12",
+      type: "app",
+      label: "https://www.acme.com",
+      parent_id: "asset-2",
+      status: "verified",
+      tested: true,
+      findings: 0,
+    },
+    {
+      id: "asset-13",
+      type: "app",
+      label: "https://admin.acme.com",
+      parent_id: "asset-6",
+      status: "vulnerable",
+      tested: true,
+      findings: 1,
+    },
+    {
+      id: "asset-17",
+      type: "endpoint",
+      label: "https://admin.acme.com/login",
+      parent_id: "asset-13",
+      status: "vulnerable",
+      tested: true,
+      findings: 1,
+    },
+    {
+      id: "asset-18",
+      type: "endpoint",
+      label: "https://www.acme.com/search",
+      parent_id: "asset-12",
+      status: "discovered",
+      tested: false,
+      findings: 0,
+    },
+  ],
+  edges: [
+    { source: "asset-1", target: "asset-2" },
+    { source: "asset-1", target: "asset-6" },
+    { source: "asset-7", target: "asset-10" },
+    { source: "asset-2", target: "asset-12" },
+    { source: "asset-6", target: "asset-13" },
+    { source: "asset-13", target: "asset-17" },
+    { source: "asset-12", target: "asset-18" },
+  ],
+  total: 9,
+  tested: 8,
+  vulnerable: 4,
+  untested: 1,
+};
+
+// ── Agent runtime / repeatable performance baseline ─────────────────────────
+export const taskRoundCosts: TaskRoundCosts = {
+  unit: "tokens",
+  workers: [
+    {
+      worker: "planner",
+      rounds: 6,
+      tool_calls: 5,
+      tool_errors: 0,
+      input_tokens: 18400,
+      output_tokens: 2380,
+      cache_read_tokens: 12100,
+      cache_write_tokens: 1600,
+    },
+    {
+      worker: "worker-web-1",
+      rounds: 11,
+      tool_calls: 28,
+      tool_errors: 2,
+      input_tokens: 42200,
+      output_tokens: 6840,
+      cache_read_tokens: 31900,
+      cache_write_tokens: 4200,
+    },
+    {
+      worker: "worker-api-1",
+      rounds: 8,
+      tool_calls: 19,
+      tool_errors: 1,
+      input_tokens: 29700,
+      output_tokens: 4910,
+      cache_read_tokens: 20800,
+      cache_write_tokens: 2700,
+    },
+  ],
+  total: {
+    worker: "all",
+    rounds: 25,
+    tool_calls: 52,
+    tool_errors: 3,
+    input_tokens: 90300,
+    output_tokens: 14130,
+    cache_read_tokens: 64800,
+    cache_write_tokens: 8500,
+  },
+};
+
+export const agentEvents: AgentEvent[] = [
+  {
+    id: 101,
+    node_id: 1,
+    agent: "mainagent",
+    event_type: "turn_started",
+    payload: { objective: "确认后台权限边界与敏感数据访问链路" },
+    created_at: T("2026-07-26T03:30:00Z"),
+  },
+  {
+    id: 102,
+    node_id: 1,
+    agent: "planner",
+    event_type: "prompt_assembled",
+    payload: { working_set_version: 7, catalog_tools: 14, loaded_tools: 4 },
+    input_tokens: 3210,
+    cache_read_tokens: 2410,
+    created_at: T("2026-07-26T03:30:02Z"),
+  },
+  {
+    id: 103,
+    node_id: 2,
+    agent: "worker-web-1",
+    event_type: "intent_claimed",
+    payload: { intent_id: "i-2", lease_seconds: 120, resource_key: "asset:admin.acme.com" },
+    created_at: T("2026-07-26T03:31:10Z"),
+  },
+  {
+    id: 104,
+    node_id: 2,
+    agent: "worker-web-1",
+    event_type: "tool_called",
+    payload: { tool: "http_request", target: "https://admin.acme.com/login", side_effect: "read" },
+    created_at: T("2026-07-26T03:32:04Z"),
+  },
+  {
+    id: 105,
+    node_id: 2,
+    agent: "worker-web-1",
+    event_type: "tool_result",
+    payload: { tool: "http_request", status: 200, artifact_ref: "artifact:sha256:7f34-demo" },
+    created_at: T("2026-07-26T03:32:05Z"),
+  },
+  {
+    id: 106,
+    node_id: 2,
+    agent: "worker-web-1",
+    event_type: "artifact_created",
+    payload: { artifact_id: "artifact:sha256:7f34-demo", mime: "application/http", lines: 42 },
+    created_at: T("2026-07-26T03:32:05Z"),
+  },
+  {
+    id: 107,
+    node_id: 3,
+    agent: "worker-api-1",
+    event_type: "resource_conflict_wait",
+    payload: { resource_key: "credential:demo-admin", blocked_by: "worker-web-1", wait_ms: 840 },
+    created_at: T("2026-07-26T03:33:16Z"),
+  },
+  {
+    id: 108,
+    node_id: 2,
+    agent: "worker-web-1",
+    event_type: "summary_created",
+    payload: { working_set_version: 8, new_facts: 2, artifact_refs: ["artifact:sha256:7f34-demo"] },
+    output_tokens: 460,
+    created_at: T("2026-07-26T03:34:40Z"),
+  },
+  {
+    id: 109,
+    node_id: 2,
+    agent: "mainagent",
+    event_type: "working_set_restored",
+    payload: { version: 8, content_hash: "sha256:98d1-demo" },
+    created_at: T("2026-07-26T03:35:01Z"),
+  },
+  {
+    id: 110,
+    node_id: 2,
+    agent: "mainagent",
+    event_type: "turn_finished",
+    payload: { status: "evidence_collected", confirmed_findings: 1 },
+    input_tokens: 4280,
+    output_tokens: 720,
+    cache_read_tokens: 3160,
+    created_at: T("2026-07-26T03:35:28Z"),
+  },
+];
+
+export function operationsDashboard(_taskId: string): TaskOperationsDashboard {
+  return {
+    task_id: 1,
+    baseline: {
+      schema_version: "tsecbenchmark/v1",
+      task_id: 1,
+      status: "running",
+      repeatable: true,
+      time_to_first_confirmed_fact_seconds: 38,
+      time_to_first_evidence_fact_seconds: 64,
+      time_to_first_confirmed_finding_seconds: 412,
+      results: {
+        confirmed_facts: 14,
+        negative_results: 9,
+        evidence_backed_facts: 12,
+        confirmed_findings: 3,
+        evidence_backed_findings: 3,
+        artifacts: 21,
+      },
+      intents: {
+        total: 18,
+        attempts: 21,
+        repeated_attempts: 3,
+        duplicate_intents: 1,
+        zero_yield_intents: 4,
+        duplicate_intent_rejections: 2,
+        zero_yield_scope_rejections: 1,
+      },
+      coverage: { total: 18, verified: 14, vulnerable: 4, verified_rate: 0.778, vulnerable_rate: 0.222 },
+      usage: taskRoundCosts.total,
+      efficiency: {
+        tool_error_rate: 0.058,
+        duplicate_intent_rate: 0.056,
+        zero_yield_intent_rate: 0.222,
+        evidence_coverage_rate: 0.882,
+        cache_read_rate: 0.621,
+        confirmed_results_per_1k_input_tokens: 0.188,
+        input_tokens_per_finding: 30100,
+        tool_calls_per_finding: 17.3,
+      },
+    },
+    costs: taskRoundCosts,
+    events: agentEvents,
+    event_counts: {
+      turn_started: 1,
+      prompt_assembled: 1,
+      intent_claimed: 1,
+      tool_called: 1,
+      tool_result: 1,
+      artifact_created: 1,
+      resource_conflict_wait: 1,
+      summary_created: 1,
+      working_set_restored: 1,
+      turn_finished: 1,
+    },
+    working_set: {
+      id: 8,
+      version: 8,
+      schema_version: 1,
+      content_hash: "sha256:98d1-demo",
+      source_event_id: 108,
+      created_at: T("2026-07-26T03:34:40Z"),
+      fixed: {
+        objective: "获得后台访问权限，并用最小化证据确认敏感数据读取风险",
+        authorization_scope: ["*.acme.com", "203.0.113.0/24"],
+        constraints: ["禁止破坏性写入", "禁止访问范围外目标", "真实凭据不得写入 transcript"],
+        risk_policy: ["同一账号操作串行", "高风险工具需审批", "基础设施容器只读"],
+      },
+      sliding: {
+        recent_intents: ["i-2: 后台认证验证", "i-3: 用户接口枚举"],
+        pending_dependencies: ["i-3 waits for artifact:sha256:7f34-demo"],
+        recent_tool_errors: ["worker-api-1: HTTP 429, backoff 2s"],
+        pending_evidence: ["确认用户列表字段是否包含敏感信息"],
+        artifact_refs: ["artifact:sha256:7f34-demo"],
+      },
+    },
+    resource_leases: [
+      {
+        intent_id: 3,
+        owner: "worker-web-1",
+        resource_key: "credential:demo-admin",
+        mode: "exclusive",
+        lease_expires_at: T("2026-07-26T04:02:00Z"),
+      },
+    ],
+    projection: {
+      complete: true,
+      matches: true,
+      event_hash: "sha256:events-demo-8",
+      projection_hash: "sha256:events-demo-8",
+      event_nodes: 27,
+      projected_nodes: 27,
+      event_edges: 31,
+      projected_edges: 31,
+      event_anchors: 6,
+      projected_anchors: 6,
+    },
+  };
+}
+
+export function taskOverview(taskId: string): TaskOverview {
+  const task = getTask(taskId) ?? tasks[0];
+  const counts = { total: 0, open: 0, running: 0, blocked: 0 };
+  for (const i of intents) {
+    counts.total++;
+    if (i.state === "open") counts.open++;
+    else if (i.state === "running") counts.running++;
+    else if (i.state === "blocked") counts.blocked++;
+  }
+  return {
+    task,
+    engine_mode: task.engine_mode ?? "idle",
+    intents,
+    intent_counts: counts,
+    findings: findings.filter((finding) => finding.task_id === task.id),
+    costs: taskRoundCosts,
+  };
+}
+
 // ── Findings ─────────────────────────────────────────────────────────────────
 export const findings: Finding[] = [
   {
     id: "f-1",
     vulnclass: "SQL Injection",
     severity: "high",
+    status: "confirmed",
     summary: "www.acme.com/search q 参数存在报错型 SQL 注入",
     evidence: "GET /search?q=1' AND 1=CONVERT(int,@@version)-- → 返回 MSSQL 版本报错，可读库结构。",
+    report: `## 风险说明
+
+搜索接口将 \`q\` 参数直接拼接到数据库查询中。攻击者可构造报错型 SQL 表达式读取数据库版本、表结构及业务数据，影响范围为公开访问的搜索接口。
+
+## 复现步骤
+
+1. 请求 \`GET /search?q=normal\`，记录正常响应。
+2. 将参数替换为 \`1' AND 1=CONVERT(int,@@version)--\`。
+3. 响应返回包含数据库版本信息的类型转换错误，且错误随表达式变化稳定复现。
+
+## 证据引用
+
+- HTTP 交互：\`artifact:sha256:7f34-demo\`
+- 关联意图：\`i-2\`
+- 资产：\`https://www.acme.com/search\`
+
+## 修复建议
+
+使用参数化查询，禁止拼接用户输入；生产环境关闭详细数据库错误回显，并为搜索接口增加输入约束、异常监控与回归测试。`,
     intent_id: "i-2",
     task_id: "t-acme-web",
     task_description: "Acme 官网与后台外部渗透",
@@ -424,6 +796,7 @@ export const findings: Finding[] = [
     id: "f-2",
     vulnclass: "IDOR",
     severity: "high",
+    status: "in_progress",
     summary: "api.acme.com/v1/orders?id= 可越权读取他人订单",
     evidence: "将 id=1001 改为 id=1002 返回他人订单（含收货地址、手机号），无归属校验。",
     intent_id: "i-5",
@@ -436,6 +809,7 @@ export const findings: Finding[] = [
     id: "f-3",
     vulnclass: "Weak JWT",
     severity: "high",
+    status: "confirmed",
     summary: "API JWT 使用弱密钥、可离线爆破伪造",
     evidence: "HS256，密钥 'secret'，john 5 秒破解 → 可伪造任意 sub 越权。",
     task_id: "t-acme-api",
@@ -447,6 +821,7 @@ export const findings: Finding[] = [
     id: "f-4",
     vulnclass: "Reflected XSS",
     severity: "medium",
+    status: "pending",
     summary: "搜索页对 q 参数未转义，反射型 XSS",
     evidence: "q=<script>alert(document.domain)</script> 原样回显于结果标题。",
     task_id: "t-acme-web",
@@ -458,6 +833,7 @@ export const findings: Finding[] = [
     id: "f-5",
     vulnclass: "Exposed .git",
     severity: "medium",
+    status: "resolved",
     summary: "www.acme.com 暴露 .git 目录，可还原源码",
     evidence: "GET /.git/HEAD → 200；git-dumper 还原出后端源码与数据库连接串注释。",
     task_id: "t-acme-web",
@@ -469,6 +845,7 @@ export const findings: Finding[] = [
     id: "f-6",
     vulnclass: "Default Credentials",
     severity: "high",
+    status: "confirmed",
     summary: "admin.acme.com 后台默认口令 admin/admin123",
     evidence: "登录成功，进入管理后台，可管理用户与订单。",
     intent_id: "i-3",
@@ -481,6 +858,7 @@ export const findings: Finding[] = [
     id: "f-7",
     vulnclass: "Open Redirect",
     severity: "low",
+    status: "risk_accepted",
     summary: "登录后 next 参数任意跳转",
     evidence: "/login?next=https://evil.example 登录后 302 跳到外站。",
     task_id: "t-acme-web",
@@ -492,6 +870,7 @@ export const findings: Finding[] = [
     id: "f-8",
     vulnclass: "Missing Rate Limit",
     severity: "medium",
+    status: "pending",
     summary: "登录接口无速率限制，可暴力破解",
     evidence: "1000 次/分钟无锁定，无验证码。",
     task_id: "t-acme-web",
@@ -503,6 +882,7 @@ export const findings: Finding[] = [
     id: "f-9",
     vulnclass: "Verbose Error",
     severity: "low",
+    status: "ignored",
     summary: "API 500 返回堆栈，泄露路径与框架版本",
     evidence: "触发 500 返回 Node.js 堆栈，泄露绝对路径与依赖版本。",
     task_id: "t-acme-api",
@@ -514,6 +894,7 @@ export const findings: Finding[] = [
     id: "f-10",
     vulnclass: "Outdated Component",
     severity: "medium",
+    status: "pending",
     summary: "shop 使用存在已知 RCE 的老版本组件",
     evidence: "指纹识别到组件 v2.3.1，对应 CVE-2024-xxxx 反序列化 RCE。",
     task_id: "t-shop-pay",
@@ -1952,3 +2333,255 @@ export const spaceResults: SpaceSearchResult[] = [
     city: "Shanghai",
   },
 ];
+
+// ── Platform / RBAC demo ────────────────────────────────────────────────────
+export const permissionPoints: PermissionPoint[] = [
+  { key: "platform.user.read", description: "查看成员列表" },
+  { key: "platform.user.write", description: "创建 / 编辑成员" },
+  { key: "platform.user.role", description: "给成员分配平台角色" },
+  { key: "platform.role.read", description: "查看平台角色" },
+  { key: "platform.role.write", description: "创建 / 编辑平台角色" },
+  { key: "platform.settings.read", description: "查看系统设置" },
+  { key: "platform.settings.write", description: "修改系统设置" },
+  { key: "sec.intercept.read", description: "查看拦截规则与审批记录" },
+  { key: "sec.intercept.write", description: "编辑拦截规则" },
+  { key: "sec.intercept.decide", description: "审批拦截请求" },
+  { key: "sec.audit.read", description: "查看审计日志" },
+  { key: "sec.audit.export", description: "导出审计日志" },
+  { key: "sandbox.read", description: "查看沙箱主机 / 容器 / 出口范围" },
+  { key: "sandbox.write", description: "管理沙箱与出口范围" },
+  { key: "worklog.read", description: "查看流量 / 工具执行 / LLM 录制" },
+  { key: "worklog.write", description: "清理流量 / 工具执行 / LLM 录制" },
+  { key: "agent.read", description: "查看 Agent / MCP / Skill / 工具" },
+  { key: "agent.write", description: "管理 Agent / MCP / Skill / 工具" },
+  { key: "benchmark.read", description: "查看基准测试配置与题目" },
+  { key: "benchmark.run", description: "配置并执行基准测试" },
+  { key: "task.read", description: "查看任务 / 发现 / 资产" },
+  { key: "task.create", description: "创建任务" },
+  { key: "task.run", description: "运行 / 暂停任务" },
+  { key: "task.kill", description: "终止任务 / 干预执行" },
+];
+
+export const myProfile: MyProfile = {
+  user: {
+    id: 1,
+    username: "demo-admin",
+    display_name: "Demo Admin",
+    enabled: true,
+    is_builtin: true,
+  },
+  roles: ["admin"],
+  permissions: permissionPoints.map((permission) => permission.key),
+  scope: "global",
+  admin: true,
+};
+
+export const platformUsers: PlatformUser[] = [
+  {
+    id: 1,
+    username: "demo-admin",
+    display_name: "Demo Admin",
+    enabled: true,
+    is_builtin: true,
+    created_at: T("2026-07-01T08:00:00Z"),
+    roles: ["admin"],
+  },
+  {
+    id: 2,
+    username: "demo-auditor",
+    display_name: "安全审计员",
+    enabled: true,
+    is_builtin: false,
+    created_at: T("2026-07-15T10:20:00Z"),
+    roles: ["auditor"],
+  },
+];
+
+export const platformRoles: PlatformRole[] = [
+  { id: 1, name: "admin", description: "系统内置：全量权限", scope: "all", is_system: true, perm_count: 0 },
+  { id: 2, name: "operator", description: "任务与平台操作员", scope: "all", is_system: true, perm_count: 22 },
+  { id: 3, name: "auditor", description: "审计与只读审查", scope: "all", is_system: true, perm_count: 8 },
+  { id: 4, name: "viewer", description: "只读查看", scope: "all", is_system: true, perm_count: 7 },
+];
+
+export const auditLogs: AuditLogEntry[] = [
+  {
+    id: 1,
+    actor: "demo-admin",
+    category: "task",
+    action: "task.start",
+    result: "success",
+    message: "启动示例任务 t-acme-web",
+    ip: "192.0.2.10",
+    created_at: T("2026-07-26T03:30:00Z"),
+  },
+  {
+    id: 2,
+    actor: "worker-web-1",
+    category: "sandbox",
+    action: "container.inspect",
+    result: "success",
+    message: "只读检查受管沙箱容器",
+    ip: "192.0.2.20",
+    created_at: T("2026-07-26T03:32:05Z"),
+  },
+  {
+    id: 3,
+    actor: "worker-api-1",
+    category: "sandbox",
+    action: "container.stop",
+    result: "denied",
+    message: "拒绝管理受保护的 PostgreSQL 基础设施容器",
+    ip: "192.0.2.20",
+    created_at: T("2026-07-26T03:33:12Z"),
+  },
+];
+
+// ── Sandbox demo: managed workloads are controllable; infrastructure is not ─
+export const sandboxHosts: SandboxHost[] = [
+  {
+    id: "1",
+    name: "Demo Sandbox Host",
+    addr: "tcp://sandbox.demo.internal:2376",
+    description: "隔离测试节点；基础设施容器仅查看",
+    created_at: T("2026-07-20T09:00:00Z"),
+  },
+];
+
+export const sandboxContainers: SandboxContainer[] = [
+  {
+    Id: "8f4d71d2a903demo-managed",
+    Names: ["/restxtra-sandbox-web-01"],
+    Image: "restxtra/sandbox-tools:2026.07",
+    ImageID: "sha256:demo-sandbox-image",
+    Command: "sleep infinity",
+    Created: 1785634200,
+    State: "running",
+    Status: "Up 2 hours (healthy)",
+    Labels: { "sandbox.managed": "true", "sandbox.task_id": "t-acme-web" },
+    Ports: [],
+  },
+  {
+    Id: "1db0a9427cb3demo-postgres",
+    Names: ["/restxtra-postgres"],
+    Image: "postgres:16-alpine",
+    ImageID: "sha256:demo-postgres-image",
+    Command: "postgres",
+    Created: 1784872800,
+    State: "running",
+    Status: "Up 10 days (healthy)",
+    Labels: { "restxtra.protected": "true", "com.docker.compose.service": "postgres" },
+    Ports: [{ IP: "127.0.0.1", PrivatePort: 5432, PublicPort: 5432, Type: "tcp" }],
+  },
+  {
+    Id: "c84eb21893b1demo-control",
+    Names: ["/restxtra-control-plane"],
+    Image: "restxtra/control-plane:demo",
+    ImageID: "sha256:demo-control-image",
+    Command: "/app/restxtra",
+    Created: 1784872800,
+    State: "running",
+    Status: "Up 10 days (healthy)",
+    Labels: { "restxtra.protected": "true", "com.docker.compose.service": "restxtra" },
+    Ports: [{ IP: "127.0.0.1", PrivatePort: 8787, PublicPort: 8787, Type: "tcp" }],
+  },
+];
+
+export const sandboxImages: DockerImage[] = [
+  {
+    Id: "sha256:demo-sandbox-image",
+    RepoTags: ["restxtra/sandbox-tools:2026.07"],
+    Size: 734003200,
+    Labels: { "sandbox.image": "true" },
+  },
+  {
+    Id: "sha256:demo-minimal-image",
+    RepoTags: ["alpine:3.22"],
+    Size: 8388608,
+    Labels: {},
+  },
+];
+
+export const sandboxEgress: SandboxEgress[] = [
+  {
+    id: "1",
+    kind: "domain",
+    value: "*.acme.com",
+    action: "allow",
+    note: "授权测试域",
+    enabled: true,
+    created_at: T("2026-07-20T09:10:00Z"),
+  },
+  {
+    id: "2",
+    kind: "cidr",
+    value: "203.0.113.0/24",
+    action: "allow",
+    note: "RFC 5737 示例测试网段",
+    enabled: true,
+    created_at: T("2026-07-20T09:12:00Z"),
+  },
+  {
+    id: "3",
+    kind: "cidr",
+    value: "0.0.0.0/0",
+    action: "deny",
+    note: "默认拒绝范围外流量",
+    enabled: true,
+    created_at: T("2026-07-20T09:15:00Z"),
+  },
+];
+
+
+// ── C2 演示数据 ──
+export const c2Listeners = [
+  { id: "1", name: "VPS-HTTP-C2", protocol: "http", host: "0.0.0.0", port: 8080, enabled: true, status: "running", profile_id: 1, options: {}, disguise: { decoy_type: "nginx_404", status_code: 404, server_header: "nginx/1.24.0" }, firewall: { basic_auth_enabled: false }, error: "", created_at: T("2026-08-20T08:00:00Z") },
+  { id: "2", name: "内网-HTTPS-C2", protocol: "https", host: "10.0.0.9", port: 8443, enabled: true, status: "running", profile_id: null, options: { tls_cert_file: "/etc/ssl/c2.crt" }, disguise: { decoy_type: "apache_404" }, firewall: { basic_auth_enabled: true, basic_auth_user: "admin", basic_auth_pass: "secret" }, error: "", created_at: T("2026-08-22T08:00:00Z") },
+] as const;
+
+export const c2Sessions = [
+  { id: "1", listener_id: "1", session_id: "S-9f3a1c2e", host: "192.168.1.20", remote_ip: "203.0.113.5", location: "中国 · 广东", hostname: "web-01", username: "root", uid: "0", gid: "0", os: "linux", arch: "amd64", pid: 8123, process_name: "./beacon", connection: "http", note: "边界 WEB 服务器", meta: "", status: "active", first_seen: T("2026-08-25T02:11:00Z"), last_seen: T("2026-08-25T02:11:00Z"), created_at: T("2026-08-25T02:11:00Z") },
+  { id: "2", listener_id: "1", session_id: "S-77b0d4aa", host: "10.0.1.15", remote_ip: "198.51.100.42", location: "中国 · 上海", hostname: "win-dc", username: "Administrator", uid: "", gid: "", os: "windows", arch: "amd64", pid: 4456, process_name: "beacon.exe", connection: "http", note: "内网域控", meta: "", status: "active", first_seen: T("2026-08-26T09:40:00Z"), last_seen: T("2026-08-26T09:41:00Z"), created_at: T("2026-08-26T09:40:00Z") },
+  { id: "3", listener_id: "2", session_id: "S-00c8f12b", host: "10.0.3.8", remote_ip: "203.0.113.99", location: "中国 · 北京", hostname: "kali-op", username: "kali", uid: "1000", gid: "1000", os: "linux", arch: "amd64", pid: 1201, process_name: "beacon", connection: "https", note: "测试机", meta: "", status: "lost", first_seen: T("2026-08-24T20:00:00Z"), last_seen: T("2026-08-25T10:00:00Z"), created_at: T("2026-08-24T20:00:00Z") },
+] as const;
+
+export const c2Profiles = [
+  { id: "1", name: "默认 HTTP Profile", kind: "http", config: { timing: { sleep_ms: 5000, jitter: 20 }, identity: { mode: "cookie", param: "SESSID" }, transform: { encoding: "base64" }, response: { server: "nginx/1.24.0", long_poll_secs: 25 } }, created_at: T("2026-08-20T08:00:00Z") },
+] as const;
+
+export const c2Plugins = [
+  { id: "1", name: "系统信息收集", description: "收集 OS/网络/用户基础信息", commands: ["postex info", "postex netstat", "postex whoami"], created_at: T("2026-08-21T08:00:00Z") },
+  { id: "2", name: "持久化侦察", description: "枚举计划任务/cron/systemd", commands: ["postex persist", "postex escalate"], created_at: T("2026-08-21T09:00:00Z") },
+] as const;
+
+export const c2AutoTasks = [
+  { id: "1", listener_id: 1, name: "新机上系统信息", enabled: true, order_idx: 1, target: "commands", workflow_id: null, commands: ["postex info", "postex users"], conditions: {}, created_at: T("2026-08-21T08:00:00Z") },
+] as const;
+
+export const c2Tunnels = [
+  { id: "1", session_id: "S-9f3a1c2e", kind: "socks5", bind_host: "127.0.0.1", bind_port: 1080, target: "", state: "running", error: "", created_at: T("2026-08-25T03:00:00Z") },
+] as const;
+
+export const c2Generated = [
+  { id: "1", name: "内网主机-A", listener_id: 1, os: "linux", arch: "amd64", format: "stageless", config: { server_url: "http://0.0.0.0:8080", session_id: "S-9f3a1c2e", interval: 5, jitter: 20, format: "stageless" }, artifact: "/data/c2artifacts/beacon_1_linux_amd64", size: 9182741, created_at: T("2026-08-25T02:10:00Z") },
+] as const;
+
+export const c2PostexModules = [
+  { id: "info", name: "系统信息", desc: "OS/主机名/用户/CPU/内存/磁盘", args: "" },
+  { id: "ps", name: "进程列表", desc: "目标主机进程列表", args: "" },
+  { id: "netstat", name: "网络连接", desc: "目标主机网络连接与监听端口", args: "" },
+  { id: "whoami", name: "当前用户", desc: "当前用户与权限（sudo/管理员）", args: "" },
+  { id: "users", name: "登录用户", desc: "已登录用户与本地账户", args: "" },
+  { id: "env", name: "环境变量", desc: "目标进程环境变量", args: "" },
+  { id: "ls", name: "目录列表", desc: "列出目录内容", args: "path（默认当前目录）" },
+  { id: "download", name: "下载文件", desc: "读取文件并以 base64 返回", args: "path" },
+  { id: "upload", name: "上传文件", desc: "将 base64 数据写入目标路径", args: "path base64" },
+  { id: "screenshot", name: "屏幕截图", desc: "捕获目标屏幕并 base64 返回", args: "" },
+  { id: "escalate", name: "提权侦察", desc: "sudo -l / 管理员状态 / SUID 枚举", args: "" },
+  { id: "persist", name: "持久化侦察", desc: "计划任务 / cron / systemd 枚举", args: "" },
+] as const;
+
+export const c2MockTasks = [
+  { id: "501", session_id: "S-9f3a1c2e", command: "postex info", request: {}, state: "completed", description: "postex:info", response: { output: JSON.stringify({ module: "info", result: { os: "linux", arch: "amd64", hostname: "web-01", os_version: 'PRETTY_NAME="Ubuntu 22.04"', kernel: "5.15.0" } }) }, created_at: T("2026-08-25T02:12:00Z"), sent_at: T("2026-08-25T02:12:00Z"), completed_at: T("2026-08-25T02:12:01Z") },
+  { id: "502", session_id: "S-9f3a1c2e", command: "shell id", request: {}, state: "completed", description: "", response: { output: "uid=0(root) gid=0(root) groups=0(root)", error: "" }, created_at: T("2026-08-25T02:13:00Z"), sent_at: T("2026-08-25T02:13:00Z"), completed_at: T("2026-08-25T02:13:01Z") },
+] as const;
