@@ -174,6 +174,8 @@ var builtinAgents = []builtinAgent{
 	{"auto", "Auto", "assistant", "平台操作助手：用工具管理任务(建/看/暂停/给提示)与资产，并可创建/修改 skill、自定义工具、MCP。", nil, false, nil},
 	// 渗透测试:内置「独立渗透」agent。经对话页驱动,一人从侦察到收尾走完整条渗透链,自己规划自己执行自己验证。默认开启交互式 shell。
 	{"pentest", "渗透测试", "assistant", "独立渗透 agent：一人从侦察→找攻击面→深入利用→验证→收尾走完整条链，自己规划、自己执行、自己对抗式验证。", nil, true, intp(0)},
+	// 后渗透：内置「后渗透专家」agent。经对话页驱动，用 C2 工具对已上线 beacon 会话做后渗透（信息收集/文件/提权/持久化侦察），边渗透边研判。
+	{"postex", "后渗透专家", "assistant", "C2 后渗透助手：列出 C2 会话并对其执行后渗透模块（info/ps/netstat/whoami/users/env/ls/download/upload/screenshot/escalate/persist），用 c2_task_result 取结果并研判，协助用户在已控主机上做后渗透。", nil, false, intp(0)},
 }
 
 // seedBuiltins inserts the fixed built-in agents and their variable catalog (idempotent).

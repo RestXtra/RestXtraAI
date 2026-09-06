@@ -25,6 +25,7 @@ func (s *Server) platformTools() []actool.CoreTool {
 		s.toolUpdateMCP(),
 		s.toolC2Postex(),
 		s.toolC2TaskResult(),
+		s.toolC2SessionList(),
 	}
 }
 
@@ -33,7 +34,7 @@ var platformToolKeys = []string{
 	"create_skill", "update_skill_file",
 	"create_custom_tool", "update_custom_tool",
 	"create_mcp", "update_mcp",
-	"c2_postex", "c2_task_result",
+	"c2_postex", "c2_task_result", "c2_session_list",
 }
 
 // ---- skills ----
@@ -363,6 +364,41 @@ func (s *Server) toolC2TaskResult() actool.CoreTool {
 				return actool.Errorf(fmt.Sprintf("任务 %d 不存在", tid)), nil
 			}
 			raw, _ := json.Marshal(foundTask)
+			return actool.Text(string(raw)), nil
+		},
+	)
+}
+
+// toolC2SessionList 让 AI agent 列出可用的 C2 会话，作为后渗透的目标清单。
+func (s *Server) toolC2SessionList() actool.CoreTool {
+	return wrTool("c2_session_list",
+		"列出当前所有 C2 会话（beacon 客户端），返回 session_id/hostname/os/内外网IP/状态/心跳，供后渗透选择目标。",
+		objSchema(map[string]any{}),
+		func(_ context.Context, _ json.RawMessage) (actool.Result, error) {
+			sessions, err := s.m.pg.ListC2Sessions(200)
+			if err != nil {
+				return actool.Errorf("查询失败: " + err.Error()), nil
+			}
+			type row struct {
+				SessionID string `json:"session_id"`
+				Hostname  string `json:"hostname"`
+				OS        string `json:"os"`
+				Arch      string `json:"arch"`
+				Host      string `json:"host"`
+				RemoteIP  string `json:"remote_ip"`
+				Username  string `json:"username"`
+				Status    string `json:"status"`
+				LastSeen  string `json:"last_seen"`
+			}
+			rows := make([]row, 0, len(sessions))
+			for _, s := range sessions {
+				rows = append(rows, row{
+					SessionID: s.SessionID, Hostname: s.Hostname, OS: s.OS, Arch: s.Arch,
+					Host: s.Host, RemoteIP: s.RemoteIP, Username: s.Username,
+					Status: s.Status, LastSeen: s.LastSeen.Format("2006-01-02 15:04:05"),
+				})
+			}
+			raw, _ := json.Marshal(map[string]any{"count": len(rows), "sessions": rows})
 			return actool.Text(string(raw)), nil
 		},
 	)
