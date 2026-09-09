@@ -246,6 +246,8 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		wireTools(m.pg, domainReg, &s.toolCatalog) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
 		seedPrompts(m.pg)                          // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
 		s.seedOrchestrationTools()                 // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
+		s.seedOpenSourceMCPServers()               // P6 开源 IR MCP 服务器配置(env 路径,禁用态,可一键启用)
+		s.seedIRWorkflowTemplates()                // P6 缝② soc-autopilot playbook → workflow DAG 模板
 		s.seedPythonInterpreter()                  // 自定义脚本工具:开机检测 python 解释器入库(仅空时)
 		go newScheduler(s).Run(s.ctx)              // P3 触发器调度(定时/finding/目标事件),仅自定义 agent
 		s.startBatchScheduler()                    // 批量任务队列后台排空(骨架执行器)
@@ -788,6 +790,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/audit/stats", s.rbac("sec.audit.read", s.platformAuditStats))
 	mux.HandleFunc("POST /api/audit/gc", s.rbac("sec.audit.export", s.platformAuditGC))
 	mux.HandleFunc("POST /api/audit/clear", s.rbac("sec.audit.export", s.platformAuditClear))
+	mux.HandleFunc("GET /api/audit/verify", s.rbac("sec.audit.export", s.platformAuditVerify))
 	// 攻击模式库 / playbook
 	mux.HandleFunc("GET /api/playbook/patterns", s.rbac("playbook.read", s.playbookListPatterns))
 	mux.HandleFunc("POST /api/playbook/patterns", s.rbac("playbook.write", s.playbookCreatePattern))
@@ -846,6 +849,21 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/webshell/{id}", s.webshellDelete)
 	mux.HandleFunc("DELETE /api/webshell", s.webshellDeleteBatch)
 	mux.HandleFunc("POST /api/webshell/test", s.webshellTest)
+	mux.HandleFunc("GET /api/connections", s.connectionList)
+	mux.HandleFunc("POST /api/connections", s.connectionSave)
+	mux.HandleFunc("DELETE /api/connections/{id}", s.connectionDelete)
+	mux.HandleFunc("DELETE /api/connections", s.connectionDeleteBatch)
+	mux.HandleFunc("POST /api/connections/test", s.connectionTest)
+	mux.HandleFunc("GET /api/connections/approvals", s.connApprovalsList)
+	mux.HandleFunc("POST /api/connections/approvals/{id}/{action}", s.connApprovalDecide)
+	mux.HandleFunc("GET /api/connections/{id}/actions", s.connActionsList)
+	mux.HandleFunc("GET /api/incidents", s.incidentsList)
+	mux.HandleFunc("POST /api/incidents", s.incidentsCreate)
+	mux.HandleFunc("GET /api/incidents/{id}", s.incidentsGet)
+	mux.HandleFunc("PATCH /api/incidents/{id}", s.incidentsUpdate)
+	mux.HandleFunc("DELETE /api/incidents/{id}", s.incidentsDelete)
+	mux.HandleFunc("POST /api/incidents/{id}/respond", s.incidentsRespond)
+	mux.HandleFunc("POST /api/incidents/webhook", s.incidentsWebhook)
 	mux.HandleFunc("GET /api/c2", s.c2List)
 	mux.HandleFunc("POST /api/c2/listeners", s.c2SaveListener)
 	mux.HandleFunc("DELETE /api/c2/listeners/{id}", s.c2DeleteListener)

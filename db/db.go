@@ -176,6 +176,8 @@ var builtinAgents = []builtinAgent{
 	{"pentest", "渗透测试", "assistant", "独立渗透 agent：一人从侦察→找攻击面→深入利用→验证→收尾走完整条链，自己规划、自己执行、自己对抗式验证。", nil, true, intp(0)},
 	// 后渗透：内置「后渗透专家」agent。经对话页驱动，用 C2 工具对已上线 beacon 会话做后渗透（信息收集/文件/提权/持久化侦察），边渗透边研判。
 	{"postex", "后渗透专家", "assistant", "C2 后渗透助手：列出 C2 会话并对其执行后渗透模块（info/ps/netstat/whoami/users/env/ls/download/upload/screenshot/escalate/persist），用 c2_task_result 取结果并研判，协助用户在已控主机上做后渗透。", nil, false, intp(0)},
+	// 应急响应：内置「应急响应专家」agent（蓝队）。经对话页驱动，基于事件简报驱动受管连接完成研判→排查→遏制→取证→报告的全流程 IR。遏制动作走人工审批。
+	{"responder", "应急响应", "assistant", "应急响应专家：基于事件简报（告警+零散信息）驱动受管连接（SSH/WebShell 等）完成研判→排查→遏制→取证→报告的全流程 IR；遏制动作默认走人工审批。", nil, false, intp(0)},
 }
 
 // seedBuiltins inserts the fixed built-in agents and their variable catalog (idempotent).

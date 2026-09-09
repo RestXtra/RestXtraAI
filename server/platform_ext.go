@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/RestXtra/RestXtraAI/db"
+	"golang.org/x/crypto/ssh"
 )
 
 // 平台扩展能力：工作空间（文件浏览）、知识库、WebShell、C2。
@@ -277,29 +278,22 @@ func (s *Server) webshellDeleteBatch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"deleted": n})
 }
 
-// webshellTest 通过 HTTP 向 webshell 发一条 ping 命令验证连通性。
-func (s *Server) webshellTest(w http.ResponseWriter, r *http.Request) {
-	var c db.WebshellConn
-	if err := decode(r, &c); err != nil {
-		writeErr(w, 400, err.Error())
-		return
+// webshellExec 向 webshell 发送一条任意命令，返回原始输出 + HTTP 状态码。
+func webshellExec(host, shellType, password, headers, cmd string) (string, int, error) {
+	if strings.TrimSpace(host) == "" {
+		return "", 0, fmt.Errorf("URL 必填")
 	}
-	if strings.TrimSpace(c.URL) == "" {
-		writeErr(w, 400, "URL 必填")
-		return
-	}
-	marker := "RESTXTRA_WS_OK"
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := &http.Client{Timeout: 20 * time.Second}
 	var body io.Reader
 	var req *http.Request
 	var err error
-	u := c.URL
-	switch c.Type {
+	u := host
+	switch shellType {
 	case "php", "jsp", "aspx", "asp":
 		q := url.Values{}
-		q.Set("cmd", "echo "+marker)
-		if c.Password != "" {
-			q.Set("pwd", c.Password)
+		q.Set("cmd", cmd)
+		if password != "" {
+			q.Set("pwd", password)
 		}
 		sep := "?"
 		if strings.Contains(u, "?") {
@@ -307,30 +301,219 @@ func (s *Server) webshellTest(w http.ResponseWriter, r *http.Request) {
 		}
 		req, err = http.NewRequest(http.MethodGet, u+sep+q.Encode(), nil)
 	default: // generic：JSON POST
-		payload, _ := json.Marshal(map[string]string{"cmd": "echo " + marker})
+		payload, _ := json.Marshal(map[string]string{"cmd": cmd})
 		body = strings.NewReader(string(payload))
 		req, err = http.NewRequest(http.MethodPost, u, body)
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if err != nil {
-		writeErr(w, 400, err.Error())
-		return
+		return "", 0, err
 	}
-	// 自定义头
-	var headers map[string]string
-	_ = json.Unmarshal([]byte(c.Headers), &headers)
-	for k, v := range headers {
+	var hdr map[string]string
+	_ = json.Unmarshal([]byte(headers), &hdr)
+	for k, v := range hdr {
 		req.Header.Set(k, v)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 65536))
-	ok := strings.Contains(string(b), marker)
-	writeJSON(w, 200, map[string]any{"ok": ok, "status": resp.StatusCode, "snippet": firstLine(string(b), 200)})
+	return string(b), resp.StatusCode, nil
+}
+
+// testWebshellConn 通过 HTTP 向 webshell 发一条 ping 命令验证连通性。
+func testWebshellConn(host, shellType, password, headers string) map[string]any {
+	marker := "RESTXTRA_WS_OK"
+	out, status, err := webshellExec(host, shellType, password, headers, "echo "+marker)
+	if err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	ok := strings.Contains(out, marker)
+	return map[string]any{"ok": ok, "status": status, "snippet": firstLine(out, 200)}
+}
+
+// webshellTest 通过 HTTP 向 webshell 发一条 ping 命令验证连通性。
+func (s *Server) webshellTest(w http.ResponseWriter, r *http.Request) {
+	var c db.WebshellConn
+	if err := decode(r, &c); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, testWebshellConn(c.URL, c.Type, c.Password, c.Headers))
+}
+
+// ---------- Connection（统一连接管理）----------
+
+func (s *Server) connectionList(w http.ResponseWriter, r *http.Request) {
+	kind := r.URL.Query().Get("kind")
+	conns, err := s.m.pg.ListConnections(kind)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"connections": conns})
+}
+
+func (s *Server) connectionSave(w http.ResponseWriter, r *http.Request) {
+	var c db.Connection
+	if err := decode(r, &c); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if strings.TrimSpace(c.Name) == "" {
+		writeErr(w, 400, "名称必填")
+		return
+	}
+	if c.Kind == "" {
+		c.Kind = "webshell"
+	}
+	id, err := s.m.pg.SaveConnection(&c)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": id})
+}
+
+func (s *Server) connectionDelete(w http.ResponseWriter, r *http.Request) {
+	id, _ := pathInt(r, "id")
+	if err := s.m.pg.DeleteConnection(id); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": id})
+}
+
+func (s *Server) connectionDeleteBatch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+		All bool    `json:"all"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	var n int64
+	var err error
+	if req.All {
+		n, err = s.m.pg.ClearConnections()
+	} else {
+		n, err = s.m.pg.DeleteConnections(req.IDs)
+	}
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": n})
+}
+
+// testSSH 通过 x/crypto/ssh 登录并执行标记命令验证连通性（无需新增依赖）。
+func testSSH(c db.Connection) map[string]any {
+	if c.Host == "" {
+		return map[string]any{"ok": false, "error": "host 必填"}
+	}
+	port := c.Port
+	if port == 0 {
+		port = 22
+	}
+	user := c.Username
+	if user == "" {
+		user = "root"
+	}
+	var cfg struct {
+		PrivateKey string `json:"private_key"`
+	}
+	_ = json.Unmarshal(c.Config, &cfg)
+	auth := []ssh.AuthMethod{}
+	if cfg.PrivateKey != "" {
+		signer, err := ssh.ParsePrivateKey([]byte(cfg.PrivateKey))
+		if err != nil {
+			return map[string]any{"ok": false, "error": "私钥解析失败: " + err.Error()}
+		}
+		auth = append(auth, ssh.PublicKeys(signer))
+	}
+	if c.Secret != "" {
+		auth = append(auth, ssh.Password(c.Secret))
+	}
+	if len(auth) == 0 {
+		return map[string]any{"ok": false, "error": "未配置密码或私钥"}
+	}
+	sshCfg := &ssh.ClientConfig{
+		User:            user,
+		Auth:            auth,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", c.Host, port), sshCfg)
+	if err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	defer client.Close()
+	sess, err := client.NewSession()
+	if err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	defer sess.Close()
+	out, err := sess.CombinedOutput("echo RESTXTRA_SSH_OK")
+	if err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	ok := strings.Contains(string(out), "RESTXTRA_SSH_OK")
+	return map[string]any{"ok": ok, "output": firstLine(string(out), 200)}
+}
+
+// rdpTestResult 通过 grdp NLA auth-only 验证 RDP 凭据。
+func rdpTestResult(c db.Connection) map[string]any {
+	if c.Host == "" {
+		return map[string]any{"ok": false, "error": "host 必填"}
+	}
+	if err := rdpCredentialCheck(c.Host, c.Port, c.Username, c.Secret); err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	return map[string]any{"ok": true}
+}
+
+// telnetTestResult 通过 go-telnet 连接并回显标记验证连通性。
+func telnetTestResult(c db.Connection) map[string]any {
+	if c.Host == "" {
+		return map[string]any{"ok": false, "error": "host 必填"}
+	}
+	out, err := telnetRun(c.Host, c.Port, "echo RESTXTRA_TELNET_OK", 6*time.Second)
+	if err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	ok := strings.Contains(out, "RESTXTRA_TELNET_OK")
+	return map[string]any{"ok": ok, "snippet": firstLine(out, 200)}
+}
+
+// connectionTest 按 kind 验证连接可用性。webshell 走 HTTP 探测；ssh 走 x/crypto/ssh 登录；
+// rdp 走 grdp NLA 验凭据；telnet 走 go-telnet 连接（见 docs/connection-management-design.md §15）。
+func (s *Server) connectionTest(w http.ResponseWriter, r *http.Request) {
+	var c db.Connection
+	if err := decode(r, &c); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	switch c.Kind {
+	case "ssh":
+		writeJSON(w, 200, testSSH(c))
+	case "rdp":
+		writeJSON(w, 200, rdpTestResult(c))
+	case "telnet":
+		writeJSON(w, 200, telnetTestResult(c))
+	default: // webshell
+		var cfg struct {
+			Type    string `json:"type"`
+			Headers string `json:"headers"`
+		}
+		_ = json.Unmarshal(c.Config, &cfg)
+		if cfg.Headers == "" {
+			cfg.Headers = "{}"
+		}
+		writeJSON(w, 200, testWebshellConn(c.Host, cfg.Type, c.Secret, cfg.Headers))
+	}
 }
 
 // ---------- C2 ----------

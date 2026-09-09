@@ -160,6 +160,130 @@ func (d *DB) ClearWebshells() (int64, error) {
 	return res.RowsAffected()
 }
 
+// ---------- Connection（统一连接管理）----------
+
+type Connection struct {
+	ID        int64           `json:"id"`
+	Name      string          `json:"name"`
+	Kind      string          `json:"kind"` // webshell|ssh|rdp|telnet|agent
+	Host      string          `json:"host"`
+	Port      int             `json:"port"`
+	Username  string          `json:"username"`
+	Config    json.RawMessage `json:"config"`
+	Secret    string          `json:"-"`
+	SecretSet bool            `json:"secret_set"`
+	Note      string          `json:"note"`
+	Enabled   bool            `json:"enabled"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+func (d *DB) ListConnections(kind string) ([]*Connection, error) {
+	q := `SELECT id,name,COALESCE(kind,'webshell'),COALESCE(host,''),COALESCE(port,0),COALESCE(username,''),
+		COALESCE(config,'{}'),COALESCE(secret,''),COALESCE(note,''),enabled,created_at,updated_at
+		FROM connections`
+	args := []interface{}{}
+	if kind != "" {
+		q += ` WHERE kind=$1`
+		args = append(args, kind)
+	}
+	q += ` ORDER BY id`
+	rows, err := d.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Connection
+	for rows.Next() {
+		var c Connection
+		var cfg []byte
+		if err := rows.Scan(&c.ID, &c.Name, &c.Kind, &c.Host, &c.Port, &c.Username, &cfg, &c.Secret, &c.Note, &c.Enabled, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if len(cfg) == 0 {
+			cfg = []byte("{}")
+		}
+		c.Config = cfg
+		c.Secret, err = d.RevealSecret(c.Secret)
+		if err != nil {
+			return nil, err
+		}
+		c.SecretSet = c.Secret != ""
+		out = append(out, &c)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) GetConnection(id int64) (*Connection, error) {
+	var c Connection
+	var cfg []byte
+	err := d.QueryRow(`SELECT id,name,COALESCE(kind,'webshell'),COALESCE(host,''),COALESCE(port,0),COALESCE(username,''),
+		COALESCE(config,'{}'),COALESCE(secret,''),COALESCE(note,''),enabled,created_at,updated_at
+		FROM connections WHERE id=$1`, id).
+		Scan(&c.ID, &c.Name, &c.Kind, &c.Host, &c.Port, &c.Username, &cfg, &c.Secret, &c.Note, &c.Enabled, &c.CreatedAt, &c.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if len(cfg) == 0 {
+		cfg = []byte("{}")
+	}
+	c.Config = cfg
+	c.Secret, err = d.RevealSecret(c.Secret)
+	if err != nil {
+		return nil, err
+	}
+	c.SecretSet = c.Secret != ""
+	return &c, nil
+}
+
+func (d *DB) SaveConnection(c *Connection) (int64, error) {
+	secret, err := d.ProtectSecret(c.Secret)
+	if err != nil {
+		return 0, err
+	}
+	cfg := c.Config
+	if len(cfg) == 0 {
+		cfg = []byte("{}")
+	}
+	if c.Kind == "" {
+		c.Kind = "webshell"
+	}
+	if c.ID == 0 {
+		var id int64
+		err = d.QueryRow(`INSERT INTO connections(name,kind,host,port,username,config,secret,note,enabled)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+			c.Name, c.Kind, c.Host, c.Port, c.Username, cfg, secret, c.Note, c.Enabled).Scan(&id)
+		return id, err
+	}
+	_, err = d.Exec(`UPDATE connections SET name=$1,kind=$2,host=$3,port=$4,username=$5,config=$6,secret=$7,note=$8,enabled=$9,updated_at=now() WHERE id=$10`,
+		c.Name, c.Kind, c.Host, c.Port, c.Username, cfg, secret, c.Note, c.Enabled, c.ID)
+	return c.ID, err
+}
+
+func (d *DB) DeleteConnection(id int64) error {
+	_, err := d.Exec(`DELETE FROM connections WHERE id=$1`, id)
+	return err
+}
+
+func (d *DB) DeleteConnections(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res, err := d.Exec(`DELETE FROM connections WHERE id IN (`+idList(ids)+`)`, idsToArgs(ids)...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (d *DB) ClearConnections() (int64, error) {
+	res, err := d.Exec(`DELETE FROM connections`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // ---------- C2 ----------
 
 type C2Listener struct {

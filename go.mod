@@ -8,12 +8,15 @@ replace github.com/Autumn-27/norma => ./third_party/norma
 
 require (
 	github.com/Autumn-27/norma v0.2.7
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/lqqyt2423/go-mitmproxy v1.9.2
 	github.com/miekg/dns v1.1.72
 	github.com/projectdiscovery/dnsx v1.2.3
+	github.com/reiver/go-telnet v0.0.0-20250617105250-7da9ad70a2b2
+	github.com/x90skysn3k/grdp v1.0.4
 	golang.org/x/crypto v0.54.0
 	golang.org/x/net v0.56.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -21,7 +24,6 @@ require (
 )
 
 require (
-	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
@@ -37,6 +39,7 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
+	github.com/lunixbochs/struc v0.0.0-20241101090106-8d528fa2c543 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -45,6 +48,7 @@ require (
 	github.com/projectdiscovery/cdncheck v1.2.13 // indirect
 	github.com/projectdiscovery/retryabledns v1.0.111 // indirect
 	github.com/projectdiscovery/utils v0.7.3 // indirect
+	github.com/reiver/go-oi v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d // indirect
 	github.com/satori/go.uuid v1.2.0 // indirect

@@ -745,6 +745,10 @@ func (s *Server) seedOrchestrationTools() {
 		if t.Name() == "c2_postex" || t.Name() == "c2_task_result" || t.Name() == "c2_session_list" {
 			agents, _ = json.Marshal([]string{"auto", "worker", "postex"})
 		}
+		// 连接管理工具绑定到 worker/postex/responder：agent 可经受管连接执行命令。
+		if t.Name() == "conn_list" || t.Name() == "conn_exec" || t.Name() == "conn_contain" {
+			agents, _ = json.Marshal([]string{"auto", "worker", "postex", "responder"})
+		}
 		_ = s.m.PG().SeedTool(t.Name(), t.Description(), schema, agents)
 	}
 	s.refreshBuiltinToolSchemas()
@@ -752,6 +756,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.seedPlannerDefaultBindings()
 	s.seedAutoReportFindingBinding()
 	s.seedC2AgentBindings()
+	s.seedConnAgentBindings()
 	// 注：pentest 的默认工具绑定无需迁移——BuiltinToolSeeds 在全新初始化时就把
 	// list_assets/insert_assets/report_finding/list_findings/list_companies 连同
 	// pentest 一起 seed 好了（项目尚无旧库，不做迁移）。
@@ -822,7 +827,27 @@ func (s *Server) seedC2AgentBindings() {
 	s.toolCatalog.Invalidate()
 }
 
-// seedPlannerDefaultBindings adds "planner" to report_finding's binding ONCE
+// seedConnAgentBindings adds the conn_* (connection-management) + responder
+// investigation tools to the worker/auto/postex/responder agent bindings ONCE
+// for existing DBs, so agents can drive managed connections without a fresh init.
+func (s *Server) seedConnAgentBindings() {
+	const flag = "conn_agent_bindings_v2"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	connKeys := []string{"conn_list", "conn_exec", "conn_contain"}
+	for _, agentKey := range []string{"worker", "auto", "postex", "responder"} {
+		if err := s.m.pg.AddAgentToToolBinding(agentKey, connKeys); err != nil {
+			log.Printf("[conn] %s 绑定 conn 工具失败: %v", agentKey, err)
+			return
+		}
+	}
+	// responder 额外绑定调查/取证工具。
+	_ = s.m.pg.AddAgentToToolBinding("responder", []string{"search_knowledge", "list_assets", "insert_assets", "report_finding"})
+	_ = s.m.pg.SetSetting(flag, "true")
+	s.toolCatalog.Invalidate()
+}
+
 // (guarded by a settings flag), so existing DBs — whose report_finding row was
 // seeded as worker-only — also let the planner record findings. Fresh DBs already
 // get it via PlannerTools(); this only backfills without overriding a user unbind.

@@ -27,6 +27,8 @@ var platformPermissions = []permissionDef{
 	// 能力
 	{"cap.webshell.read", "使用 WebShell"},
 	{"cap.webshell.write", "管理 WebShell 会话"},
+	{"cap.connection.read", "查看连接管理（SSH / RDP / Telnet / WebShell）"},
+	{"cap.connection.write", "管理连接（新增 / 编辑 / 测试 / 删除）"},
 	{"cap.c2.read", "查看 C2 会话"},
 	{"cap.c2.write", "管理 C2 监听器与任务"},
 	{"cap.report.read", "生成 / 查看报告"},
@@ -72,6 +74,7 @@ var systemRoleDefs = map[string][]string{
 		"platform.settings.read", "platform.settings.write",
 		"sec.intercept.read", "sec.intercept.write", "sec.intercept.decide",
 		"cap.webshell.read", "cap.webshell.write",
+		"cap.connection.read", "cap.connection.write",
 		"cap.c2.read", "cap.c2.write",
 		"cap.report.read",
 		"cap.proxy.read", "cap.proxy.write",

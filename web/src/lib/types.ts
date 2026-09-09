@@ -982,6 +982,51 @@ export interface WebshellConn {
   enabled: boolean;
   created_at: string;
 }
+export interface Connection {
+  id: string;
+  name: string;
+  kind: string;
+  host: string;
+  port: number;
+  username: string;
+  config?: any;
+  secret?: string;
+  secret_set?: boolean;
+  note?: string;
+  enabled: boolean;
+  created_at: string;
+}
+export interface ConnAction {
+  id: string;
+  connection_id: string;
+  kind: string;
+  action: string;
+  command: string;
+  rationale: string;
+  state: string;
+  requested_by: string;
+  decided_by: string;
+  result: string;
+  created_at: string;
+  decided_at?: string;
+  executed_at?: string;
+  conn_name?: string;
+  conn_kind?: string;
+  conn_host?: string;
+}
+export interface Incident {
+  id: string;
+  title: string;
+  severity: string;
+  status: string;
+  source: string;
+  alert_info: string;
+  notes: string;
+  assets: string;
+  iocs: string;
+  task_id?: string;
+  created_at: string;
+}
 export interface C2Listener {
   id: string;
   name: string;

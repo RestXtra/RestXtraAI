@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"time"
 )
 
 // schemaMigrations keeps schema changes ordered and auditable. schema.sql is
@@ -361,6 +362,65 @@ ON CONFLICT (source_key) DO NOTHING`)
 				if _, err := tx.Exec(stmt); err != nil {
 					return err
 				}
+			}
+			return nil
+		},
+	},
+	{
+		Version: 15,
+		Name:    "audit_hash_chain",
+		Apply: func(tx *sql.Tx) error {
+			// 审计哈希链列(soc-autopilot 风格防篡改):每条审计的 hash 覆盖上一条 + 本条字段。
+			stmts := []string{
+				`ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS prev_hash TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS hash TEXT NOT NULL DEFAULT ''`,
+			}
+			for _, stmt := range stmts {
+				if _, err := tx.Exec(stmt); err != nil {
+					return err
+				}
+			}
+			// backfill: 给既有行按 id 顺序补 hash(老库升级不丢链)。
+			rows, err := tx.Query(`SELECT id, actor, category, action, result, message, ip, created_at, prev_hash, hash FROM audit_logs ORDER BY id`)
+			if err != nil {
+				return err
+			}
+			type row struct {
+				id      int64
+				actor   string
+				cat     string
+				action  string
+				result  string
+				message string
+				ip      string
+				ts      time.Time
+				prev    string
+				hash    string
+			}
+			var items []row
+			for rows.Next() {
+				var r row
+				if err := rows.Scan(&r.id, &r.actor, &r.cat, &r.action, &r.result, &r.message, &r.ip, &r.ts, &r.prev, &r.hash); err != nil {
+					rows.Close()
+					return err
+				}
+				items = append(items, r)
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			prev := ""
+			for _, r := range items {
+				if r.hash != "" {
+					prev = r.hash
+					continue
+				}
+				h := auditChainHash(prev, r.actor, r.cat, r.action, r.result, r.message, r.ip, r.ts)
+				if _, err := tx.Exec(`UPDATE audit_logs SET prev_hash=$2, hash=$3 WHERE id=$1`, r.id, prev, h); err != nil {
+					return err
+				}
+				prev = h
 			}
 			return nil
 		},

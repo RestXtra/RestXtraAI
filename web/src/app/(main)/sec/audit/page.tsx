@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { RefreshCwIcon, Trash2Icon } from "lucide-react";
+import { RefreshCwIcon, ShieldCheckIcon, Trash2Icon } from "lucide-react";
 
 import { PermissionGate } from "@/components/permission-gate";
 import { TablePagination } from "@/components/table-pagination";
@@ -74,6 +74,22 @@ export default function AuditPage() {
     }
   }
 
+  async function verifyChain() {
+    try {
+      const r = await api.auditVerify();
+      const c = r.check;
+      if (r.ok) {
+        alert(`审计哈希链完整 ✓（共 ${c.total} 条，链无断裂）`);
+      } else {
+        alert(
+          `审计链异常！共 ${c.total} 条，断裂 ${c.broken} 条，未链化 ${c.legacy} 条\n断裂 id：${c.broken_ids.join(", ") || "无"}`,
+        );
+      }
+    } catch (e) {
+      alert(`验证失败：${(e as Error).message}`);
+    }
+  }
+
   return (
     <PermissionGate perm="sec.audit.read">
       <div className="space-y-6 p-4 md:p-6">
@@ -85,6 +101,9 @@ export default function AuditPage() {
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={load}>
               <RefreshCwIcon className="size-4" /> 刷新
+            </Button>
+            <Button variant="outline" size="sm" onClick={verifyChain}>
+              <ShieldCheckIcon className="size-4" /> 验证哈希链
             </Button>
             <Button variant="outline" size="sm" onClick={gc}>
               <Trash2Icon className="size-4" /> 清理 90 天前

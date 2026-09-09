@@ -81,3 +81,20 @@ func (s *Server) platformAuditClear(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"removed": n})
 }
+
+// GET /api/audit/verify — walk the audit SHA-256 hash chain and report breaks
+// (tampered / deleted / reordered rows).
+func (s *Server) platformAuditVerify(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	check, err := pg.VerifyAuditChain()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"ok": check.Broken == 0 && check.Legacy == 0, "check": check,
+	})
+}

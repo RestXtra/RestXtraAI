@@ -745,7 +745,9 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     result     TEXT NOT NULL DEFAULT '',
     message    TEXT NOT NULL DEFAULT '',
     ip         TEXT NOT NULL DEFAULT '',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    prev_hash  TEXT NOT NULL DEFAULT '', -- 上一条审计的 hash(SHA-256 哈希链,防篡改)
+    hash       TEXT NOT NULL DEFAULT ''  -- 本条审计的 hash = sha256(prev_hash|fields|ts)
 );
 CREATE INDEX IF NOT EXISTS idx_audit_logs_time  ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor);
@@ -889,6 +891,74 @@ CREATE TABLE IF NOT EXISTS webshell_conns (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 统一连接管理：webshell / ssh / rdp / telnet / agent（agent 为未来代理会话占位）。
+-- webshell 作为 kind='webshell' 的一种纳入统一管理（见 docs/connection-management-design.md）。
+CREATE TABLE IF NOT EXISTS connections (
+    id         BIGSERIAL PRIMARY KEY,
+    name       TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'webshell', -- webshell|ssh|rdp|telnet|agent
+    host       TEXT NOT NULL DEFAULT '',          -- 主机/IP 或 webshell URL
+    port       INTEGER NOT NULL DEFAULT 0,
+    username   TEXT NOT NULL DEFAULT '',
+    config     JSONB NOT NULL DEFAULT '{}',       -- 类型相关配置（webshell:type/headers；ssh:private_key 等）
+    secret     TEXT NOT NULL DEFAULT '',          -- 加密存储：密码 / 私钥密码
+    note       TEXT NOT NULL DEFAULT '',
+    enabled    BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_connections_kind ON connections(kind);
+
+-- 历史 webshell_conns 数据一次性迁入 connections(kind='webshell')（幂等）。
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='webshell_conns')
+       AND NOT EXISTS (SELECT 1 FROM connections WHERE kind='webshell') THEN
+        INSERT INTO connections(name, kind, host, config, secret, note, enabled, created_at, updated_at)
+        SELECT name, 'webshell', url,
+               jsonb_build_object('type', type, 'headers', COALESCE(headers,'{}')),
+               COALESCE(password,''), COALESCE(note,''), enabled, created_at, updated_at
+        FROM webshell_conns;
+    END IF;
+END $$;
+
+-- 连接动作审批：conn_* 危险操作的 HITL 闸门(soc-autopilot 风格:LLM 只能 propose,人工批准才执行)。
+CREATE TABLE IF NOT EXISTS conn_actions (
+    id             BIGSERIAL PRIMARY KEY,
+    connection_id  BIGINT NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+    kind           TEXT NOT NULL DEFAULT 'exec',  -- exec|contain|collect
+    action         TEXT NOT NULL DEFAULT '',       -- contain: isolate|block_ip|kill_process
+    target         TEXT NOT NULL DEFAULT '',       -- contain 的目标:block_ip/isolate 的源IP;kill_process 的 pid
+    command        TEXT NOT NULL DEFAULT '',
+    rationale      TEXT NOT NULL DEFAULT '',
+    state          TEXT NOT NULL DEFAULT 'pending', -- pending|approved|rejected|executed|failed
+    requested_by   TEXT NOT NULL DEFAULT '',
+    decided_by     TEXT NOT NULL DEFAULT '',
+    result         TEXT NOT NULL DEFAULT '',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    decided_at     TIMESTAMPTZ,
+    executed_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_conn_actions_conn ON conn_actions(connection_id);
+CREATE INDEX IF NOT EXISTS idx_conn_actions_state ON conn_actions(state);
+
+-- 安全事件(incident)：应急响应的输入载体。brief = 已知告警信息 + 与运维/开发的零散信息。
+CREATE TABLE IF NOT EXISTS incidents (
+    id          BIGSERIAL PRIMARY KEY,
+    title       TEXT NOT NULL,
+    severity    TEXT NOT NULL DEFAULT 'medium', -- low|medium|high|critical
+    status      TEXT NOT NULL DEFAULT 'new',    -- new|triaging|contained|resolved|closed_false_positive
+    source      TEXT NOT NULL DEFAULT '',       -- 告警来源(SIEM/工单/手工)
+    alert_info  TEXT NOT NULL DEFAULT '',       -- 已知告警信息(时间/类型/IOC等)
+    notes       TEXT NOT NULL DEFAULT '',       -- 与运维/开发交流得到的零散信息
+    assets      TEXT NOT NULL DEFAULT '',       -- 受影响资产(逗号分隔)
+    iocs        TEXT NOT NULL DEFAULT '',       -- IOC(逗号分隔)
+    task_id     TEXT,                           -- 关联的 responder 任务 id(字符串)
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
 
 CREATE TABLE IF NOT EXISTS c2_listeners (
     id         BIGSERIAL PRIMARY KEY,

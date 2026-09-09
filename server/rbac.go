@@ -130,6 +130,16 @@ func apiPermission(method, path string) (string, bool) {
 		return readWrite(method, "knowledge.read", "knowledge.write")
 	case strings.HasPrefix(path, "/api/webshell"):
 		return readWrite(method, "cap.webshell.read", "cap.webshell.write")
+	case strings.HasPrefix(path, "/api/connections"):
+		return readWrite(method, "cap.connection.read", "cap.connection.write")
+	case strings.HasPrefix(path, "/api/incidents"):
+		if strings.HasSuffix(path, "/respond") || strings.HasSuffix(path, "/webhook") {
+			return "task.run", true
+		}
+		if method == http.MethodGet {
+			return "task.read", true
+		}
+		return "task.create", true
 	case strings.HasPrefix(path, "/api/c2"):
 		return readWrite(method, "cap.c2.read", "cap.c2.write")
 	case strings.HasPrefix(path, "/api/proxies"), strings.HasPrefix(path, "/api/proxy-sources"):

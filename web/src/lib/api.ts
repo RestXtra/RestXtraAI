@@ -28,6 +28,8 @@ import type {
   CommandRecord,
   Company,
   CompanyStat,
+  ConnAction,
+  Connection,
   Conversation,
   ConvTokenSummary,
   CoverageGraphData,
@@ -37,6 +39,7 @@ import type {
   Finding,
   FindingStatus,
   FindingsPage,
+  Incident,
   InterceptApprovalRow,
   InterceptPending,
   InterceptRule,
@@ -687,6 +690,10 @@ export const api = {
   },
   auditStats: () => get<{ total: number }>("/audit/stats"),
   auditGC: (days = 90) => post<{ removed: number }>(`/audit/gc?days=${days}`, {}),
+  auditVerify: () =>
+    get<{ ok: boolean; check: { total: number; legacy: number; broken: number; broken_ids: number[] } }>(
+      "/audit/verify",
+    ),
   deleteLogs: (ids: number[]) =>
     request<{ deleted: number }>("/logs", { method: "DELETE", body: JSON.stringify({ ids }) }),
   clearLogs: () => post<{ removed: number }>("/logs/clear", {}),
@@ -876,6 +883,36 @@ export const api = {
     }),
   webshellTest: (w: Partial<WebshellConn>) =>
     post<{ ok: boolean; status?: number; snippet?: string; error?: string }>("/webshell/test", w),
+
+  // ---- 连接管理（统一 SSH / RDP / Telnet / WebShell）----
+  connections: (kind = "") =>
+    get<{ connections: Connection[] }>(`/connections${kind ? `?kind=${kind}` : ""}`).then((r) => arr(r.connections)),
+  saveConnection: (c: Partial<Connection>) => post<{ id: number }>("/connections", c),
+  deleteConnection: (id: string) => del<{ deleted: number }>(`/connections/${id}`),
+  deleteConnections: (ids: string[], all = false) =>
+    request<{ deleted: number }>("/connections", {
+      method: "DELETE",
+      body: JSON.stringify({ ids: ids.map(Number), all }),
+    }),
+  connectionTest: (c: Partial<Connection>) =>
+    post<{ ok: boolean; status?: number; snippet?: string; output?: string; error?: string }>("/connections/test", c),
+  connApprovals: () => get<{ approvals: ConnAction[] }>("/connections/approvals").then((r) => arr(r.approvals)),
+  connApprovalDecide: (id: string, action: "approve" | "reject") =>
+    post<{ ok: boolean; id: string; approval: string; state?: string; verified?: boolean; result?: string }>(
+      `/connections/approvals/${id}/${action}`,
+      {},
+    ),
+  connActions: (id: string) => get<{ actions: ConnAction[] }>(`/connections/${id}/actions`).then((r) => arr(r.actions)),
+
+  // ---- 安全事件（应急响应）----
+  incidents: (status = "") =>
+    get<{ incidents: Incident[] }>(`/incidents${status ? `?status=${status}` : ""}`).then((r) => arr(r.incidents)),
+  createIncident: (i: Partial<Incident>) => post<{ id: number }>("/incidents", i),
+  incidentGet: (id: string) => get<{ incident: Incident }>(`/incidents/${id}`).then((r) => r.incident),
+  incidentUpdate: (id: string, i: Partial<Incident>) => patch<{ ok: boolean }>(`/incidents/${id}`, i),
+  deleteIncident: (id: string) => del<{ deleted: number }>(`/incidents/${id}`),
+  incidentRespond: (id: string) => post<{ ok: boolean; task_id: string }>(`/incidents/${id}/respond`, {}),
+  incidentWebhook: (i: Partial<Incident>) => post<{ id: number; task_id?: string }>("/incidents/webhook", i),
 
   // ---- C2 ----
   c2: () => get<{ listeners: C2Listener[]; sessions: C2Session[] }>("/c2"),

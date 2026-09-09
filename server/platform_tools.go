@@ -26,6 +26,9 @@ func (s *Server) platformTools() []actool.CoreTool {
 		s.toolC2Postex(),
 		s.toolC2TaskResult(),
 		s.toolC2SessionList(),
+		s.toolConnList(),
+		s.toolConnExec(),
+		s.toolConnContain(),
 	}
 }
 
@@ -35,6 +38,7 @@ var platformToolKeys = []string{
 	"create_custom_tool", "update_custom_tool",
 	"create_mcp", "update_mcp",
 	"c2_postex", "c2_task_result", "c2_session_list",
+	"conn_list", "conn_exec", "conn_contain",
 }
 
 // ---- skills ----
