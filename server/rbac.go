@@ -142,7 +142,8 @@ func apiPermission(method, path string) (string, bool) {
 		return "task.create", true
 	case strings.HasPrefix(path, "/api/c2"):
 		return readWrite(method, "cap.c2.read", "cap.c2.write")
-	case strings.HasPrefix(path, "/api/proxies"), strings.HasPrefix(path, "/api/proxy-sources"):
+	case strings.HasPrefix(path, "/api/proxies"), strings.HasPrefix(path, "/api/proxy-sources"),
+		strings.HasPrefix(path, "/api/proxy-bridge"):
 		return readWrite(method, "cap.proxy.read", "cap.proxy.write")
 	case strings.HasPrefix(path, "/api/spacesearch"):
 		if method == http.MethodGet || strings.HasSuffix(path, "/search") || strings.HasSuffix(path, "/test") {

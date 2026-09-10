@@ -36,7 +36,20 @@ func jsonResult(v any) (actool.Result, error) {
 // withheld, routed via SearchExtraTools/ExecuteExtraTool). Per-agent binding still
 // decides who actually sees any of them.
 //
+// convCompanyKey carries the current conversation's company id (if any) into
+// agent tools, so tasks spawned from a chat inherit the enterprise link.
+//
 //nolint:unused // used as the hostTools provider in wireAgentAugment
+type convCompanyKey struct{}
+
+// convCompanyID returns the conversation's company id from ctx, or 0.
+func convCompanyID(ctx context.Context) int64 {
+	if v, ok := ctx.Value(convCompanyKey{}).(*int64); ok && v != nil {
+		return *v
+	}
+	return 0
+}
+
 func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	tools := append(s.m.HostTools(), s.orchestrationTools()...)
 	tools = append(tools, s.platformTools()...) // 平台操作工具(建改 skill/工具/MCP，给 Auto 用)
@@ -253,7 +266,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			"llm_profile_id":  map[string]any{"type": "integer", "description": "可选：指定本子任务 planner/worker 用的 LLM 配置 id(见 list_llm_profiles)；留空则继承父任务、再回退全局激活配置"},
 			"timeout_seconds": map[string]any{"type": "integer", "description": "兼容旧调用：任务级超时；budget.max_wall_time_seconds 优先"},
 		}, "description"),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
 				Description      string                `json:"description"`
 				Objective        string                `json:"objective"`
@@ -326,7 +339,11 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 					pin = pt.LLMProfileID
 				}
 			}
-			t, err := s.m.CreateTask(a.Description, objective, pin, timeout, 0, nil)
+			var companyIDs []int64
+			if cid := convCompanyID(ctx); cid > 0 {
+				companyIDs = []int64{cid}
+			}
+			t, err := s.m.CreateTask(a.Description, objective, pin, timeout, 0, companyIDs)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}

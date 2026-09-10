@@ -100,7 +100,6 @@ export const sidebarItems: NavGroup[] = [
         subItems: [
           { id: "connection", title: "连接管理", url: "/cap/connection", icon: Plug, perm: "cap.connection.read" },
           { id: "incident", title: "安全事件", url: "/cap/incident", icon: Siren, perm: "task.read" },
-          { id: "webshell", title: "WebShell(旧)", url: "/cap/webshell", icon: Terminal, perm: "cap.webshell.read" },
           { id: "c2", title: "C2", url: "/cap/c2", icon: Webhook, perm: "cap.c2.read" },
           { id: "proxy-pool", title: "代理池管理", url: "/cap/proxies", icon: Network, perm: "cap.proxy.read" },
           { id: "spacesearch", title: "空间测绘", url: "/cap/spacesearch", icon: Radar, perm: "cap.spacesearch.read" },

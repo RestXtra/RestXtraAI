@@ -371,6 +371,10 @@ func (s *Server) runConversationSync(c *db.Conversation, msg, busyKey string) {
 			log.Printf("[conv %d] append activity failed: %v", c.ID, err)
 		}
 	}
+	// 让 agent 工具拿到本会话关联的企业：会话内 spawn_task 下发的任务自动继承。
+	if c.CompanyID != nil {
+		ctx = context.WithValue(ctx, convCompanyKey{}, c.CompanyID)
+	}
 	// On a manual stop ctx is cancelled; Chat already emits a clean "已手动停止"
 	// step, so skip the raw-error entry — only surface genuine failures.
 	if _, err := ca.Chat(ctx, c.AgentKey, sessionID, msg, maxTurns, maxDuration, webSearch, emit); err != nil && ctx.Err() == nil {

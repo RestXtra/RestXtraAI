@@ -43,6 +43,9 @@ type Server struct {
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
 
+	// proxyBridge 是代理入口（本地混合 HTTP/SOCKS5 正向代理）的运行时状态。
+	proxyBridge *proxyBridgeState
+
 	cfgMu         sync.Mutex
 	mainAgent     *agent.MainAgent // nil when no LLM provider is configured
 	chatAgent     *agent.ChatAgent // conversational runner for the chat page; nil w/o LLM
@@ -920,6 +923,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/proxy-sources", s.rbac("cap.proxy.write", s.proxySourceSave))
 	mux.HandleFunc("DELETE /api/proxy-sources/{id}", s.rbac("cap.proxy.write", s.proxySourceDelete))
 	mux.HandleFunc("POST /api/proxy-sources/{id}/refresh", s.rbac("cap.proxy.write", s.proxySourceRefresh))
+	mux.HandleFunc("GET /api/proxy-bridge", s.rbac("cap.proxy.read", s.proxyBridgeGet))
+	mux.HandleFunc("POST /api/proxy-bridge", s.rbac("cap.proxy.write", s.proxyBridgeSave))
+	mux.HandleFunc("POST /api/proxy-bridge/start", s.rbac("cap.proxy.write", s.proxyBridgeStart))
+	mux.HandleFunc("POST /api/proxy-bridge/stop", s.rbac("cap.proxy.write", s.proxyBridgeStop))
+	mux.HandleFunc("POST /api/proxy-bridge/import-rules", s.rbac("cap.proxy.write", s.proxyBridgeImportRules))
 
 	// 空间测绘：FOFA / Hunter / Quake 搜索与资产导入
 	mux.HandleFunc("GET /api/spacesearch/config", s.rbac("cap.spacesearch.read", s.spaceSearchConfigGet))
