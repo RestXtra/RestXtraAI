@@ -12,7 +12,12 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (response.status === 401) {
-    if (typeof window !== "undefined") window.location.href = "/login";
+    // 登录/初始化页上的 401 是预期（探测登录态/初始化态），不应整页跳回 /login，
+    // 否则会形成「platformMy→401→跳 /login→reload→又 401」的刷新死循环。
+    const path = typeof window !== "undefined" ? window.location.pathname : "";
+    if (path !== "/login" && path !== "/setup") {
+      window.location.href = "/login";
+    }
     throw new Error("未授权");
   }
   if (!response.ok) {
