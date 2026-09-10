@@ -16,11 +16,33 @@ import (
 // (U+0000) so ToValidUTF8 leaves it in place, yet PostgreSQL text still rejects it
 // (SQLSTATE 22021) — so it must be removed separately. JSONB payloads are fine
 // (json.Marshal already sanitizes), so only the plain text columns need it.
+// utf8Clean sanitizes a string for storage: removes NUL bytes, fixes invalid
+// UTF-8, and replaces lone surrogates (U+D800–DFFF) with U+FFFD. ToValidUTF8
+// fixes malformed byte sequences but NOT lone surrogates — Go's json.Marshal
+// emits them as \ud800 and Postgres jsonb rejects that ("unsupported Unicode
+// escape sequence", SQLSTATE 22P05). Tools returning raw bytes (curl/pty/
+// terminal output) can carry such code points, so every field that lands in a
+// JSONB column or text column must pass through here.
 func utf8Clean(s string) string {
 	if strings.IndexByte(s, 0) >= 0 {
 		s = strings.ReplaceAll(s, "\x00", "")
 	}
-	return strings.ToValidUTF8(s, "�")
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	// fast path: surrogates (U+D800–DFFF) encode to bytes starting 0xED; absent
+	// → nothing to do.
+	if strings.IndexByte(s, 0xED) < 0 {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r >= 0xD800 && r <= 0xDFFF {
+			b.WriteRune('\uFFFD')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // Node is a typed reasoning node (= old task_nodes). kind ∈ goal|intent|finding|hint.
