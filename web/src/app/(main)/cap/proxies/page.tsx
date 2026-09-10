@@ -610,6 +610,24 @@ export default function ProxyPoolPage() {
     }
   };
 
+  // 行内启用/停用开关：只改 enabled，保留其余字段。
+  const toggleEnable = async (p: ProxyItem) => {
+    try {
+      await api.saveProxy({
+        id: Number(p.id),
+        name: p.name,
+        protocol: p.protocol,
+        host: p.host,
+        port: p.port,
+        enabled: !p.enabled,
+      });
+      toast.success(p.enabled ? `已停用 ${p.name || p.host}` : `已启用 ${p.name || p.host}`);
+      load();
+    } catch (e) {
+      toast.error(`操作失败：${(e as Error).message}`);
+    }
+  };
+
   const removeOne = async (p: ProxyItem) => {
     try {
       await api.deleteProxy(p.id);
@@ -801,6 +819,14 @@ export default function ProxyPoolPage() {
                       <td className="px-3 py-2 text-muted-foreground text-xs">{sourceLabel(p.source)}</td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-1">
+                          <Button
+                            size="sm"
+                            variant={p.enabled ? "outline" : "default"}
+                            onClick={() => toggleEnable(p)}
+                            title={p.enabled ? "停用该节点" : "启用该节点"}
+                          >
+                            {p.enabled ? "停用" : "启用"}
+                          </Button>
                           <Button
                             size="sm"
                             variant="ghost"
