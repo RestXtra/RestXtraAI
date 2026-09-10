@@ -27,7 +27,7 @@ import (
 // via Authorization: Bearer instead — that credential is named
 // "ANTHROPIC_AUTH_TOKEN". Values map to llm_profiles.auth_mode.
 const (
-	AuthModeDefault = ""        // 默认：anthropic→x-api-key，openai→Bearer（SDK 原生行为）
+	AuthModeDefault = "" // 默认：anthropic→x-api-key，openai→Bearer（SDK 原生行为）
 	AuthModeXAPIKey = "x-api-key"
 	AuthModeBearer  = "bearer" // Authorization: Bearer <key>
 )
@@ -56,6 +56,10 @@ type Config struct {
 	// "x-api-key" = SDK 默认 x-api-key；"bearer" = Authorization: Bearer（兼容
 	// ANTHROPIC_AUTH_TOKEN 类网关）。OpenAI 格式恒为 Bearer，本字段对它是 no-op。
 	AuthMode string
+	// SessionID 是发往网关的 x-opencode-session 头值（OpenCode GO 等要求稳定会话 ID
+	// 用于路由与提示词缓存）。空 = 不发送该头。设置时同时覆盖 User-Agent 为
+	// RestXtraAI 自定义标识（网关要求非通用 SDK UA）。
+	SessionID string
 }
 
 // compaction window resolution bounds (in K tokens). Below the floor the
@@ -256,8 +260,9 @@ func (c Config) buildProvider(key string) (llm.Provider, error) {
 	}
 	// Anthropic 格式 + bearer 认证：注入一个把 x-api-key 换成 Authorization: Bearer 的
 	// transport（SDK 硬编码 x-api-key，在 RoundTrip 层改写头，无需 fork SDK）。
-	if c.Format == llm.FormatAnthropic && c.AuthMode == AuthModeBearer {
-		client, err := bearerHTTPClient(c.Proxy, key)
+	// 需要会话头（OpenCode GO）或自定义 UA 时也走同一 transport 注入。
+	if c.Format == llm.FormatAnthropic && c.AuthMode == AuthModeBearer || c.SessionID != "" {
+		client, err := c.gatewayHTTPClient(c.Proxy, key)
 		if err != nil {
 			return nil, err
 		}
@@ -266,12 +271,11 @@ func (c Config) buildProvider(key string) (llm.Provider, error) {
 	return llm.NewProvider(lc)
 }
 
-// bearerHTTPClient builds an http.Client whose transport rewrites each request's
-// Anthropic credential header from x-api-key to "Authorization: Bearer <key>",
-// for relay gateways that only accept ANTHROPIC_AUTH_TOKEN-style auth. The
-// default transport is cloned so standard timeouts / pooling / *_PROXY env are
-// preserved; an explicit proxy still wins over the environment.
-func bearerHTTPClient(proxy, key string) (*http.Client, error) {
+// gatewayHTTPClient 构建一个注入网关所需头的 http.Client：可选的
+// x-api-key→Bearer 改写（auth_mode=bearer）、x-opencode-session 会话头、以及
+// 自定义 User-Agent（OpenCode GO 等网关要求非通用 SDK UA）。默认 transport 被克隆，
+// 保留标准超时/连接池/*_PROXY 环境变量；显式 proxy 优先于环境。
+func (c Config) gatewayHTTPClient(proxy, key string) (*http.Client, error) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	if proxy != "" {
 		u, err := url.Parse(proxy)
@@ -284,8 +288,14 @@ func bearerHTTPClient(proxy, key string) (*http.Client, error) {
 	}
 	key = strings.TrimSpace(key)
 	return &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-		r.Header.Del("x-api-key") // the SDK set this; the gateway wants Bearer instead
-		r.Header.Set("Authorization", "Bearer "+key)
+		if c.Format == llm.FormatAnthropic && c.AuthMode == AuthModeBearer {
+			r.Header.Del("x-api-key") // the SDK set this; the gateway wants Bearer instead
+			r.Header.Set("Authorization", "Bearer "+key)
+		}
+		if c.SessionID != "" {
+			r.Header.Set("x-opencode-session", c.SessionID)
+		}
+		r.Header.Set("User-Agent", "RestXtraAI/2.4.0")
 		return tr.RoundTrip(r)
 	})}, nil
 }

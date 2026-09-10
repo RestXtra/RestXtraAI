@@ -36,3 +36,30 @@ func TestPreToolUseGating(t *testing.T) {
 }
 
 var _ = hook.PreToolUse
+
+func TestHttpWriteGating(t *testing.T) {
+	g := New() // no interceptor → HTTP write methods are blocked
+	block := func(cmd string) bool {
+		input, _ := json.Marshal(map[string]string{"command": cmd})
+		b, _, _ := g.Hooks().PreToolUse(context.Background(), "Bash", input)
+		return b
+	}
+	if !block(`curl -X DELETE https://x.com/api/user/1`) {
+		t.Error("curl -X DELETE should be gated")
+	}
+	if !block(`curl -X PUT https://x.com/api/user/1`) {
+		t.Error("curl -X PUT should be gated")
+	}
+	if !block(`curl --request PATCH https://x.com/api/x`) {
+		t.Error("curl --request PATCH should be gated")
+	}
+	if !block(`wget --method=DELETE https://x.com/api/x`) {
+		t.Error("wget --method=DELETE should be gated")
+	}
+	if block(`curl https://x.com/api/users`) {
+		t.Error("plain GET curl should be allowed")
+	}
+	if block(`curl -X GET https://x.com/api/user/1`) {
+		t.Error("curl -X GET should be allowed")
+	}
+}

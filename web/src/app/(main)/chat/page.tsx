@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { ArrowUpIcon, Bot, ChevronDownIcon, Square, ZapIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -648,6 +648,7 @@ function ChatView({
 
 function ChatPageInner() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const urlId = searchParams.get("id");
   const selectedId = urlId ? Number(urlId) || null : null;
 
@@ -730,6 +731,7 @@ function ChatPageInner() {
           reloadConvs();
           useChatNavStore.getState().refresh();
           select(c.id);
+          router.replace(`/chat?id=${c.id}`); // 切 URL：对话页以 URL 为选中源，否则卡在新建态
         }}
       />
     );

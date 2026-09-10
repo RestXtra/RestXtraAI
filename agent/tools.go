@@ -48,9 +48,12 @@ func compactIntents(ns []*db.Node, parentsOf, yieldsOf map[int64][]int64) []map[
 // ToolSet exposes the PG-backed dual graph (asset + exploration) to an LLM agent.
 // One ToolSet is created per planner/worker run; per-run signals live here.
 type ToolSet struct {
-	as     *db.AssetStore   // asset store (optional; nil = asset tools not available)
-	cs     *db.CompanyStore // company store (optional)
-	ts     *db.ExplorationStore
+	as *db.AssetStore   // asset store (optional; nil = asset tools not available)
+	cs *db.CompanyStore // company store (optional)
+	ts *db.ExplorationStore
+	// pg 是全局 DB 句柄（可选）。会话上下文（ts==nil）的写工具（如 report_finding）
+	// 用它直接落到独立 findings 表，让 chat agent 也能登记漏洞。
+	pg     *db.DB
 	worker string
 	taskID int64 // PG tasks.id; 0 when unknown (tests / orchestrator cross-task reads)
 	// ownerNode is the exploration node that writes attach to: assets this run
@@ -83,6 +86,10 @@ type ToolSet struct {
 // SetNotify wires the planner-wake callback (see ToolSet.notify). Set by callers
 // that hold the task handle (main-agent chat, cross-task orchestration).
 func (t *ToolSet) SetNotify(fn func()) { t.notify = fn }
+
+// SetPG wires the global DB handle for conversation-context write tools
+// (report_finding falls back to the standalone findings table when ts==nil).
+func (t *ToolSet) SetPG(pg *db.DB) { t.pg = pg }
 
 // SetNotifyFinding wires the finding-wake callback (see ToolSet.notifyFinding).
 func (t *ToolSet) SetNotifyFinding(fn func(int64, string)) { t.notifyFinding = fn }
@@ -653,8 +660,19 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 				}
 				_, _ = t.ts.AddStandaloneFinding(t.taskID, id, a.VulnClass, a.Severity, a.Summary, a.Evidence, t.worker, anchors)
 			} else {
-				// conversation context: no exploration store available, cannot record finding
-				return actool.Errorf("report_finding 需要任务上下文（exploration store 未初始化）"), nil
+				// conversation context: no exploration store — fall back to the
+				// standalone findings table via the global DB handle, so chat
+				// agents (auto/red_team_lead/pentest/responder) can record vulns.
+				if t.pg == nil {
+					return actool.Errorf("report_finding 需要任务上下文（exploration store 未初始化）"), nil
+				}
+				ev, _ := json.Marshal(map[string]string{"by": t.worker, "poc": a.Evidence})
+				id, err := t.pg.AddFinding(t.taskID, 0, a.VulnClass, a.Severity, a.Summary, string(ev), t.worker, anchors)
+				if err != nil {
+					return actool.Errorf(err.Error()), nil
+				}
+				t.writes.Findings++
+				return actool.Text(fmt.Sprintf("finding recorded: %d", id)), nil
 			}
 			t.writes.Findings++
 			return actool.Text(fmt.Sprintf("finding recorded: %d", id)), nil

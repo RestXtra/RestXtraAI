@@ -478,12 +478,13 @@ func contains(ss []string, v string) bool {
 // (real AssetStore, nil ExplorationStore, taskID=0). Used by ToolResolve to inject
 // domain tools into agents (Auto, custom) that don't own a per-task ToolSet.
 // nil as → returns nil (no injection, graceful degradation).
-func buildDomainReg(as *db.AssetStore) map[string]actool.CoreTool {
+func buildDomainReg(pg *db.DB, as *db.AssetStore) map[string]actool.CoreTool {
 	if as == nil {
 		return nil
 	}
 	serverTS := agent.NewToolSet(nil, "")
 	serverTS.SetAssetStore(as, as.Companies())
+	serverTS.SetPG(pg) // 会话上下文写工具（report_finding）落独立 findings 表
 	reg := make(map[string]actool.CoreTool)
 	for _, t := range serverTS.AllDomainTools() {
 		reg[t.Name()] = t

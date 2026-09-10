@@ -551,6 +551,8 @@ export interface LLMProfile {
   reasoning_effort?: string;
   // 认证头: ""/x-api-key=Anthropic 默认头(OpenAI 恒为 Bearer) | "bearer"=Authorization: Bearer(兼容 ANTHROPIC_AUTH_TOKEN 类网关, 如 OpenCode GO)
   auth_mode?: "" | "x-api-key" | "bearer";
+  // x-opencode-session 会话头（OpenCode GO 等网关必需）
+  session_id?: string;
   is_default: boolean;
 }
 

@@ -19,11 +19,12 @@ export interface LLMPreset {
 export const LLM_PRESETS: LLMPreset[] = [
   {
     name: "OpenCode GO",
-    description: "OpenCode 的 Zen GO 网关 · Anthropic 兼容 · deepseek-v4-flash（端点同时接受 x-api-key 与 Bearer）",
-    format: "anthropic",
-    base_url: "https://opencode.ai/zen/go",
+    description:
+      "OpenCode Zen GO 网关 · OpenAI 兼容（/v1/chat/completions）· deepseek-v4-flash · 自动生成 x-opencode-session 会话头",
+    format: "openai",
+    base_url: "https://opencode.ai/zen/go/v1",
     model: "deepseek-v4-flash",
-    auth_mode: "x-api-key",
+    auth_mode: "bearer",
     api_key_placeholder: "sk-…（OpenCode Zen GO 令牌）",
   },
   {

@@ -425,6 +425,14 @@ ON CONFLICT (source_key) DO NOTHING`)
 			return nil
 		},
 	},
+	{
+		Version: 16,
+		Name:    "llm_profile_session_id",
+		Apply: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS session_id TEXT NOT NULL DEFAULT ''`)
+			return err
+		},
+	},
 }
 
 func applyMigrations(db *sql.DB) error {

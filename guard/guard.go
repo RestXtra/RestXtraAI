@@ -21,7 +21,7 @@ import (
 type AuditEntry struct {
 	TS      int64  `json:"ts"`
 	Tool    string `json:"tool"`
-	Action  string `json:"action"` // allow|block
+	Action  string `json:"action"`          // allow|block
 	Class   string `json:"class,omitempty"` // P6.1: recon|scan|exploit（从命令内容推演）
 	Reason  string `json:"reason,omitempty"`
 	Command string `json:"command,omitempty"`
@@ -68,6 +68,9 @@ func (g *Guard) Hooks() *hook.Registry { return g.reg }
 var (
 	reDestructive = regexp.MustCompile(`(?i)\b(rm\s+-rf\s+/|mkfs|dd\s+if=|:\(\)\s*\{|shutdown|reboot|>\s*/dev/sd)`)
 	reExfil       = regexp.MustCompile(`(?i)(curl|wget|nc|ncat)\b[^|]*\b(\|\s*(curl|wget|nc))`)
+	// reHttpWrite 匹配显式 HTTP 写方法(DELETE/PUT/PATCH)的 curl/wget —— 测试删除/修改
+	// 类接口前必须询问操作者（最小危害边界）。
+	reHttpWrite = regexp.MustCompile(`(?i)\b(curl|wget)\b[^\n]{0,300}?(?:-X|--request|--method)[\s=]*(DELETE|PUT|PATCH)\b`)
 )
 
 func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
@@ -104,6 +107,10 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 	if reDestructive.MatchString(cmd) {
 		return g.block(ev.ToolName, "破坏性命令被安全边界拒绝（需人工批准）", cmd, cls)
 	}
+	// HTTP 写方法(DELETE/PUT/PATCH)：询问操作者，批准后才执行。
+	if reHttpWrite.MatchString(cmd) {
+		return g.gateHttpWrite(ctx, ev, cmd, cls)
+	}
 	if g.denyExfil && reExfilHard.MatchString(cmd) {
 		return g.block(ev.ToolName, "疑似数据外泄（本地敏感文件外发）被拒绝", cmd, cls)
 	}
@@ -117,6 +124,22 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 
 	g.record(ev.ToolName, "allow", "", cmd)
 	return g.applyIntercept(ctx, ev)
+}
+
+// gateHttpWrite 在 HTTP 写方法(DELETE/PUT/PATCH)命中时询问操作者。有 interceptor
+// 则走标准审批流（对话卡片/审批页）；无则直接拒绝（安全兜底）。
+func (g *Guard) gateHttpWrite(ctx context.Context, ev hook.Event, cmd, cls string) hook.Result {
+	msg := "HTTP 写操作(DELETE/PUT/PATCH)需操作者确认，批准后才执行"
+	if g.interceptor == nil {
+		return g.block(ev.ToolName, msg, cmd, cls)
+	}
+	convID := intercept.ConvIDFromContext(ctx)
+	dec := intercept.Decision{Action: "ask", Message: msg}
+	if !g.interceptor.HandleAsk(ctx, convID, dec, ev.ToolName, ev.Input) {
+		return g.block(ev.ToolName, "用户拒绝或审批超时", cmd, cls)
+	}
+	g.record(ev.ToolName, "allow", msg, cmd)
+	return hook.Result{}
 }
 
 // applyIntercept evaluates user-configured intercept rules against the tool call.

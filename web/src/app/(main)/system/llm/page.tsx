@@ -2,7 +2,16 @@
 
 import * as React from "react";
 
-import { ClipboardPasteIcon, Loader2Icon, PlugZapIcon, PlusIcon, SaveIcon, StarIcon, Trash2Icon } from "lucide-react";
+import {
+  ClipboardPasteIcon,
+  DownloadIcon,
+  Loader2Icon,
+  PlugZapIcon,
+  PlusIcon,
+  SaveIcon,
+  StarIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +58,39 @@ const THINK_MODES: { value: ThinkMode; label: string }[] = [
 const toStore = (mode: ThinkMode, effort: string) => (mode === "on" ? effort : mode === "off" ? "off" : "");
 const modeFromStore = (v?: string): ThinkMode => (!v ? "none" : v === "off" ? "off" : "on");
 const effortFromStore = (v?: string) => (v && v !== "off" ? v : "high");
+
+// 常见模型建议（按格式）。选取后自动填入 model，并用 MODEL_CONTEXT 补上下文窗口。
+const MODEL_SUGGESTIONS: Record<string, string[]> = {
+  openai: [
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "glm-5.1",
+    "glm-5.2",
+    "kimi-k2.7-code",
+    "gpt-5.6-sol",
+    "qwen3.8-flash",
+    "qwen3.8-max",
+    "minimax-m3",
+    "hy3",
+  ],
+  anthropic: ["claude-opus-4-8", "claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-4-5"],
+};
+const MODEL_CONTEXT: Record<string, number> = {
+  "deepseek-v4-flash": 200,
+  "deepseek-v4-pro": 200,
+  "glm-5.1": 200,
+  "glm-5.2": 200,
+  "kimi-k2.7-code": 262,
+  "gpt-5.6-sol": 400,
+  "qwen3.8-flash": 983,
+  "qwen3.8-max": 983,
+  "minimax-m3": 1000,
+  hy3: 200,
+  "claude-opus-4-8": 200,
+  "claude-sonnet-4-5": 200,
+  "claude-haiku-4-5": 200,
+  "claude-opus-4-5": 200,
+};
 
 // 认证头选择（「认证字段」概念）：x-api-key（默认）| Bearer（ANTHROPIC_AUTH_TOKEN）。
 function AuthModeField({ value, onChange }: { value: LLMAuthMode; onChange: (v: LLMAuthMode) => void }) {
@@ -151,6 +193,9 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
   const [thinkMode, setThinkMode] = React.useState<ThinkMode>("none");
   const [effort, setEffort] = React.useState("high");
   const [preset, setPreset] = React.useState("");
+  const [sessionId, setSessionId] = React.useState("");
+  const [modelSugs, setModelSugs] = React.useState<string[]>([]);
+  const [fetchingModels, setFetchingModels] = React.useState(false);
 
   function applyImported(imp: ImportedLLMProfile) {
     setName(imp.name);
@@ -190,6 +235,46 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
     setThinkMode("none");
     setEffort("high");
     setPreset("");
+    setSessionId("");
+    setModelSugs([]);
+  }
+
+  // 选模型建议：填 model，并自动补上下文窗口（0/空时）。
+  function pickModelSuggestion(m: string) {
+    setModel(m);
+    const k = MODEL_CONTEXT[m];
+    if (k && (!cw || Number(cw) === 0)) setCw(String(k));
+  }
+
+  // 拉取 /v1/models 填充模型下拉（cc-switch 同款能力）。
+  async function fetchModels() {
+    if (!baseUrl.trim() || !apiKey.trim()) {
+      toast.error("请先填 Base URL 与 API Key 再拉取模型");
+      return;
+    }
+    setFetchingModels(true);
+    try {
+      const url = baseUrl.replace(/\/+$/, "") + "/models";
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          ...(format === "anthropic" ? { "x-api-key": apiKey } : {}),
+        },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { data?: { id: string }[] };
+      const ids = Array.isArray(data?.data) ? data.data.map((m) => m.id).filter(Boolean) : [];
+      if (ids.length === 0) {
+        toast.info("该端点未返回模型列表（部分网关需在控制台查）");
+        return;
+      }
+      setModelSugs(ids);
+      toast.success(`已拉取 ${ids.length} 个模型`);
+    } catch (e) {
+      toast.error(`拉取模型失败：${(e as Error).message}`);
+    } finally {
+      setFetchingModels(false);
+    }
   }
 
   async function create() {
@@ -210,6 +295,7 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
         rate_per_minute: Number(rpm) || 0,
         context_window_k: Number(cw) || 0,
         reasoning_effort: toStore(thinkMode, effort),
+        session_id: sessionId,
       });
       toast.success(`已新建 Profile：${name.trim()}（在列表中「设为激活」以启用）`);
       reset();
@@ -421,6 +507,47 @@ export default function LLMPage() {
   const [effort, setEffort] = React.useState("high");
   const [authMode, setAuthMode] = React.useState<LLMAuthMode>("");
   const [testing, setTesting] = React.useState(false);
+  const [sessionId, setSessionId] = React.useState("");
+  const [modelSugs, setModelSugs] = React.useState<string[]>([]);
+  const [fetchingModels, setFetchingModels] = React.useState(false);
+
+  // 选模型建议：填 model，并自动补上下文窗口（0/空时）。
+  function pickModelSuggestion(m: string) {
+    setModel(m);
+    const k = MODEL_CONTEXT[m];
+    if (k && (!cw || Number(cw) === 0)) setCw(String(k));
+  }
+
+  // 拉取 /v1/models 填充模型下拉（cc-switch 同款能力）。
+  async function fetchModels() {
+    if (!baseUrl.trim() || !apiKey.trim()) {
+      toast.error("请先填 Base URL 与 API Key 再拉取模型");
+      return;
+    }
+    setFetchingModels(true);
+    try {
+      const url = baseUrl.replace(/\/+$/, "") + "/models";
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          ...(format === "anthropic" ? { "x-api-key": apiKey } : {}),
+        },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { data?: { id: string }[] };
+      const ids = Array.isArray(data?.data) ? data.data.map((m) => m.id).filter(Boolean) : [];
+      if (ids.length === 0) {
+        toast.info("该端点未返回模型列表（部分网关需在控制台查）");
+        return;
+      }
+      setModelSugs(ids);
+      toast.success(`已拉取 ${ids.length} 个模型`);
+    } catch (e) {
+      toast.error(`拉取模型失败：${(e as Error).message}`);
+    } finally {
+      setFetchingModels(false);
+    }
+  }
 
   const load = React.useCallback(async () => {
     try {
@@ -454,6 +581,7 @@ export default function LLMPage() {
     setThinkMode(modeFromStore(selected.reasoning_effort));
     setEffort(effortFromStore(selected.reasoning_effort));
     setAuthMode(selected.auth_mode ?? "");
+    setSessionId(selected.session_id ?? "");
     setApiKey("");
     setKeyHint(selected.api_key_hint ?? "");
   }, [selected]);
@@ -474,6 +602,7 @@ export default function LLMPage() {
         toStore(thinkMode, effort),
         selectedId ? Number(selectedId) : undefined,
         authMode,
+        sessionId,
       );
       if (r.ok)
         toast.success(
@@ -512,6 +641,7 @@ export default function LLMPage() {
         rate_per_minute: Number(rpm) || 0,
         context_window_k: Number(cw) || 0,
         reasoning_effort: toStore(thinkMode, effort),
+        session_id: sessionId,
       });
       toast.success(selected?.is_default ? "已保存，激活配置即时生效，无需重启" : "已保存");
       setApiKey("");
@@ -604,13 +734,40 @@ export default function LLMPage() {
 
                 <div className="grid gap-2">
                   <Label htmlFor="model">模型</Label>
-                  <Input
-                    id="model"
-                    className="font-mono"
-                    placeholder="claude-opus-4-8"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                  />
+                  <div className="flex gap-2">
+                    <Input
+                      id="model"
+                      className="min-w-0 flex-1 font-mono"
+                      placeholder="claude-opus-4-8"
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                    />
+                    <Select value="" onValueChange={(v) => v && pickModelSuggestion(v)}>
+                      <SelectTrigger className="w-44 shrink-0">
+                        <SelectValue placeholder="建议模型" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(modelSugs.length ? modelSugs : (MODEL_SUGGESTIONS[format] ?? [])).map((m) => (
+                          <SelectItem key={m} value={m}>
+                            <span className="font-mono text-xs">{m}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={fetchModels}
+                      disabled={fetchingModels}
+                      className="shrink-0"
+                    >
+                      {fetchingModels ? <Loader2Icon className="animate-spin" /> : <DownloadIcon className="size-4" />}
+                      拉取
+                    </Button>
+                  </div>
+                  <p className="text-muted-foreground text-xs">
+                    从「建议模型」选择或「拉取」base_url 的 /models，会自动填入模型并补上下文窗口。
+                  </p>
                 </div>
 
                 <div className="grid gap-2">
@@ -635,6 +792,20 @@ export default function LLMPage() {
                   />
                   <p className="text-muted-foreground text-xs">
                     仅 LLM 出站请求走此代理，支持 http/https/socks5；留空则用环境变量（HTTP_PROXY/HTTPS_PROXY）。
+                  </p>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="session-id">会话 ID · x-opencode-session（可选）</Label>
+                  <Input
+                    id="session-id"
+                    className="font-mono"
+                    placeholder="留空自动生成"
+                    value={sessionId}
+                    onChange={(e) => setSessionId(e.target.value)}
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    OpenCode GO 等网关要求稳定的会话头用于路由与提示词缓存；base_url 含 opencode 时留空会自动生成。
                   </p>
                 </div>
 

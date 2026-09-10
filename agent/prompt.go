@@ -19,6 +19,14 @@ type WorkerVars struct{ ProxyAddr, WorkerName string }
 type MainVars struct{ Goal, AssetSummary, FindingsSummary string }
 type GoalsVars struct{ EngagementDescription, Now string }
 
+// GlobalInstruction 追加到每个 agent 的系统提示词末尾，保证统一的回复语言与安全纪律。
+const GlobalInstruction = `
+
+## 全局纪律
+- **始终使用中文回复**（命令 / 代码 / PoC / 原始报文等原文除外）。
+- 对可能产生状态变更或破坏性的操作（HTTP DELETE/PUT/PATCH、删除 / 修改 / 禁用账号、资金 / 审批类接口），**必须先向操作者说明将做什么、为什么，获得确认后再执行**；未经确认不得发起写操作。
+- 只依据真实工具输出作答，不臆造结论。`
+
 // renderSystem returns the rendered system-prompt BODY (段 [A]) for agentKey.
 // Precedence: the DB-stored template (if any) over the built-in default template
 // (def). BOTH are Go templates now — the built-in default is seeded into the DB
@@ -35,14 +43,15 @@ func renderSystem(agentKey, def string, vars any) string {
 			tmpl = t
 		}
 	}
+	var body string
 	if out, err := renderTmpl(tmpl, vars); err == nil {
-		return out
+		body = out
+	} else if out, err := renderTmpl(def, vars); err == nil {
+		body = out
+	} else {
+		body = def
 	}
-	// DB template broke (e.g. references an out-of-catalog var) → code default.
-	if out, err := renderTmpl(def, vars); err == nil {
-		return out
-	}
-	return def
+	return body + GlobalInstruction
 }
 
 func renderTmpl(tmpl string, vars any) (string, error) {

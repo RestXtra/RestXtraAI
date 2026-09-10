@@ -244,6 +244,7 @@ CREATE TABLE IF NOT EXISTS llm_profiles (
     -- auth_mode 选择认证头：''/x-api-key = Anthropic 默认 x-api-key（OpenAI 用 Bearer）；
     -- 'bearer' = Authorization: Bearer（兼容 ANTHROPIC_AUTH_TOKEN 类中转网关）。
     auth_mode        TEXT NOT NULL DEFAULT '',
+    session_id       TEXT NOT NULL DEFAULT '',
     is_default       BOOLEAN NOT NULL DEFAULT false,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()

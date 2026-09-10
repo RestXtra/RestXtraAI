@@ -242,7 +242,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		s.seedSixDomainAgents()
 		s.seedAgentModelBindings()                                          // P1.4 强/弱模型路由：按模型名把 planner 绑强模型、worker 绑弱模型(一次性)
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools, &s.assemblyCatalog) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
-		domainReg := buildDomainReg(m.Assets())
+		domainReg := buildDomainReg(m.pg, m.Assets())
 		wireTools(m.pg, domainReg, &s.toolCatalog) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
 		seedPrompts(m.pg)                          // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
 		s.seedOrchestrationTools()                 // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
@@ -334,6 +334,7 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 	cfg.ContextWindowK = p.ContextWindowK
 	cfg.ReasoningEffort = p.ReasoningEffort
 	cfg.AuthMode = p.AuthMode
+	cfg.SessionID = p.SessionID
 	if cfg.APIKey == "" {
 		return cfg, false
 	}
@@ -361,7 +362,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) {
 	newID, err := s.m.pg.SaveProfile(&db.LLMProfile{
 		ID: id, Name: "default", Format: format, Model: cfg.Model, BaseURL: cfg.BaseURL, Proxy: cfg.Proxy,
 		APIKey: cfg.APIKey, RatePerSecond: cfg.RatePerSecond, RatePerMinute: cfg.RatePerMinute,
-		ContextWindowK: cfg.ContextWindowK, ReasoningEffort: cfg.ReasoningEffort, AuthMode: cfg.AuthMode, IsDefault: true,
+		ContextWindowK: cfg.ContextWindowK, ReasoningEffort: cfg.ReasoningEffort, AuthMode: cfg.AuthMode, SessionID: cfg.SessionID, IsDefault: true,
 	})
 	if err == nil {
 		_ = s.m.pg.SetActiveProfile(newID)
@@ -1157,6 +1158,7 @@ func (s *Server) getLLM(w http.ResponseWriter, r *http.Request) {
 		"context_window_k": s.llmCfg.ContextWindowK,
 		"reasoning_effort": s.llmCfg.ReasoningEffort,
 		"auth_mode":        s.llmCfg.AuthMode,
+		"session_id":       s.llmCfg.SessionID,
 	})
 }
 
@@ -1173,6 +1175,7 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		ContextWindowK  int     `json:"context_window_k"`
 		ReasoningEffort string  `json:"reasoning_effort"`
 		AuthMode        string  `json:"auth_mode"` // ""|x-api-key|bearer
+		SessionID       string  `json:"session_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -1182,6 +1185,7 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 	cfg.RatePerSecond, cfg.RatePerMinute = req.RatePerSecond, req.RatePerMinute
 	cfg.ReasoningEffort = req.ReasoningEffort
 	cfg.AuthMode = req.AuthMode
+	cfg.SessionID = req.SessionID
 	if k := req.ContextWindowK; k > 0 { // 0 = keep default (200K); cap at 1M
 		if k > 1000 {
 			k = 1000
@@ -1191,6 +1195,11 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 	if cfg.APIKey == "" {
 		s.cfgMu.Lock()
 		cfg.APIKey = s.llmCfg.APIKey // keep existing key if not re-entered
+		s.cfgMu.Unlock()
+	}
+	if cfg.SessionID == "" {
+		s.cfgMu.Lock()
+		cfg.SessionID = s.llmCfg.SessionID // keep existing x-opencode-session if not re-entered
 		s.cfgMu.Unlock()
 	}
 	if cfg.APIKey == "" {
@@ -1216,6 +1225,7 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		APIKey          string `json:"api_key"`
 		ReasoningEffort string `json:"reasoning_effort"`
 		AuthMode        string `json:"auth_mode"`  // ""|x-api-key|bearer
+		SessionID       string `json:"session_id"` // x-opencode-session 头(OpenCode GO 等网关)
 		ProfileID       *int64 `json:"profile_id"` // 测已存 profile 时传入：api_key 为空则用它存的 key
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1226,13 +1236,20 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// mirror production: send the SAME thinking params so a provider that rejects the
 	// reasoning_effort/thinking field fails the test too (no false "test ok, run 400").
 	cfg.ReasoningEffort = req.ReasoningEffort
-	// 认证头与已存 profile 一致（profile 存的 auth_mode 优先于表单，因表单可能未选）。
-	if req.AuthMode == "" && req.ProfileID != nil {
+	// 测「已存 profile」时，若表单未填 format/模型/端点，则用 profile 存的值（否则空
+	// provider 会默认成 anthropic，OpenCode GO 等 openai 兼容端点会被测错）。
+	if req.ProfileID != nil {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
+			if req.Provider == "" {
+				cfg = agent.ConfigFrom(p.Format, p.Model, p.BaseURL, p.APIKey, p.Proxy)
+				cfg.ReasoningEffort = req.ReasoningEffort
+			}
 			req.AuthMode = p.AuthMode
+			req.SessionID = p.SessionID
 		}
 	}
 	cfg.AuthMode = req.AuthMode
+	cfg.SessionID = req.SessionID
 	// API Key 解析优先级：表单输入 > 指定 profile 存的 key > 全局配置的 key。
 	// 已存 profile 的 key 不回传浏览器，所以测试已存配置时表单为空，需从 DB 取。
 	if cfg.APIKey == "" && req.ProfileID != nil {
@@ -1248,6 +1265,12 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	if cfg.APIKey == "" {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": "未提供 API Key"})
 		return
+	}
+	// 测试未传 session_id 时，回退到已激活配置的会话头（OpenCode GO 网关必需）。
+	if cfg.SessionID == "" {
+		s.cfgMu.Lock()
+		cfg.SessionID = s.llmCfg.SessionID
+		s.cfgMu.Unlock()
 	}
 	lat, err := agent.TestConnection(r.Context(), cfg)
 	if err != nil {

@@ -361,6 +361,7 @@ type LLMProfileDTO struct {
 	ContextWindowK  int     `json:"context_window_k"`
 	ReasoningEffort string  `json:"reasoning_effort"`
 	AuthMode        string  `json:"auth_mode,omitempty"`
+	SessionID       string  `json:"session_id,omitempty"`
 	IsDefault       bool    `json:"is_default"`
 }
 
@@ -378,6 +379,7 @@ func llmProfileDTO(p *db.LLMProfile) LLMProfileDTO {
 		ContextWindowK:  p.ContextWindowK,
 		ReasoningEffort: p.ReasoningEffort,
 		AuthMode:        p.AuthMode,
+		SessionID:       p.SessionID,
 		IsDefault:       p.IsDefault,
 	}
 }

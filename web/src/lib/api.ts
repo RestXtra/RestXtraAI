@@ -398,6 +398,7 @@ export const api = {
     reasoning_effort = "",
     profile_id?: number,
     auth_mode = "",
+    session_id = "",
   ) =>
     post<{ ok: boolean; error?: string; latency_ms?: number; model?: string }>("/llm/test", {
       provider,
@@ -407,6 +408,7 @@ export const api = {
       api_key,
       reasoning_effort,
       auth_mode,
+      session_id,
       profile_id,
     }),
   llmProfiles: () => get<{ profiles: LLMProfile[] }>("/llm/profiles").then((r) => arr(r.profiles)),
@@ -423,6 +425,7 @@ export const api = {
     context_window_k?: number;
     reasoning_effort?: string; // ""|"off"|"low"|"medium"|"high"|"max"
     auth_mode?: string; // ""|"x-api-key"|"bearer" (bearer=Authorization: Bearer, 兼容 ANTHROPIC_AUTH_TOKEN)
+    session_id?: string; // x-opencode-session 会话头（OpenCode GO 等网关必需）
   }) => post<{ id: number }>("/llm/profiles", p),
   deleteLLMProfile: (id: string) => del<{ deleted: number }>(`/llm/profiles/${id}`),
   activateLLMProfile: (id: string) => post<{ ok: boolean }>("/llm/profiles/active", { id: Number(id) }),

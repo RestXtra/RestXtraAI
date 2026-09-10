@@ -4,7 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // ---------- LLM profiles ----------
@@ -30,12 +33,15 @@ type LLMProfile struct {
 	// AuthMode selects the credential header: ""/x-api-key = Anthropic 默认头
 	// (OpenAI 恒为 Bearer)；"bearer" = Authorization: Bearer，兼容 ANTHROPIC_AUTH_TOKEN
 	// 类中转网关（OpenCode GO 等）。映射到 agent.Config.AuthMode。
-	AuthMode  string `json:"auth_mode,omitempty"`
+	AuthMode string `json:"auth_mode,omitempty"`
+	// SessionID 是发往网关的 x-opencode-session 头值（OpenCode GO 等要求稳定的会话 ID
+	// 用于路由与提示词缓存）。空 = 不发送该头（普通 Anthropic/OpenAI 无需）。
+	SessionID string `json:"session_id,omitempty"`
 	IsDefault bool   `json:"is_default"`
 }
 
 func (d *DB) ListProfiles() ([]*LLMProfile, error) {
-	rows, err := d.Query(`SELECT id,name,format,COALESCE(base_url,''),COALESCE(proxy,''),model,COALESCE(api_key_hint,''),rate_per_second,rate_per_minute,context_window_k,COALESCE(reasoning_effort,''),COALESCE(auth_mode,''),is_default FROM llm_profiles ORDER BY id`)
+	rows, err := d.Query(`SELECT id,name,format,COALESCE(base_url,''),COALESCE(proxy,''),model,COALESCE(api_key_hint,''),rate_per_second,rate_per_minute,context_window_k,COALESCE(reasoning_effort,''),COALESCE(auth_mode,''),COALESCE(session_id,''),is_default FROM llm_profiles ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +49,7 @@ func (d *DB) ListProfiles() ([]*LLMProfile, error) {
 	var out []*LLMProfile
 	for rows.Next() {
 		var p LLMProfile
-		if err := rows.Scan(&p.ID, &p.Name, &p.Format, &p.BaseURL, &p.Proxy, &p.Model, &p.APIKeyHint, &p.RatePerSecond, &p.RatePerMinute, &p.ContextWindowK, &p.ReasoningEffort, &p.AuthMode, &p.IsDefault); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Format, &p.BaseURL, &p.Proxy, &p.Model, &p.APIKeyHint, &p.RatePerSecond, &p.RatePerMinute, &p.ContextWindowK, &p.ReasoningEffort, &p.AuthMode, &p.SessionID, &p.IsDefault); err != nil {
 			return nil, err
 		}
 		out = append(out, &p)
@@ -54,8 +60,8 @@ func (d *DB) ListProfiles() ([]*LLMProfile, error) {
 // ActiveProfile returns the default (active) profile with its api key, or nil.
 func (d *DB) ActiveProfile() (*LLMProfile, error) {
 	var p LLMProfile
-	err := d.QueryRow(`SELECT id,name,format,COALESCE(base_url,''),COALESCE(proxy,''),model,COALESCE(api_key,''),rate_per_second,rate_per_minute,context_window_k,COALESCE(reasoning_effort,''),COALESCE(auth_mode,''),is_default FROM llm_profiles WHERE is_default LIMIT 1`).
-		Scan(&p.ID, &p.Name, &p.Format, &p.BaseURL, &p.Proxy, &p.Model, &p.APIKey, &p.RatePerSecond, &p.RatePerMinute, &p.ContextWindowK, &p.ReasoningEffort, &p.AuthMode, &p.IsDefault)
+	err := d.QueryRow(`SELECT id,name,format,COALESCE(base_url,''),COALESCE(proxy,''),model,COALESCE(api_key,''),rate_per_second,rate_per_minute,context_window_k,COALESCE(reasoning_effort,''),COALESCE(auth_mode,''),COALESCE(session_id,''),is_default FROM llm_profiles WHERE is_default LIMIT 1`).
+		Scan(&p.ID, &p.Name, &p.Format, &p.BaseURL, &p.Proxy, &p.Model, &p.APIKey, &p.RatePerSecond, &p.RatePerMinute, &p.ContextWindowK, &p.ReasoningEffort, &p.AuthMode, &p.SessionID, &p.IsDefault)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -70,8 +76,8 @@ func (d *DB) ActiveProfile() (*LLMProfile, error) {
 // Used to run a task on a specific (non-default) LLM profile.
 func (d *DB) ProfileByID(id int64) (*LLMProfile, error) {
 	var p LLMProfile
-	err := d.QueryRow(`SELECT id,name,format,COALESCE(base_url,''),COALESCE(proxy,''),model,COALESCE(api_key,''),rate_per_second,rate_per_minute,context_window_k,COALESCE(reasoning_effort,''),COALESCE(auth_mode,''),is_default FROM llm_profiles WHERE id=$1`, id).
-		Scan(&p.ID, &p.Name, &p.Format, &p.BaseURL, &p.Proxy, &p.Model, &p.APIKey, &p.RatePerSecond, &p.RatePerMinute, &p.ContextWindowK, &p.ReasoningEffort, &p.AuthMode, &p.IsDefault)
+	err := d.QueryRow(`SELECT id,name,format,COALESCE(base_url,''),COALESCE(proxy,''),model,COALESCE(api_key,''),rate_per_second,rate_per_minute,context_window_k,COALESCE(reasoning_effort,''),COALESCE(auth_mode,''),COALESCE(session_id,''),is_default FROM llm_profiles WHERE id=$1`, id).
+		Scan(&p.ID, &p.Name, &p.Format, &p.BaseURL, &p.Proxy, &p.Model, &p.APIKey, &p.RatePerSecond, &p.RatePerMinute, &p.ContextWindowK, &p.ReasoningEffort, &p.AuthMode, &p.SessionID, &p.IsDefault)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -84,6 +90,11 @@ func (d *DB) ProfileByID(id int64) (*LLMProfile, error) {
 
 // SaveProfile inserts (id==0) or updates a profile. Empty apiKey on update keeps existing.
 func (d *DB) SaveProfile(p *LLMProfile) (int64, error) {
+	// OpenCode GO 类网关必需 x-opencode-session：session_id 为空时自动生成稳定 UUID，
+	// 避免每次新建 profile 都漏掉会话头导致 MissingSessionID。
+	if p.SessionID == "" && strings.Contains(strings.ToLower(p.BaseURL), "opencode") {
+		p.SessionID = uuid.NewString()
+	}
 	apiKey, err := d.ProtectSecret(p.APIKey)
 	if err != nil {
 		return 0, err
@@ -94,18 +105,18 @@ func (d *DB) SaveProfile(p *LLMProfile) (int64, error) {
 	}
 	if p.ID == 0 {
 		var id int64
-		err := d.QueryRow(`INSERT INTO llm_profiles(name,format,base_url,proxy,model,api_key,api_key_hint,rate_per_second,rate_per_minute,context_window_k,reasoning_effort,auth_mode)
-VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,NULLIF($6,''),NULLIF($7,''),$8,$9,$10,$11,$12) RETURNING id`,
-			p.Name, p.Format, p.BaseURL, p.Proxy, p.Model, apiKey, hint, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.AuthMode).Scan(&id)
+		err := d.QueryRow(`INSERT INTO llm_profiles(name,format,base_url,proxy,model,api_key,api_key_hint,rate_per_second,rate_per_minute,context_window_k,reasoning_effort,auth_mode,session_id)
+VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,NULLIF($6,''),NULLIF($7,''),$8,$9,$10,$11,$12,$13) RETURNING id`,
+			p.Name, p.Format, p.BaseURL, p.Proxy, p.Model, apiKey, hint, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.AuthMode, p.SessionID).Scan(&id)
 		return id, err
 	}
 	if p.APIKey == "" {
-		_, err := d.Exec(`UPDATE llm_profiles SET name=$1,format=$2,base_url=NULLIF($3,''),proxy=NULLIF($4,''),model=$5,rate_per_second=$6,rate_per_minute=$7,context_window_k=$8,reasoning_effort=$9,auth_mode=$10 WHERE id=$11`,
-			p.Name, p.Format, p.BaseURL, p.Proxy, p.Model, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.AuthMode, p.ID)
+		_, err := d.Exec(`UPDATE llm_profiles SET name=$1,format=$2,base_url=NULLIF($3,''),proxy=NULLIF($4,''),model=$5,rate_per_second=$6,rate_per_minute=$7,context_window_k=$8,reasoning_effort=$9,auth_mode=$10,session_id=$11 WHERE id=$12`,
+			p.Name, p.Format, p.BaseURL, p.Proxy, p.Model, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.AuthMode, p.SessionID, p.ID)
 		return p.ID, err
 	}
-	_, err = d.Exec(`UPDATE llm_profiles SET name=$1,format=$2,base_url=NULLIF($3,''),proxy=NULLIF($4,''),model=$5,api_key=$6,api_key_hint=$7,rate_per_second=$8,rate_per_minute=$9,context_window_k=$10,reasoning_effort=$11,auth_mode=$12 WHERE id=$13`,
-		p.Name, p.Format, p.BaseURL, p.Proxy, p.Model, apiKey, hint, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.AuthMode, p.ID)
+	_, err = d.Exec(`UPDATE llm_profiles SET name=$1,format=$2,base_url=NULLIF($3,''),proxy=NULLIF($4,''),model=$5,api_key=$6,api_key_hint=$7,rate_per_second=$8,rate_per_minute=$9,context_window_k=$10,reasoning_effort=$11,auth_mode=$12,session_id=$13 WHERE id=$14`,
+		p.Name, p.Format, p.BaseURL, p.Proxy, p.Model, apiKey, hint, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.AuthMode, p.SessionID, p.ID)
 	return p.ID, err
 }
 
