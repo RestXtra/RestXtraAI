@@ -547,7 +547,8 @@ export default function TasksPage() {
           <Table className="**:data-[slot='table-cell']:px-4 **:data-[slot='table-head']:px-4">
             <TableHeader className="[&_tr]:border-t">
               <TableRow>
-                <TableHead className="font-mono">ID</TableHead>
+                  <TableHead className="font-mono">ID</TableHead>
+                  <TableHead>来源</TableHead>
                 <TableHead>描述</TableHead>
                 <TableHead>企业</TableHead>
                 <TableHead>目标</TableHead>
@@ -566,6 +567,25 @@ export default function TasksPage() {
                 <TableRow key={task.id} className="group border-border/60">
                   <TableCell>
                     <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{task.id}</code>
+                  </TableCell>
+                  <TableCell>
+                    {task.conversation_id ? (
+                      <span
+                        className="rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-600 dark:text-sky-400"
+                        title={`由会话 #${task.conversation_id} 派生`}
+                      >
+                        会话 #{task.conversation_id}
+                      </span>
+                    ) : task.parent_ref ? (
+                      <span
+                        className="rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-600 dark:text-violet-400"
+                        title={`父任务 #${task.parent_ref}`}
+                      >
+                        父 #{task.parent_ref}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">—</span>
+                    )}
                   </TableCell>
                   <TableCell className="font-medium">
                     <div className="flex max-w-xs items-center gap-2">
