@@ -85,3 +85,85 @@ func applyToolPolicy(ctx context.Context, tools []actool.CoreTool, def *Deferred
 	def.GlobalCatalog = catalog
 	return out
 }
+
+// ToolAllowlistFor, if set by the server, returns a per-agent base-tool allowlist
+// (by tool name). nil/empty means no restriction (unchanged behavior). It is used
+// to strip execution tools from orchestrator agents (e.g. red_team_lead) so they
+// can only delegate: they keep orchestration/read/report tools and lose the
+// SDK defaults (Bash/Read/Write/Edit/LS/Glob/Grep) and WebFetch.
+var ToolAllowlistFor func(agentKey string) []string
+
+// AgentHasToolAllowlist reports whether a non-empty allowlist is configured for
+// agentKey (i.e. the agent is tool-restricted).
+func AgentHasToolAllowlist(agentKey string) bool {
+	if ToolAllowlistFor == nil {
+		return false
+	}
+	return len(ToolAllowlistFor(agentKey)) > 0
+}
+
+// AgentToolAllowed reports whether name is permitted for agentKey under the
+// allowlist. No allowlist configured → everything allowed.
+func AgentToolAllowed(agentKey, name string) bool {
+	if ToolAllowlistFor == nil {
+		return true
+	}
+	allow := ToolAllowlistFor(agentKey)
+	if len(allow) == 0 {
+		return true
+	}
+	for _, n := range allow {
+		if strings.EqualFold(strings.TrimSpace(n), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// ApplyAgentToolAllowlist filters an assembled chat tool set down to the agent's
+// allowlist and prunes the deferred wiring, so meta-tools cannot reach a filtered
+// capability. No allowlist → tools returned unchanged.
+func ApplyAgentToolAllowlist(agentKey string, tools []actool.CoreTool, def *DeferredInfo) []actool.CoreTool {
+	if ToolAllowlistFor == nil {
+		return tools
+	}
+	allow := ToolAllowlistFor(agentKey)
+	if len(allow) == 0 {
+		return tools
+	}
+	keep := map[string]bool{}
+	for _, n := range allow {
+		if n = strings.ToLower(strings.TrimSpace(n)); n != "" {
+			keep[n] = true
+		}
+	}
+	out := make([]actool.CoreTool, 0, len(tools))
+	kept := map[string]bool{}
+	for _, tool := range tools {
+		if keep[strings.ToLower(tool.Name())] {
+			out = append(out, tool)
+			kept[tool.Name()] = true
+		}
+	}
+	if def != nil {
+		filterNames := func(names []string) []string {
+			f := make([]string, 0, len(names))
+			for _, n := range names {
+				if kept[n] {
+					f = append(f, n)
+				}
+			}
+			return f
+		}
+		def.Deferred = filterNames(def.Deferred)
+		def.GlobalNames = filterNames(def.GlobalNames)
+		catalog := def.GlobalCatalog[:0]
+		for _, e := range def.GlobalCatalog {
+			if kept[e.Name] {
+				catalog = append(catalog, e)
+			}
+		}
+		def.GlobalCatalog = catalog
+	}
+	return out
+}

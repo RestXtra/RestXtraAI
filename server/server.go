@@ -245,6 +245,8 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		s.seedSixDomainAgents()
 		s.seedSrcHuntingSkillBinding()                                      // 把 src-hunting 方法论 skill 追加给对话式进攻 agent
 		s.seedRedTeamLeadPromptV2()                                         // 把红队总指挥提示词升级为 SRC 方法论版
+		s.wireAgentToolAllowlist()                                          // 让 agent 包按 key 读取工具白名单
+		s.seedCommanderToolAllowlist()                                      // 红队总指挥只保留编排/只读/报告工具（不自己执行）
 		s.seedAgentModelBindings()                                          // P1.4 强/弱模型路由：按模型名把 planner 绑强模型、worker 绑弱模型(一次性)
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools, &s.assemblyCatalog) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
 		domainReg := buildDomainReg(m.pg, m.Assets())

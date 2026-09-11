@@ -93,6 +93,9 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	base := withHostBash(actool.DefaultTools())
 	tools, def, cleanup := AugmentTools(ctx, agentKey, base)
 	defer cleanup()
+	// 编排类 agent（如红队总指挥）用白名单裁掉执行工具（Bash/Read/Write/WebFetch…），
+	// 使其只能派活，不能自己动手。无白名单→不变。
+	tools = ApplyAgentToolAllowlist(agentKey, tools, &def)
 	{
 		names := make([]string, 0, len(tools))
 		for _, t := range tools {
@@ -104,29 +107,32 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	system, boundary := deferredSystem(chatSystem(agentKey, sessionWorkDir), def)
 	opts := agentcore.Options{
 		EmitPromptEvents: true,
-		Provider:        c.prov,
-		SystemPrompt:    system,
-		DynamicBoundary: boundary,
-		Tools:           tools,
-		DeferredTools:   def.Deferred,
-		UnlockSet:       def.Unlock,
-		PermissionMode:  permission.ModeBypass,
-		EnableWebFetch:  true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
-		WebFetchProxy:   c.proxyAddr,
-		WebFetchCACert:  c.proxyCACert,
+		Provider:         c.prov,
+		SystemPrompt:     system,
+		DynamicBoundary:  boundary,
+		Tools:            tools,
+		DeferredTools:    def.Deferred,
+		UnlockSet:        def.Unlock,
+		PermissionMode:   permission.ModeBypass,
+		EnableWebFetch:   AgentToolAllowed(agentKey, "WebFetch"), // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
+		WebFetchProxy:    c.proxyAddr,
+		WebFetchCACert:   c.proxyCACert,
 		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
 		// WebSearchProxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
-		EnableWebSearch:    ws.Enabled,
+		EnableWebSearch:    ws.Enabled && AgentToolAllowed(agentKey, "web_search"),
 		WebSearchBackend:   ws.Backend,
 		BraveSearchAPIKey:  ws.BraveKey,
 		TavilySearchAPIKey: ws.TavilyKey,
 		WebSearchProxy:     ws.Proxy,
-		BashEnv:           proxyEnv(c.proxyAddr, c.proxyCACert), // Bash 子命令默认走代理+信任 CA
-		WorkingDir:        sessionWorkDir,
-		MaxTurns:          maxTurns,
-		MaxDuration:       maxDuration,
-		Compaction:        compactionConfig(c.window),
-		Todos:             actool.NewTodoStore(),
+		BashEnv:            proxyEnv(c.proxyAddr, c.proxyCACert), // Bash 子命令默认走代理+信任 CA
+		WorkingDir:         sessionWorkDir,
+		MaxTurns:           maxTurns,
+		MaxDuration:        maxDuration,
+		Compaction:         compactionConfig(c.window),
+		Todos:              actool.NewTodoStore(),
+		// 受限 agent（如红队总指挥）禁用后台任务工具（TaskOutput/TaskStop/TaskList/Monitor），
+		// 否则它们会绕过工具白名单、带来起/杀进程等执行能力。未受限 agent 保持默认。
+		DisableBackgroundTasks: AgentHasToolAllowlist(agentKey) && !AgentToolAllowed(agentKey, "TaskOutput"),
 		// large tool output spills to cmd-output/ under the session dir.
 		// 截断上限用 SDK 默认(tool.Capture 的 30000 字符)。
 		ToolOutputDir: filepath.Join(sessionWorkDir, "cmd-output"),

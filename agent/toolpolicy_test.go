@@ -61,3 +61,55 @@ func TestCapabilityAllowedHonorsDelegationPolicy(t *testing.T) {
 		t.Fatal("SDK capability policy not enforced")
 	}
 }
+
+func TestAgentToolAllowlistFiltersExecutionTools(t *testing.T) {
+	orig := ToolAllowlistFor
+	defer func() { ToolAllowlistFor = orig }()
+	ToolAllowlistFor = func(key string) []string {
+		if key == "red_team_lead" {
+			return []string{"spawn_task", "wait_task", "skill"}
+		}
+		return nil
+	}
+	tools := []actool.CoreTool{
+		policyTestTool("spawn_task"), policyTestTool("wait_task"),
+		policyTestTool("Skill"), policyTestTool("Bash"), policyTestTool("Read"),
+		policyTestTool("ExecuteExtraTool"),
+	}
+	def := DeferredInfo{
+		Deferred:      []string{"Bash"},
+		GlobalNames:   []string{"Bash", "spawn_task"},
+		GlobalCatalog: []actool.CatalogEntry{{Name: "Bash"}, {Name: "spawn_task"}},
+	}
+	got := ApplyAgentToolAllowlist("red_team_lead", tools, &def)
+	names := map[string]bool{}
+	for _, tl := range got {
+		names[tl.Name()] = true
+	}
+	if !names["spawn_task"] || !names["wait_task"] || !names["Skill"] {
+		t.Fatalf("allowlisted tools missing: %v", names)
+	}
+	if names["Bash"] || names["Read"] || names["ExecuteExtraTool"] {
+		t.Fatalf("execution tools survived allowlist: %v", names)
+	}
+	if len(def.Deferred) != 0 || len(def.GlobalCatalog) != 1 || def.GlobalCatalog[0].Name != "spawn_task" {
+		t.Fatalf("deferred wiring not pruned: %+v", def)
+	}
+	if AgentToolAllowed("red_team_lead", "Bash") || !AgentToolAllowed("red_team_lead", "spawn_task") {
+		t.Fatal("AgentToolAllowed mismatch")
+	}
+	if !AgentToolAllowed("other_agent", "Bash") {
+		t.Fatal("agent without allowlist must keep all tools")
+	}
+}
+
+func TestApplyAgentToolAllowlistNoopWithoutConfig(t *testing.T) {
+	orig := ToolAllowlistFor
+	defer func() { ToolAllowlistFor = orig }()
+	ToolAllowlistFor = nil
+	tools := []actool.CoreTool{policyTestTool("Bash")}
+	got := ApplyAgentToolAllowlist("red_team_lead", tools, nil)
+	if len(got) != 1 {
+		t.Fatalf("no-op expected, got %d tools", len(got))
+	}
+}

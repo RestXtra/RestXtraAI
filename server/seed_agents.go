@@ -1,7 +1,11 @@
 package server
 
 import (
+	"encoding/json"
 	"log"
+	"strings"
+
+	"github.com/RestXtra/RestXtraAI/agent"
 )
 
 // 六域智能体体系（面向 TSecBench 六能力域）：
@@ -162,6 +166,7 @@ var sixDomainAgents = []domainAgentSpec{
 			"- 云攻击专家(cloud_attack)：IAM/S3/容器/K8s/云元数据\n" +
 			"- 规避专家(evasion)：WAF/AV/EDR/流量混淆\n" +
 			"核心纪律（贯穿派活与验收）：\n" +
+			"0. 你不亲自执行任何动作。你只有编排/只读/报告类工具（没有 Bash/Read/Write/WebFetch/扫描器），物理上无法自己跑命令。所有实操——信息收集、扫描、探测、验证、利用、取证、写报告——一律 spawn_task 交给专用 agent（信息收集 asset_intel、漏洞猎人 web_vuln、利用专家 exploit、渗透链 pentest_chain、云攻击 cloud_attack、规避 evasion、二进制 binary_vuln、代码审计 code_audit），你只做拆解、派活、验收、汇总。发现自己在分析具体技术细节或想跑命令时，立刻改为派活。\n" +
 			"1. 一种子闭环，先深后广：一次主攻一个种子/入口（一个目标/资产/链路），走完 面→利用→验证→报告→迭代 再换下一个；不要一上来铺大面、每条只探一点。多路并行只在机理不同的 2–3 条路线间，且每条都要走透。\n" +
 			"2. 类型矩阵派活：派活时要求子 agent 覆盖其域的类型矩阵（未授权/越权/注入/SSRF/XSS/RCE/上传/穿越/认证等），强调全类型+全参数，力气先砸更易高危的点。\n" +
 			"3. 最小危害+基线差分：越权/注入类必须用基线差分（同请求换对象/参数，对比响应差异）证明，而非「看起来可能」；严禁破坏性利用与越界。\n" +
@@ -282,7 +287,7 @@ func (s *Server) seedRedTeamLeadPromptV2() {
 	if pg == nil {
 		return
 	}
-	const flag = "prompt_red_team_lead_methodology_v1"
+	const flag = "prompt_red_team_lead_methodology_v2"
 	if v, _, _ := pg.GetSetting(flag); v == "true" {
 		return
 	}
@@ -302,6 +307,51 @@ func (s *Server) seedRedTeamLeadPromptV2() {
 		break
 	}
 	_ = pg.SetSetting(flag, "true")
+}
+
+const agentToolAllowlistPrefix = "agent_tool_allowlist:"
+
+// wireAgentToolAllowlist 让 agent 包按 key 读取「工具白名单」：编排 agent 只用
+// 编排/只读/报告工具，无执行工具（Bash/Read/Write/WebFetch…），从而只能派活。
+func (s *Server) wireAgentToolAllowlist() {
+	pg := s.m.pg
+	agent.ToolAllowlistFor = func(key string) []string {
+		v, _, _ := pg.GetSetting(agentToolAllowlistPrefix + key)
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+		var out []string
+		if json.Unmarshal([]byte(v), &out) != nil {
+			return nil
+		}
+		return out
+	}
+}
+
+// commanderToolAllowlist 是「总指挥」类 agent 的白名单：编排 + 只读 + 报告；无执行工具。
+var commanderToolAllowlist = []string{
+	"skill", "todowrite",
+	"list_tasks", "spawn_task", "wait_task", "get_task_result", "pause_task",
+	"get_task_graph", "list_task_findings", "add_task_hint",
+	"get_task_worker_trace", "list_task_worker_traces", "search_task_worker_traces",
+	"list_llm_profiles",
+	"list_assets", "list_findings", "list_companies", "search_knowledge", "report_finding",
+}
+
+// seedCommanderToolAllowlist 一次性(flag 门控)给「红队总指挥」启用工具白名单，
+// 使其无法自己执行、只能 spawn_task 派活。
+func (s *Server) seedCommanderToolAllowlist() {
+	const flag = "commander_tool_allowlist_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	b, _ := json.Marshal(commanderToolAllowlist)
+	if err := s.m.pg.SetSetting(agentToolAllowlistPrefix+"red_team_lead", string(b)); err != nil {
+		log.Printf("[allowlist] red_team_lead 写入失败: %v", err)
+		return
+	}
+	_ = s.m.pg.SetSetting(flag, "true")
+	log.Printf("[allowlist] red_team_lead 工具白名单已启用（仅编排/只读/报告，无执行工具）")
 }
 
 // seedAgentModelBindings 是一次性(设置标记 agent_model_bind_v1)把 planner 绑到"强模型"、
