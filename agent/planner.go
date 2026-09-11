@@ -25,6 +25,7 @@ type Planner struct {
 	model       string
 	tx          *transcript.Store                      // raw LLM conversation persistence (nil = off)
 	window      int                                    // context window in tokens (for compaction)
+	tokenCount  llm.TokenCounter                       // exact compaction token counter (nil = local estimate)
 	maxTurns    int                                    // max agent turns per run (0 = unlimited)
 	killWork    func(intentID int64) error             // engine callback to terminate a running work (nil = off)
 	steerWork   func(intentID int64, msg string) error // engine callback to steer a running work mid-run (nil = off)
@@ -51,6 +52,11 @@ func (p *Planner) SetProxy(addr, caCert string) { p.proxyAddr, p.proxyCACert = a
 
 // SetWebSearch selects the web_search backend for the planner (off by default).
 func (p *Planner) SetWebSearch(o WebSearchOpts) { p.webSearch = o }
+
+// SetCompactionTokenCounter wires the exact token counter used for compaction
+// threshold math (nil = norma's local estimate). Resolved per provider by the
+// host so a non-Anthropic provider never attempts a remote count_tokens call.
+func (p *Planner) SetCompactionTokenCounter(c llm.TokenCounter) { p.tokenCount = c }
 
 // todoFor returns the task's persistent planning todo store, creating it on first
 // use. Shared across all of this task's planner wake-ups.
@@ -303,7 +309,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		BashEnv:            proxyEnv(p.proxyAddr, p.proxyCACert), // Bash 子命令默认走代理+信任 CA
 		MaxTurns:           p.maxTurns,                           // 0 = unlimited (configurable in agent management)
 		MaxDuration:        maxDur,                               // 0=不限;有 deadline 时=距 deadline 剩余
-		Compaction:         compactionConfig(p.window),
+		Compaction:         compactionConfig(p.window, p.tokenCount),
 		// P7.3：免 LLM 的确定性摘要。
 		Summarizer: DeterministicSummarizer,
 		// 跨唤醒共享的规划待办：让串行链在多轮之间保留（session 是新的，store 不是）。

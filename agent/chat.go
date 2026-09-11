@@ -28,6 +28,7 @@ type ChatAgent struct {
 	workDir     string
 	tx          *transcript.Store
 	window      int
+	tokenCount  llm.TokenCounter // exact compaction token counter (nil = local estimate)
 	proxyAddr   string
 	proxyCACert string
 	webSearch   WebSearchOpts
@@ -44,6 +45,10 @@ func (c *ChatAgent) SetProxy(addr, caCert string) { c.proxyAddr, c.proxyCACert =
 
 // SetWebSearch selects the web_search backend for the chat agent (off by default).
 func (c *ChatAgent) SetWebSearch(o WebSearchOpts) { c.webSearch = o }
+
+// SetCompactionTokenCounter wires the exact token counter used for compaction
+// threshold math (nil = norma's local estimate). Resolved per provider by the host.
+func (c *ChatAgent) SetCompactionTokenCounter(counter llm.TokenCounter) { c.tokenCount = counter }
 
 // SetGuard attaches a guard (with user-configured intercept rules) to this chat
 // agent. Must be called before Chat; safe to call multiple times.
@@ -128,7 +133,7 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		WorkingDir:         sessionWorkDir,
 		MaxTurns:           maxTurns,
 		MaxDuration:        maxDuration,
-		Compaction:         compactionConfig(c.window),
+		Compaction:         compactionConfig(c.window, c.tokenCount),
 		Todos:              actool.NewTodoStore(),
 		// 受限 agent（如红队总指挥）禁用后台任务工具（TaskOutput/TaskStop/TaskList/Monitor），
 		// 否则它们会绕过工具白名单、带来起/杀进程等执行能力。未受限 agent 保持默认。

@@ -48,6 +48,7 @@ type Worker struct {
 	mem         *memory.Store     // cross-engagement tradecraft memory (G4)
 	tx          *transcript.Store // raw LLM conversation persistence (nil = off)
 	window      int               // context window in tokens (for compaction)
+	tokenCount  llm.TokenCounter  // exact compaction token counter (nil = local estimate)
 	maxTurns    int               // max agent turns per run (0 = unlimited)
 	// runTimeout is the wall-clock budget for the main exploration of one intent
 	// (0 = unlimited). When it fires, the run is cut and a settlement round is
@@ -90,6 +91,10 @@ func (w *Worker) SetProxy(addr, caCert string) { w.proxyAddr, w.proxyCACert = ad
 
 // SetWebSearch selects the web_search backend for this worker (off by default).
 func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
+
+// SetCompactionTokenCounter wires the exact token counter used for compaction
+// threshold math (nil = norma's local estimate). Resolved per provider by the host.
+func (w *Worker) SetCompactionTokenCounter(c llm.TokenCounter) { w.tokenCount = c }
 
 // proxyEnv builds the Bash-subprocess env that routes child-command HTTP through
 // the recording proxy and makes the common toolchain trust its MITM CA — so tools
@@ -318,7 +323,7 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 		// large tool output spills to cmd-output/ with a head + pointer (SDK tool.Capture);
 		// full output preserved on disk. 截断上限用 SDK 默认(30000 字符)。
 		ToolOutputDir: filepath.Join(w.workDir, "cmd-output"),
-		Compaction:    compactionConfig(w.window), // long tool-heavy runs stay within the window
+		Compaction:    compactionConfig(w.window, w.tokenCount), // long tool-heavy runs stay within the window
 		// P7.3：免 LLM 的确定性摘要（避免 compaction 触发时的额外模型调用）。
 		Summarizer: DeterministicSummarizer,
 		Todos:      actool.NewTodoStore(), // 会话级临时待办（TodoWrite），纯规划用，退出即丢

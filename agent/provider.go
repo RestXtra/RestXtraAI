@@ -91,17 +91,49 @@ func (c Config) CompactionWindow() int {
 // compactionConfig builds the agent-core compaction config for a context window
 // in tokens. agentcore.NewSession wires the summarizer (same provider) when this
 // is set on Options.Compaction.
-// P2.4：CountTokens 用精确 tokenizer（Anthropic cl100k 风格），避免估算导致的
-// 误触发/漏触发；ToolResultBudget 收紧到 500 清更多陈旧大工具结果，KeepRecent=8 保轨迹。
-func compactionConfig(windowTokens int) *compaction.Config {
+//
+// counter, when non-nil, is the exact token counter used for threshold math; nil
+// falls back to norma's local length estimate (EstimateTokens). The counter is
+// resolved per provider via Config.CompactionTokenCounter — never wired blindly,
+// because a doomed remote count_tokens call would run on every turn.
+// ToolResultBudget 收紧到 500 清更多陈旧大工具结果。
+func compactionConfig(windowTokens int, counter llm.TokenCounter) *compaction.Config {
 	if windowTokens <= 0 {
 		windowTokens = defaultWindowK * 1000
 	}
 	return &compaction.Config{
 		ContextWindow:    windowTokens,
-		CountTokens:      llm.NewAnthropicTokenCounter(llm.Config{Model: "claude-3-5-sonnet-20241022"}),
+		CountTokens:      counter,
 		ToolResultBudget: 500,
 	}
+}
+
+// CompactionTokenCounter returns an exact token counter for compaction thresholds,
+// or nil to use norma's local length estimate.
+//
+// The count_tokens endpoint is Anthropic-specific, so a counter is wired only for
+// an Anthropic provider that has a key. Previously this counter was wired for every
+// provider with an empty key and the default host, so each model turn attempted a
+// doomed HTTPS request to api.anthropic.com (no timeout) — pure per-turn latency,
+// and the result was discarded on failure anyway. Non-Anthropic providers now skip
+// the network entirely.
+func (c Config) CompactionTokenCounter() llm.TokenCounter {
+	if c.Format != llm.FormatAnthropic || strings.TrimSpace(c.APIKey) == "" {
+		return nil
+	}
+	baseURL := strings.TrimSpace(c.BaseURL)
+	if baseURL == "" {
+		baseURL = "https://api.anthropic.com"
+	}
+	return llm.NewAnthropicTokenCounter(llm.Config{
+		Format:  llm.FormatAnthropic,
+		BaseURL: baseURL,
+		APIKey:  c.APIKey,
+		// A cheap, stable model id used purely to tokenize; the count endpoint
+		// requires a known model name regardless of which model the agent runs.
+		Model:      "claude-3-5-sonnet-20241022",
+		HTTPClient: &http.Client{Timeout: 10 * time.Second},
+	})
 }
 
 // FromEnv resolves the LLM provider config:

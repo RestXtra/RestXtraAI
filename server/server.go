@@ -443,11 +443,13 @@ func (s *Server) buildPlannerWorker(prov llm.Provider, cfg agent.Config) (*agent
 	wk.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	wk.SetMemory(memory.NewStore(filepath.Join(s.m.dir, "memory")))
 	wk.SetWebSearch(s.webSearchFor("worker"))
+	wk.SetCompactionTokenCounter(wkCfg.CompactionTokenCounter()) // nil for non-Anthropic → local estimate
 	pl := agent.NewPlanner(plProv, plCfg.Model, s.m.dir, tx, plCfg.CompactionWindow(), s.agentMaxTurns("planner"))
 	pl.SetKillWork(s.engine.KillWork)               // planner kill_work → terminate a running work
 	pl.SetSteerWork(s.engine.SteerWork)             // planner steer_work → inject mid-run course-correction
 	pl.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert()) // WebFetch through the recording proxy
 	pl.SetWebSearch(s.webSearchFor("planner"))
+	pl.SetCompactionTokenCounter(plCfg.CompactionTokenCounter()) // nil for non-Anthropic → local estimate
 	return pl, wk
 }
 
@@ -472,12 +474,14 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	s.mainAgent = agent.NewMainAgent(prov, cfg.Model, s.m.dir, tx, win, s.agentMaxTurns("mainagent"))
 	s.mainAgent.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert()) // WebFetch through the recording proxy
 	s.mainAgent.SetWebSearch(s.webSearchFor("mainagent"))
+	s.mainAgent.SetCompactionTokenCounter(cfg.CompactionTokenCounter()) // nil for non-Anthropic → local estimate
 	// chat agent serves MANY custom agents by key → it holds the GLOBAL opts
 	// (backend/key) and gates Enabled per-conversation-agent at Chat time. 对话始终用激活配置。
 	s.chatAgent = agent.NewChatAgent(prov, cfg.Model, s.m.dir, tx, win) // chat page runner
 	s.chatAgent.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	s.chatAgent.SetWebSearch(s.m.WebSearchOpts())
 	s.chatAgent.SetGuard(s.chatGuard())
+	s.chatAgent.SetCompactionTokenCounter(cfg.CompactionTokenCounter()) // nil for non-Anthropic → local estimate
 	s.llmCfg = cfg
 	s.llmOn = true
 	s.cfgMu.Unlock()
@@ -562,6 +566,7 @@ func (s *Server) chatAgentForProfile(id int64) *agent.ChatAgent {
 	ca.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	ca.SetWebSearch(s.m.WebSearchOpts())
 	ca.SetGuard(s.chatGuard())
+	ca.SetCompactionTokenCounter(cfg.CompactionTokenCounter()) // nil for non-Anthropic → local estimate
 	s.profChatAgents[id] = ca
 	return ca
 }

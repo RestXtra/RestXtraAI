@@ -21,6 +21,7 @@ type MainAgent struct {
 	model       string
 	tx          *transcript.Store // raw LLM conversation persistence (nil = off)
 	window      int               // context window in tokens (for compaction)
+	tokenCount  llm.TokenCounter  // exact compaction token counter (nil = local estimate)
 	maxTurns    int               // max agent turns per run (0 = unlimited)
 	proxyAddr   string            // recording proxy for WebFetch (empty = direct)
 	proxyCACert string            // recording proxy's CA cert path (HTTPS verify)
@@ -38,6 +39,10 @@ func (m *MainAgent) SetProxy(addr, caCert string) { m.proxyAddr, m.proxyCACert =
 
 // SetWebSearch selects the web_search backend for the main agent (off by default).
 func (m *MainAgent) SetWebSearch(o WebSearchOpts) { m.webSearch = o }
+
+// SetCompactionTokenCounter wires the exact token counter used for compaction
+// threshold math (nil = norma's local estimate). Resolved per provider by the host.
+func (m *MainAgent) SetCompactionTokenCounter(c llm.TokenCounter) { m.tokenCount = c }
 
 // mainAgentDefaultTmpl is the built-in EDITABLE body (段 [A]) of the main agent
 // prompt, seeded into agent_prompts. Goal is a {{.Goal}} template var; the 中间
@@ -77,16 +82,16 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, as *db.AssetStore, t
 	system, boundary := deferredSystem(mainAgentSystem(goal, m.workDir), def)
 	opts := agentcore.Options{
 		EmitPromptEvents: true,
-		Provider:        m.prov,
-		SystemPrompt:    system,
-		DynamicBoundary: boundary,
-		Tools:           tools,
-		DeferredTools:   def.Deferred,
-		UnlockSet:       def.Unlock,
-		PermissionMode:  permission.ModeBypass,
-		EnableWebFetch:  true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
-		WebFetchProxy:   m.proxyAddr,
-		WebFetchCACert:  m.proxyCACert,
+		Provider:         m.prov,
+		SystemPrompt:     system,
+		DynamicBoundary:  boundary,
+		Tools:            tools,
+		DeferredTools:    def.Deferred,
+		UnlockSet:        def.Unlock,
+		PermissionMode:   permission.ModeBypass,
+		EnableWebFetch:   true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
+		WebFetchProxy:    m.proxyAddr,
+		WebFetchCACert:   m.proxyCACert,
 		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
 		// WebSearchProxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
 		EnableWebSearch:    m.webSearch.Enabled,
@@ -94,10 +99,10 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, as *db.AssetStore, t
 		BraveSearchAPIKey:  m.webSearch.BraveKey,
 		TavilySearchAPIKey: m.webSearch.TavilyKey,
 		WebSearchProxy:     m.webSearch.Proxy,
-		BashEnv:           proxyEnv(m.proxyAddr, m.proxyCACert), // Bash 子命令默认走代理+信任 CA
-		MaxTurns:          m.maxTurns,                           // 0 = unlimited (configurable in agent management)
-		Compaction:        compactionConfig(m.window),           // long chats stay within the window
-		Todos:             actool.NewTodoStore(),                // 会话级临时待办（TodoWrite），纯规划用，退出即丢
+		BashEnv:            proxyEnv(m.proxyAddr, m.proxyCACert),     // Bash 子命令默认走代理+信任 CA
+		MaxTurns:           m.maxTurns,                               // 0 = unlimited (configurable in agent management)
+		Compaction:         compactionConfig(m.window, m.tokenCount), // long chats stay within the window
+		Todos:              actool.NewTodoStore(),                    // 会话级临时待办（TodoWrite），纯规划用，退出即丢
 		// 命中预算(步数)→ SDK 跑收尾:向用户输出一句进展总结。Prompt 与收尾轮数可后台编辑(默认 5 轮)。
 		Settlement: wrapupSettlement("mainagent", nil),
 	}
