@@ -24,6 +24,8 @@ export interface Task {
   engine_mode?: EngineMode;
   tokens?: TokenTotal; // whole-task token consumption
   llm_profile_id?: number; // LLM profile used; absent = default profile
+  parent_ref?: string; // 父任务 id（任务内编排 spawn 记录）
+  conversation_id?: number; // 派生本任务的会话(chat) id（会话级编排分组）
   companies?: CompanyRef[]; // 企业归属（多企业）
   company_id?: number; // 主企业
 }
