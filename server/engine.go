@@ -800,6 +800,11 @@ func (e *Engine) enforceDelegationBudget(t *Task) bool {
 	if budget.MaxInputTokens <= 0 && budget.MaxOutputTokens <= 0 && budget.MaxToolCalls <= 0 {
 		return false
 	}
+	// 默认不按 token/工具调用硬熔断：委派任务应只在「目标达成」或「墙钟到期」时停。
+	// 需要成本硬上限时用 settings.delegation_token_budget_enforced=on 显式打开。
+	if !e.m.tokenBudgetEnforced {
+		return false
+	}
 	usage, err := t.Store.TokenTotal()
 	if err != nil {
 		log.Printf("[budget] task %s 查询 token 用量失败: %v", t.ID, err)

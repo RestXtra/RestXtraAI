@@ -120,6 +120,9 @@ type Manager struct {
 	active    string
 	trafficOn bool // 流量捕获开关（默认关；settings.traffic_capture）
 	llmRecOn  bool // LLM 录制开关（默认关；settings.llm_record）
+	// tokenBudgetEnforced 控制子任务的 token/工具调用硬熔断（默认关；settings.delegation_token_budget_enforced）。
+	// 关时子任务只在目标达成或墙钟到期(deadline)时停，不会因 token/工具数达到 budget 被提前打断。
+	tokenBudgetEnforced bool
 	// 联网搜索开关与来源（默认关；settings.web_search_*）。brave-free 需要 braveKey；tavily 需要 tavilyKey。
 	// webSearchProxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关。
 	webSearchOn      bool
@@ -147,15 +150,16 @@ func (m *Manager) notifyMCPConfigChanged() {
 
 // Settings keys the UI toggles at runtime.
 const (
-	settingTrafficCapture   = "traffic_capture"
-	settingWebSearchOn      = "web_search_enabled"
-	settingWebSearchBackend = "web_search_backend"
-	settingBraveKey         = "brave_search_api_key"
-	settingTavilyKey        = "tavily_search_api_key"
-	settingWebSearchProxy   = "web_search_proxy"
-	settingWorkers          = "workers"
-	settingLLMRecord        = "llm_record"
-	settingDenyExploit      = "guard_deny_exploit" // P6.1: 拒绝利用类动作(recon-only/RoE 严格)
+	settingTrafficCapture        = "traffic_capture"
+	settingDelegationTokenBudget = "delegation_token_budget_enforced"
+	settingWebSearchOn           = "web_search_enabled"
+	settingWebSearchBackend      = "web_search_backend"
+	settingBraveKey              = "brave_search_api_key"
+	settingTavilyKey             = "tavily_search_api_key"
+	settingWebSearchProxy        = "web_search_proxy"
+	settingWorkers               = "workers"
+	settingLLMRecord             = "llm_record"
+	settingDenyExploit           = "guard_deny_exploit" // P6.1: 拒绝利用类动作(recon-only/RoE 严格)
 	// defaultWebSearchBackend is used when web search is on but no backend was picked.
 	defaultWebSearchBackend = "ddgs"
 	// defaultWorkers is the concurrent work-agent count when the setting is unset.
@@ -242,6 +246,9 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	// Asset auto-completion engine (§5): HTTP probes routed through the recording
 	// proxy (via m.ProxyAddr, which honors the traffic-capture toggle).
 	m.trafficOn = pg.GetBool(settingTrafficCapture, false)
+	// token/工具调用硬熔断开关（默认关）。任务应只在「目标达成」或「墙钟到期」时停；
+	// 需要成本硬上限时用 settings.delegation_token_budget_enforced=on 显式打开。
+	m.tokenBudgetEnforced = pg.GetBool(settingDelegationTokenBudget, false)
 	// LLM 录制开关（默认关）。录制器每次调用时读此标志 → 切换即时生效。
 	m.llmRecOn = pg.GetBool(settingLLMRecord, false)
 	// Load persisted web-search config (default: off, ddgs).

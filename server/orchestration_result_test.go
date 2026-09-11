@@ -62,6 +62,34 @@ func TestTaskDelegationResultIsStructuredAndBounded(t *testing.T) {
 	}
 }
 
+func TestDelegationBudgetDisabledByDefault(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	defer m.Close()
+	task, err := m.CreateTask("unbounded child", "full verification", nil, 0, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.DeleteTask(task.ID)
+	task.DelegationBudget = db.DelegationBudget{MaxInputTokens: 10, MaxOutputTokens: 2, MaxToolCalls: 1}
+	m.tokenBudgetEnforced = false // 默认：不按 token/工具数硬熔断
+
+	input, output := 9999, 9999
+	if _, err := task.Store.AppendActivity(db.Activity{Worker: "work#1", Kind: "result",
+		InputTokens: &input, OutputTokens: &output}); err != nil {
+		t.Fatal(err)
+	}
+	engine := NewEngine(m)
+	if engine.enforceDelegationBudget(task) {
+		t.Fatal("token budget must NOT stop the task when enforcement is off")
+	}
+	if status := m.TaskStatus(task.ID); status == "timeout" {
+		t.Fatalf("task must not be marked timeout by advisory budget (status=%q)", status)
+	}
+}
+
 func TestDelegationBudgetEnforcementIsTerminalAndIdempotent(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
@@ -74,6 +102,7 @@ func TestDelegationBudgetEnforcementIsTerminalAndIdempotent(t *testing.T) {
 	}
 	defer m.DeleteTask(task.ID)
 	task.DelegationBudget = db.DelegationBudget{MaxInputTokens: 10, MaxOutputTokens: 2, MaxToolCalls: 1}
+	m.tokenBudgetEnforced = true // 预算硬熔断默认关；测试显式打开以验证熔断路径
 
 	input, output := 10, 2
 	if _, err := task.Store.AppendActivity(db.Activity{Worker: "work#1", Kind: "tool_use", Tool: "nmap"}); err != nil {
