@@ -29,6 +29,7 @@ func (s *Server) platformTools() []actool.CoreTool {
 		s.toolConnList(),
 		s.toolConnExec(),
 		s.toolConnContain(),
+		s.toolWeakPasswordProbe(),
 	}
 }
 

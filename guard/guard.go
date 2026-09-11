@@ -71,6 +71,8 @@ var (
 	// reHttpWrite 匹配显式 HTTP 写方法(DELETE/PUT/PATCH)的 curl/wget —— 测试删除/修改
 	// 类接口前必须询问操作者（最小危害边界）。
 	reHttpWrite = regexp.MustCompile(`(?i)\b(curl|wget)\b[^\n]{0,300}?(?:-X|--request|--method)[\s=]*(DELETE|PUT|PATCH)\b`)
+	// reBrute 匹配外部口令爆破/喷洒工具：需人工审批（小范围弱口令只走 weak_password_probe）。
+	reBrute = regexp.MustCompile(`(?i)\b(hydra|medusa|ncrack|crowbar|patator)\b|(\bsqlmap\b[^\n]*--(passwords|users))`)
 )
 
 func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
@@ -111,6 +113,10 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 	if reHttpWrite.MatchString(cmd) {
 		return g.gateHttpWrite(ctx, ev, cmd, cls)
 	}
+	// 外部口令爆破工具：询问操作者，批准后才执行（有界弱口令请用 weak_password_probe）。
+	if reBrute.MatchString(cmd) {
+		return g.gateBrute(ctx, ev, cmd, cls)
+	}
 	if g.denyExfil && reExfilHard.MatchString(cmd) {
 		return g.block(ev.ToolName, "疑似数据外泄（本地敏感文件外发）被拒绝", cmd, cls)
 	}
@@ -130,6 +136,22 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 // 则走标准审批流（对话卡片/审批页）；无则直接拒绝（安全兜底）。
 func (g *Guard) gateHttpWrite(ctx context.Context, ev hook.Event, cmd, cls string) hook.Result {
 	msg := "HTTP 写操作(DELETE/PUT/PATCH)需操作者确认，批准后才执行"
+	if g.interceptor == nil {
+		return g.block(ev.ToolName, msg, cmd, cls)
+	}
+	convID := intercept.ConvIDFromContext(ctx)
+	dec := intercept.Decision{Action: "ask", Message: msg}
+	if !g.interceptor.HandleAsk(ctx, convID, dec, ev.ToolName, ev.Input) {
+		return g.block(ev.ToolName, "用户拒绝或审批超时", cmd, cls)
+	}
+	g.record(ev.ToolName, "allow", msg, cmd)
+	return hook.Result{}
+}
+
+// gateBrute 在外部口令爆破工具(hydra/medusa/…）命中时询问操作者。有界弱口令应改走
+// weak_password_probe 工具；这里对直接调用外部爆破器的命令做人工审批（无审批器则拒绝）。
+func (g *Guard) gateBrute(ctx context.Context, ev hook.Event, cmd, cls string) hook.Result {
+	msg := "外部口令爆破工具(hydra/medusa/…）需操作者确认，批准后才执行；小范围弱口令建议改用 weak_password_probe 工具"
 	if g.interceptor == nil {
 		return g.block(ev.ToolName, msg, cmd, cls)
 	}

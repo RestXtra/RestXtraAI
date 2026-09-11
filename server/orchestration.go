@@ -766,6 +766,10 @@ func (s *Server) seedOrchestrationTools() {
 		if t.Name() == "conn_list" || t.Name() == "conn_exec" || t.Name() == "conn_contain" {
 			agents, _ = json.Marshal([]string{"auto", "worker", "postex", "responder"})
 		}
+		// 弱口令探测工具绑定到进攻 agent（小范围/需审批）。
+		if t.Name() == "weak_password_probe" {
+			agents, _ = json.Marshal([]string{"worker", "auto", "web_vuln", "exploit", "pentest_chain", "red_team_lead", "evasion", "pentest"})
+		}
 		_ = s.m.PG().SeedTool(t.Name(), t.Description(), schema, agents)
 	}
 	s.refreshBuiltinToolSchemas()
@@ -774,6 +778,7 @@ func (s *Server) seedOrchestrationTools() {
 	s.seedAutoReportFindingBinding()
 	s.seedC2AgentBindings()
 	s.seedConnAgentBindings()
+	s.seedWeakpassAgentBindings()
 	// 注：pentest 的默认工具绑定无需迁移——BuiltinToolSeeds 在全新初始化时就把
 	// list_assets/insert_assets/report_finding/list_findings/list_companies 连同
 	// pentest 一起 seed 好了（项目尚无旧库，不做迁移）。
