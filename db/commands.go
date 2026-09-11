@@ -35,6 +35,10 @@ func (d *DB) ListCommands(expID *int64, q string, page, size int) ([]CommandReco
 	where := `WHERE u.kind = 'tool_use'`
 	args := []any{}
 	argN := 1
+	// detail lives in agent_events for rows written after the de-duplication;
+	// fall back to the activity column for pre-existing rows.
+	const fromU = ` FROM activity u LEFT JOIN agent_events ue ON ue.id = u.event_id `
+	const uDetail = `COALESCE(NULLIF(u.detail,''), ue.payload->>'detail', '')`
 
 	if expID != nil {
 		where += fmt.Sprintf(` AND u.exploration_id = $%d`, argN)
@@ -42,24 +46,27 @@ func (d *DB) ListCommands(expID *int64, q string, page, size int) ([]CommandReco
 		argN++
 	}
 	if q != "" {
-		where += fmt.Sprintf(` AND (u.tool ILIKE $%d OR u.detail ILIKE $%d)`, argN, argN)
+		where += fmt.Sprintf(` AND (u.tool ILIKE $%d OR `+uDetail+` ILIKE $%d)`, argN, argN)
 		args = append(args, "%"+q+"%")
 		argN++
 	}
 
 	// count
 	var total int
-	countQ := `SELECT COUNT(*) FROM activity u ` + where
+	countQ := `SELECT COUNT(*)` + fromU + where
 	if err := d.QueryRow(countQ, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
 	// data query: join tool_use with its tool_result
+	const rDetail = `COALESCE(NULLIF(r.detail,''), re.payload->>'detail', '')`
 	dataQ := `
-SELECT u.id, u.exploration_id, COALESCE(u.worker,''), COALESCE(u.tool,''), COALESCE(u.detail,''),
-       COALESCE(r.detail,''), COALESCE(r.is_error, false), u.created_at
+SELECT u.id, u.exploration_id, COALESCE(u.worker,''), COALESCE(u.tool,''), ` + uDetail + `,
+       ` + rDetail + `, COALESCE(r.is_error, false), u.created_at
 FROM activity u
+LEFT JOIN agent_events ue ON ue.id = u.event_id
 LEFT JOIN activity r ON r.tool_use_id = u.tool_use_id AND r.kind = 'tool_result'
+LEFT JOIN agent_events re ON re.id = r.event_id
 ` + where + `
 ORDER BY u.id DESC
 LIMIT $` + fmt.Sprintf("%d", argN) + ` OFFSET $` + fmt.Sprintf("%d", argN+1)

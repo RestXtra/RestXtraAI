@@ -942,11 +942,17 @@ func (s *ExplorationStore) AppendActivity(a Activity) (int64, error) {
 		return 0, tx.Commit()
 	}
 	var id int64
+	// detail is deliberately NOT stored here: it is the largest column and is
+	// already persisted canonically in agent_events.payload->>'detail' by
+	// appendCanonicalEvent above. Readers join it back (see ActivityDetail /
+	// ActivityByIDs / ActivityTraceSearch / commands), falling back to this
+	// column for pre-existing rows. This removes ~1.5 KB of duplicate text per
+	// activity row on the write path.
 	err = tx.QueryRow(`
 INSERT INTO activity(exploration_id, node_id, worker, kind, tool, tool_use_id, is_error, summary, detail, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_id)
-VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),$7,NULLIF($8,''),NULLIF($9,''),$10,$11,$12,$13,$14)
+VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),$7,NULLIF($8,''),NULL::text,$9,$10,$11,$12,$13)
 ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO UPDATE SET event_id=EXCLUDED.event_id
-RETURNING id`, s.expID, a.NodeID, utf8Clean(a.Worker), utf8Clean(a.Kind), utf8Clean(a.Tool), utf8Clean(a.ToolUseID), a.IsError, utf8Clean(a.Summary), utf8Clean(a.Detail),
+RETURNING id`, s.expID, a.NodeID, utf8Clean(a.Worker), utf8Clean(a.Kind), utf8Clean(a.Tool), utf8Clean(a.ToolUseID), a.IsError, utf8Clean(a.Summary),
 		a.InputTokens, a.OutputTokens, a.CacheReadTokens, a.CacheWriteTokens, eventID).Scan(&id)
 	if err != nil {
 		_ = tx.Rollback()
@@ -1209,7 +1215,9 @@ type ActivityTaskRow struct {
 // ActivityDetail lazily returns the full detail blob for one step.
 func (s *ExplorationStore) ActivityDetail(id int64) (string, error) {
 	var d sql.NullString
-	err := s.db.QueryRow(`SELECT detail FROM activity WHERE id=$1 AND exploration_id=$2`, id, s.expID).Scan(&d)
+	err := s.db.QueryRow(`SELECT COALESCE(NULLIF(a.detail,''), e.payload->>'detail', '')
+FROM activity a LEFT JOIN agent_events e ON e.id = a.event_id
+WHERE a.id=$1 AND a.exploration_id=$2`, id, s.expID).Scan(&d)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
@@ -1260,16 +1268,22 @@ func (s *ExplorationStore) ActivityTraceSearch(nodeID *int64, q string, limit in
 		limit = 100
 	}
 	like := "%" + q + "%"
+	// detail lives in agent_events for rows written after the de-duplication;
+	// fall back to the activity column for pre-existing rows.
+	const cols = `a.id, a.node_id, COALESCE(a.worker,''), COALESCE(a.kind,''), COALESCE(a.tool,''), a.is_error, COALESCE(a.summary,'')`
+	const detail = `COALESCE(NULLIF(a.detail,''), e.payload->>'detail', '')`
 	var rows *sql.Rows
 	var err error
 	if nodeID != nil {
-		rows, err = s.db.Query(`SELECT `+traceCols+`
-FROM activity WHERE exploration_id=$1 AND node_id=$2 AND kind NOT IN ('thinking','usage')
-AND (summary ILIKE $3 OR detail ILIKE $3) ORDER BY id LIMIT $4`, s.expID, *nodeID, like, limit)
+		rows, err = s.db.Query(`SELECT `+cols+`
+FROM activity a LEFT JOIN agent_events e ON e.id = a.event_id
+WHERE a.exploration_id=$1 AND a.node_id=$2 AND a.kind NOT IN ('thinking','usage')
+AND (a.summary ILIKE $3 OR `+detail+` ILIKE $3) ORDER BY a.id LIMIT $4`, s.expID, *nodeID, like, limit)
 	} else {
-		rows, err = s.db.Query(`SELECT `+traceCols+`
-FROM activity WHERE exploration_id=$1 AND node_id IS NOT NULL AND kind NOT IN ('thinking','usage')
-AND (summary ILIKE $2 OR detail ILIKE $2) ORDER BY id LIMIT $3`, s.expID, like, limit)
+		rows, err = s.db.Query(`SELECT `+cols+`
+FROM activity a LEFT JOIN agent_events e ON e.id = a.event_id
+WHERE a.exploration_id=$1 AND a.node_id IS NOT NULL AND a.kind NOT IN ('thinking','usage')
+AND (a.summary ILIKE $2 OR `+detail+` ILIKE $2) ORDER BY a.id LIMIT $3`, s.expID, like, limit)
 	}
 	if err != nil {
 		return nil, err
@@ -1292,8 +1306,10 @@ func (s *ExplorationStore) ActivityByIDs(ids []int64) ([]Activity, error) {
 		ph[i] = fmt.Sprintf("$%d", i+2)
 		args[i+1] = id
 	}
-	rows, err := s.db.Query(`SELECT id, node_id, COALESCE(kind,''), COALESCE(tool,''), is_error, COALESCE(detail,'')
-FROM activity WHERE exploration_id=$1 AND kind<>'thinking' AND id IN (`+strings.Join(ph, ",")+`) ORDER BY id`, args...)
+	rows, err := s.db.Query(`SELECT a.id, a.node_id, COALESCE(a.kind,''), COALESCE(a.tool,''), a.is_error,
+	COALESCE(NULLIF(a.detail,''), e.payload->>'detail', '')
+FROM activity a LEFT JOIN agent_events e ON e.id = a.event_id
+WHERE a.exploration_id=$1 AND a.kind<>'thinking' AND a.id IN (`+strings.Join(ph, ",")+`) ORDER BY a.id`, args...)
 	if err != nil {
 		return nil, err
 	}
