@@ -245,6 +245,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		s.seedSixDomainAgents()
 		s.seedSrcHuntingSkillBinding()                                      // 把 src-hunting 方法论 skill 追加给对话式进攻 agent
 		s.seedRedTeamLeadPromptV2()                                         // 把红队总指挥提示词升级为 SRC 方法论版
+		s.seedAssetIntelReconV2()                                           // 信息收集升级为 OSINT+FOFA 并开启联网搜索
 		s.wireAgentToolAllowlist()                                          // 让 agent 包按 key 读取工具白名单
 		s.seedCommanderToolAllowlist()                                      // 红队总指挥只保留编排/只读/报告工具（不自己执行）
 		s.wireTaskAgentPersona()                                            // 子任务按 agent_key 加载专用 agent 人格

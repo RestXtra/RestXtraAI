@@ -55,15 +55,16 @@ var sixDomainAgents = []domainAgentSpec{
 	},
 	{
 		Key: "asset_intel", Name: "信息收集", Description: "企业资产信息收集专家：FOFA 被动测绘、去重归档与范围管理",
-		Prompt: "你是「信息收集」智能体，负责用户明确授权企业的【被动】资产梳理与资产库归档。\n" +
-			"工作边界：只使用 fofa_asset_discover 调用 FOFA 官方 API；不得使用 nmap、httpx、目录扫描、漏洞验证、登录尝试或任何主动探测。\n" +
+		Prompt: "你是「信息收集」智能体，负责用户明确授权企业的资产梳理与归档（OSINT 联网搜索 + FOFA 被动测绘）。\n" +
+			"工作边界：可用 web_search/WebFetch 做 OSINT（官网/APP/小程序/JS/招聘/备案/公众号/GitHub 等公开信息），用 fofa_asset_discover 做 FOFA 被动测绘；不得使用 nmap、httpx、目录扫描、漏洞验证、登录尝试等主动探测。\n" +
 			"工作流程：\n" +
-			"1. 先向用户确认企业名称与已确认的根域名；未提供根域名时，说明需要用户提供或确认官网根域名。\n" +
-			"2. 调用 fofa_asset_discover(company, root_domain, icp 可选)。该工具会创建/复用企业、登记根域名范围，并将命中该范围的根域名、子域名、IP、服务自动按企业写入资产管理。\n" +
+			"0. 联网 OSINT（web_search 搜、WebFetch 读正文）：先摸清官方资产与业务面——官网/开发者平台/开放 API/移动与小程序入口/ICP 备案/公司名，把新发现的根域名列为候选。关键词模板：`<品牌> 官网`、`<品牌> 开放平台`、`<品牌> ICP 备案`、`site:<根域>`、`<品牌> API`。\n" +
+			"1. 确认企业名称与已确认的根域名；未提供时据 OSINT 结果向用户确认官网根域名。\n" +
+			"2. 对每个已确认根域名调用 fofa_asset_discover(company, root_domain, icp 可选)；工具会创建/复用企业、登记范围，并把命中的根域/子域/IP/服务写入资产库。\n" +
 			"3. ICP/公司名扩展查询返回的其它根域名只能作为候选；不得自行扩大企业范围。向用户列出候选并请求确认后，才用 add_company_scope 追加。\n" +
 			"4. 调用 list_assets 汇总已入库资产，按根域名、子域名、IP、服务和 CDN/候选项输出简洁清单；证据必须来自工具结果，不得编造。\n" +
-			"输出必须明确：已归档资产数、未归档候选项、FOFA 查询条件以及被动测绘边界。",
-		MaxTurns: 12, RunSecs: 180,
+			"输出必须明确：已归档资产数、未归档候选项、搜索/FOFA 查询条件以及被动测绘边界。",
+		MaxTurns: 40, RunSecs: 900,
 		Tools: []string{"fofa_asset_discover", "list_assets", "list_companies", "add_company_scope"},
 	},
 	{
@@ -375,6 +376,31 @@ func (s *Server) wireTaskAgentPersona() {
 		}
 		return t.AgentKey, tmpl
 	}
+}
+
+// seedAssetIntelReconV2 一次性(flag 门控)：把信息收集升级为「联网 OSINT + FOFA」，
+// 给 asset_intel / worker 打开 web_search（子任务仍受 allowed_tools 收敛），并升级已存在实例的提示词。
+func (s *Server) seedAssetIntelReconV2() {
+	const flag = "asset_intel_recon_v2"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	_ = s.m.pg.SetAgentWebSearch("asset_intel", true)
+	_ = s.m.pg.SetAgentWebSearch("worker", true) // 子任务 worker 经 allowed_tools 才用得到 web_search
+	if ag, err := s.m.pg.GetAgentByKey("asset_intel"); err == nil && ag != nil {
+		for _, spec := range sixDomainAgents {
+			if spec.Key != "asset_intel" {
+				continue
+			}
+			if _, err := s.m.pg.SavePrompt(ag.ID, spec.Prompt, "OSINT v2", "system"); err != nil {
+				log.Printf("[seed-agent] asset_intel 提示词升级失败: %v", err)
+				return
+			}
+			break
+		}
+	}
+	_ = s.m.pg.SetSetting(flag, "true")
+	log.Printf("[seed-agent] asset_intel 已升级为 OSINT+FOFA；worker/asset_intel 已开启 web_search")
 }
 
 // seedAgentModelBindings 是一次性(设置标记 agent_model_bind_v1)把 planner 绑到"强模型"、
