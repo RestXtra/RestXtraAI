@@ -46,7 +46,7 @@ var sixDomainAgents = []domainAgentSpec{
 			"4. 确认问题时使用 report_finding，附受影响入口、source-to-sink 链、非破坏性证明、修复建议与证据文件/行号；用 record_fact 记录覆盖范围与未确认线索。\n" +
 			"5. 输出覆盖项、发现等级、待验证项和修复优先级的中文报告。",
 		MaxTurns: 16, RunSecs: 300,
-		Skills: []string{"audit-skills", "code-audit", "redteam-code-audit-detail-pack"},
+		Skills: []string{"src-hunting", "audit-skills", "code-audit", "redteam-code-audit-detail-pack"},
 		Tools:  []string{"list_assets", "list_findings", "record_fact", "report_finding"},
 	},
 	{
@@ -66,7 +66,7 @@ var sixDomainAgents = []domainAgentSpec{
 		Key: "web_vuln", Name: "漏洞猎人", Description: "Web 漏洞挖掘专家：注入/SSTI/SSRF/XXE/反序列化/认证绕过等",
 		Prompt:   "你是「漏洞猎人」，负责 Web 漏洞挖掘域。\n工作方法：\n1. 先 search_knowledge 检索对应手法（sqli/ssrf/ssti/xxe/deserialize 等）再动手。\n2. 用 sqlmap/ffuf/nuclei/httpx/curl 等工具做注入探测、参数模糊、模板扫描。\n3. 发现疑似漏洞 → 用不同方法复核确认，确认后再 report_finding（附 PoC）。\n4. 每步结论都要基于真实工具输出，严禁编造证据。\n目标：找出并确认可复现的 Web 漏洞。",
 		MaxTurns: 0, RunSecs: 0,
-		Skills: []string{"web-security-advanced", "ctf-web", "redteam-sqli-detail-pack", "redteam-ssrf-detail-pack", "redteam-deserialize-detail-pack",
+		Skills: []string{"src-hunting", "web-security-advanced", "ctf-web", "redteam-sqli-detail-pack", "redteam-ssrf-detail-pack", "redteam-deserialize-detail-pack",
 			"exploiting-server-side-request-forgery", "exploiting-template-injection-vulnerabilities", "testing-for-xxe-injection-vulnerabilities",
 			"exploiting-idor-vulnerabilities", "exploiting-http-request-smuggling", "exploiting-nosql-injection-vulnerabilities",
 			"exploiting-prototype-pollution-in-javascript", "exploiting-race-condition-vulnerabilities", "exploiting-mass-assignment-in-rest-apis",
@@ -85,7 +85,7 @@ var sixDomainAgents = []domainAgentSpec{
 		Key: "binary_vuln", Name: "二进制猎人", Description: "二进制漏洞挖掘专家：逆向/补丁对比/源码审计",
 		Prompt:   "你是「二进制猎人」，负责二进制漏洞挖掘域。\n工作方法：\n1. 先 search_knowledge 检索逆向/审计手法（reverse/code-audit）再动手。\n2. 用 Bash 调 gdb/radare2/checksec/objdump/strings/binwalk 等做静态/动态分析。\n3. 源码审计时按危险函数/污点路径追踪，定位可触达的漏洞点。\n4. 结论必须来自真实输出；确认漏洞后 report_finding（附触发路径）。",
 		MaxTurns: 0, RunSecs: 0,
-		Skills: []string{"redteam-reverse-detail-pack", "redteam-code-audit-detail-pack", "client-reverse",
+		Skills: []string{"src-hunting", "redteam-reverse-detail-pack", "redteam-code-audit-detail-pack", "client-reverse",
 			"performing-binary-exploitation-analysis", "performing-fuzzing-with-aflplusplus", "reverse-engineering-malware-with-ghidra",
 			"reverse-engineering-dotnet-malware-with-dnspy", "reverse-engineering-rust-malware", "reverse-engineering-ransomware-encryption-routine",
 			"reverse-engineering-android-malware-with-jadx", "reverse-engineering-ios-app-with-frida",
@@ -99,7 +99,7 @@ var sixDomainAgents = []domainAgentSpec{
 		Key: "exploit", Name: "利用专家", Description: "漏洞利用专家：PoC/利用链/绕过",
 		Prompt:   "你是「利用专家」，负责漏洞利用域。\n工作方法：\n1. 基于已确认漏洞设计 PoC/利用链（search_knowledge 查 ctf-web/payload/deserialize 手法）。\n2. 用 curl/sqlmap/ffuf 精确构造请求；本地用 Bash 验证序列化/编码 payload。\n3. 一次失败换编码/语法重试（URL编码→双重编码→内联注释→Unicode/hex→OOB）。\n4. 拿到利用结果 → report_finding 附可执行 PoC。",
 		MaxTurns: 0, RunSecs: 0,
-		Skills: []string{"ctf-web", "redteam-payload-detail-pack", "redteam-deserialize-detail-pack",
+		Skills: []string{"src-hunting", "ctf-web", "redteam-payload-detail-pack", "redteam-deserialize-detail-pack",
 			"exploiting-vulnerabilities-with-metasploit-framework", "exploiting-smb-vulnerabilities-with-metasploit",
 			"exploiting-ms17-010-eternalblue-vulnerability", "exploiting-zerologon-vulnerability-cve-2020-1472",
 			"exploiting-nopac-cve-2021-42278-42287", "exploiting-adcs-with-certipy", "exploiting-insecure-deserialization",
@@ -116,7 +116,7 @@ var sixDomainAgents = []domainAgentSpec{
 		Key: "pentest_chain", Name: "渗透链指挥", Description: "多阶段渗透专家：侦察→利用→提权→横向→后渗透",
 		Prompt:   "你是「渗透链指挥」，负责多阶段渗透域。\n工作方法：\n1. 先 search_knowledge 查内网/域渗透/后渗透手法（intranet/ad/postex）。\n2. 用 list_assets 看清已发现的资产，规划侦察→利用→提权→横向链路。\n3. 需要隔离步骤时用 spawn_task 传 objective、asset_ids、required_evidence、allowed_tools 和 budget；用 wait_task 直接接收结构化结果，只有引用不足时再读完整图或 trace。\n4. 把链路结论汇总为 attack-chain，最终 report_finding 覆盖关键节点。",
 		MaxTurns: 0, RunSecs: 0,
-		Skills: []string{"intranet-pentest-advanced", "redteam-ad-detail-pack", "redteam-postex-detail-pack",
+		Skills: []string{"src-hunting", "intranet-pentest-advanced", "redteam-ad-detail-pack", "redteam-postex-detail-pack",
 			"performing-active-directory-penetration-test", "exploiting-active-directory-with-bloodhound",
 			"performing-active-directory-bloodhound-analysis", "mapping-attack-paths-with-bloodhound-ce",
 			"exploiting-active-directory-certificate-services-esc1", "exploiting-kerberoasting-with-impacket",
@@ -131,7 +131,7 @@ var sixDomainAgents = []domainAgentSpec{
 		Key: "cloud_attack", Name: "云攻击专家", Description: "云攻击专家：IAM/S3/容器/K8s/云元数据",
 		Prompt:   "你是「云攻击专家」，负责云攻击域。\n工作方法：\n1. 先 search_knowledge 查云攻击手法（cloud/container/recon）。\n2. 重点：云元数据(IMDS)、IAM 错配/AssumeRole、S3 桶泄露、容器逃逸、K8s RBAC。\n3. 有 ScopeSentry MCP 时同步云资产做目标梳理。\n4. 确认漏洞 → report_finding（附利用链与影响面）。",
 		MaxTurns: 0, RunSecs: 0,
-		Skills: []string{"redteam-cloud-detail-pack", "redteam-container-detail-pack", "redteam-recon-detail-pack",
+		Skills: []string{"src-hunting", "redteam-cloud-detail-pack", "redteam-container-detail-pack", "redteam-recon-detail-pack",
 			"performing-cloud-penetration-testing-with-pacu", "exploiting-aws-with-pacu", "auditing-aws-s3-bucket-permissions",
 			"auditing-gcp-iam-permissions", "auditing-kubernetes-cluster-rbac", "auditing-kubernetes-rbac-privilege-escalation",
 			"performing-kubernetes-penetration-testing", "performing-kubernetes-etcd-security-assessment",
@@ -144,7 +144,7 @@ var sixDomainAgents = []domainAgentSpec{
 		Key: "evasion", Name: "规避专家", Description: "对抗规避专家：WAF/AV/EDR/流量混淆",
 		Prompt:   "你是「规避专家」，负责对抗规避域。\n工作方法：\n1. 先 search_knowledge 查规避手法（evasion/recon）。\n2. 被 WAF/403 拦截时：URL编码→双重编码→内联注释→Unicode/hex→OOB/换攻击面逐级升级。\n3. 规避手段必须可复现、不破坏目标；配合 Recon 找过滤规则边界。\n4. 有效规避 → report_finding（附载荷与绕过链路）。",
 		MaxTurns: 0, RunSecs: 0,
-		Skills: []string{"redteam-evasion-detail-pack", "redteam-recon-detail-pack",
+		Skills: []string{"src-hunting", "redteam-evasion-detail-pack", "redteam-recon-detail-pack",
 			"performing-web-application-firewall-bypass", "performing-ssl-stripping-attack", "performing-content-security-policy-bypass",
 			"exploiting-sql-injection-with-sqlmap", "performing-http-parameter-pollution-attack",
 			"performing-blind-ssrf-exploitation", "performing-directory-traversal-testing", "exploiting-api-injection-vulnerabilities"},
@@ -154,7 +154,7 @@ var sixDomainAgents = []domainAgentSpec{
 		Key: "red_team_lead", Name: "红队总指挥", Description: "多智能体协调者：拆解任务并委派给六域专家",
 		Prompt:   "你是「红队总指挥」，负责把复杂任务拆解并协调六域专家：\n- 漏洞猎人(web_vuln)：Web 漏洞挖掘\n- 二进制猎人(binary_vuln)：二进制/逆向\n- 利用专家(exploit)：漏洞利用\n- 渗透链指挥(pentest_chain)：多阶段渗透\n- 云攻击专家(cloud_attack)：云攻击\n- 规避专家(evasion)：对抗规避\n工作方法：\n1. 分析任务所属领域，用 spawn_task 传最小结构化交接包：objective、asset_ids、required_evidence、allowed_tools、budget；不要复制父任务 transcript。\n2. 派发后用 wait_task 阻塞等待任一子任务完成（不要 sleep 盲等），直接消费其 facts、findings、negative_results、artifact_refs、next_actions 和 usage。\n3. 用 list_tasks 跟踪进度，必要时 add_task_hint 纠偏；只有结构化结果引用不足时才调用 get_task_result、get_task_graph 或 trace。\n4. 汇总各域结论成整体评估，输出报告要点。",
 		MaxTurns: 0, RunSecs: 0,
-		Skills: []string{"web-security-advanced", "intranet-pentest-advanced", "redteam-cloud-detail-pack", "redteam-evasion-detail-pack",
+		Skills: []string{"src-hunting", "web-security-advanced", "intranet-pentest-advanced", "redteam-cloud-detail-pack", "redteam-evasion-detail-pack",
 			"ctf-web", "redteam-sqli-detail-pack", "redteam-ssrf-detail-pack", "redteam-reverse-detail-pack", "redteam-deserialize-detail-pack",
 			"exploiting-sql-injection-vulnerabilities", "exploiting-sql-injection-with-sqlmap", "performing-ssrf-vulnerability-exploitation",
 			"performing-blind-ssrf-exploitation", "exploiting-api-injection-vulnerabilities", "performing-jwt-none-algorithm-attack",
@@ -228,6 +228,31 @@ func (s *Server) seedSixDomainAgents() {
 			}
 		}
 	}
+}
+
+// seedSrcHuntingSkillBinding 把内置方法论 skill「src-hunting」追加（增量、不替换）给
+// 对话式进攻 agent（pentest/auto/postex）。一次性，幂等。六域 agent 在 seedSixDomainAgents
+// 里已把 src-hunting 加进各自 Skills 列表。
+func (s *Server) seedSrcHuntingSkillBinding() {
+	pg := s.m.pg
+	if pg == nil {
+		return
+	}
+	const flag = "src_hunting_skill_bind_v1"
+	if v, _, _ := pg.GetSetting(flag); v == "true" {
+		return
+	}
+	const skill = "src-hunting"
+	for _, key := range []string{"pentest", "auto", "postex"} {
+		ag, err := pg.GetAgentByKey(key)
+		if err != nil || ag == nil {
+			continue
+		}
+		if err := pg.ToggleSkillVisibility(ag.ID, skill, true); err != nil {
+			log.Printf("[seed-skill] %s 绑定 %s 失败: %v", key, skill, err)
+		}
+	}
+	_ = pg.SetSetting(flag, "true")
 }
 
 // seedAgentModelBindings 是一次性(设置标记 agent_model_bind_v1)把 planner 绑到"强模型"、
