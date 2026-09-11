@@ -22,6 +22,8 @@ type DBFinding struct {
 	AssetIDs        []int64
 	Status          string
 	Report          string
+	RequestRaw      string
+	ResponseRaw     string
 	CreatedAt       time.Time
 	TaskDescription string  // populated via LEFT JOIN on tasks
 	CompanyIDs      []int64 // 派生：任务企业 + 资产企业并集
@@ -72,6 +74,7 @@ func (d *DB) AddFinding(taskID, nodeID int64, vulnclass, severity, summary, evid
 
 const findingSelectCols = `f.id, f.task_id, f.node_id, f.vulnclass, f.severity, f.summary,
 	       f.evidence, f.worker, f.asset_ids, COALESCE(f.status, 'pending'), f.created_at,
+	       COALESCE(f.report,''), COALESCE(f.request_raw,''), COALESCE(f.response_raw,''),
 	       COALESCE(t.description, '') AS task_description,
 	       COALESCE((
 	         SELECT jsonb_agg(company_id ORDER BY company_id)
@@ -96,6 +99,7 @@ func scanFindings(rows interface {
 		var assetJSON, companyJSON string
 		if err := rows.Scan(&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Severity,
 			&f.Summary, &f.Evidence, &f.Worker, &assetJSON, &f.Status, &f.CreatedAt,
+			&f.Report, &f.RequestRaw, &f.ResponseRaw,
 			&f.TaskDescription, &companyJSON); err != nil {
 			return nil, err
 		}
@@ -265,4 +269,11 @@ func (d *DB) SetFindingReport(id int64, report string) (int64, error) {
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+// SetFindingPOC stores the raw request/response packets (structured PoC) on a
+// finding, so the report can render an exact request-packet + response-packet.
+func (d *DB) SetFindingPOC(id int64, requestRaw, responseRaw string) error {
+	_, err := d.Exec(`UPDATE findings SET request_raw=$2, response_raw=$3 WHERE id=$1`, id, requestRaw, responseRaw)
+	return err
 }

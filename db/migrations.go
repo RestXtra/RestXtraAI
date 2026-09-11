@@ -441,6 +441,17 @@ ON CONFLICT (source_key) DO NOTHING`)
 			return err
 		},
 	},
+	{
+		Version: 18,
+		Name:    "finding_poc_packets",
+		Apply: func(tx *sql.Tx) error {
+			if _, err := tx.Exec(`ALTER TABLE findings ADD COLUMN IF NOT EXISTS request_raw TEXT NOT NULL DEFAULT ''`); err != nil {
+				return err
+			}
+			_, err := tx.Exec(`ALTER TABLE findings ADD COLUMN IF NOT EXISTS response_raw TEXT NOT NULL DEFAULT ''`)
+			return err
+		},
+	},
 }
 
 func applyMigrations(db *sql.DB) error {

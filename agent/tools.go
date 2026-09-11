@@ -635,6 +635,8 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 			"endpoints":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "涉及接口清单：只列复现里真打过的完整地址 + 出处"},
 			"repro":       str("复现步骤：1/2/3 逐条，每步一个可复制整包（请求行 + 关键头）"),
 			"remediation": str("修复建议：精准、可落地"),
+			"request":     str("复现的原始请求包（请求行 + Host + 关键头 + body，可整包粘贴）"),
+			"response":    str("对应的原始响应包（状态行 + 关键头 + body 关键片段）"),
 			"evidence":    str("证据/PoC 文本"),
 			"intent_id":   idp("产生本发现的意图 id（任务上下文必填；会话上下文可不填）"),
 			"asset_ids":   map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "受影响资产 id（可选）：参数/端点/站点等。一个漏洞影响多处可全填。"},
@@ -643,6 +645,7 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 			var a struct {
 				VulnClass, Severity, Summary, Evidence string
 				Title, URL, Impact, Repro, Remediation string
+				Request, Response                      string
 				Endpoints                              []string
 				IntentID                               json.RawMessage   `json:"intent_id"`
 				AssetIDs                               []json.RawMessage `json:"asset_ids"`
@@ -678,6 +681,9 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 				if fid > 0 && report != "" {
 					_, _ = t.ts.SetFindingReport(fid, report)
 				}
+				if fid > 0 && (a.Request != "" || a.Response != "") {
+					_ = t.ts.SetFindingPOC(fid, a.Request, a.Response)
+				}
 			} else {
 				// conversation context: no exploration store — fall back to the
 				// standalone findings table via the global DB handle, so chat
@@ -692,6 +698,9 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 				}
 				if report != "" {
 					_, _ = t.pg.SetFindingReport(id, report)
+				}
+				if a.Request != "" || a.Response != "" {
+					_ = t.pg.SetFindingPOC(id, a.Request, a.Response)
 				}
 				t.writes.Findings++
 				return actool.Text(fmt.Sprintf("finding recorded: %d", id)), nil

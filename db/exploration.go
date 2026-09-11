@@ -1325,3 +1325,8 @@ func (s *ExplorationStore) AddStandaloneFinding(taskID, nodeID int64, vulnclass,
 func (s *ExplorationStore) SetFindingReport(id int64, report string) (int64, error) {
 	return s.db.SetFindingReport(id, report)
 }
+
+// SetFindingPOC stores the raw request/response packets on a finding row.
+func (s *ExplorationStore) SetFindingPOC(id int64, requestRaw, responseRaw string) error {
+	return s.db.SetFindingPOC(id, requestRaw, responseRaw)
+}

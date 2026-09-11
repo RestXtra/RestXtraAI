@@ -182,6 +182,8 @@ type FindingDTO struct {
 	Evidence        string  `json:"evidence"`
 	Status          string  `json:"status"`
 	Report          string  `json:"report,omitempty"`
+	RequestRaw      string  `json:"request_raw,omitempty"`
+	ResponseRaw     string  `json:"response_raw,omitempty"`
 	IntentID        string  `json:"intent_id,omitempty"`
 	ParamID         string  `json:"param_id,omitempty"`
 	TaskID          string  `json:"task_id,omitempty"`
@@ -230,15 +232,17 @@ func findingDTOsForTask(t *Task, in []*db.Node) []FindingDTO {
 // task_description are empty when the originating task has been deleted (NULL).
 func findingFromDB(f *db.DBFinding) FindingDTO {
 	d := FindingDTO{
-		ID:         i64s(f.ID),
-		VulnClass:  f.VulnClass,
-		Severity:   f.Severity,
-		Summary:    f.Summary,
-		Evidence:   f.Evidence,
-		Status:     f.Status,
-		Report:     f.Report,
-		TS:         rfc3339(f.CreatedAt),
-		CompanyIDs: f.CompanyIDs,
+		ID:          i64s(f.ID),
+		VulnClass:   f.VulnClass,
+		Severity:    f.Severity,
+		Summary:     f.Summary,
+		Evidence:    f.Evidence,
+		Status:      f.Status,
+		Report:      f.Report,
+		RequestRaw:  f.RequestRaw,
+		ResponseRaw: f.ResponseRaw,
+		TS:          rfc3339(f.CreatedAt),
+		CompanyIDs:  f.CompanyIDs,
 	}
 	if f.TaskID != nil {
 		d.TaskID = i64s(*f.TaskID)
