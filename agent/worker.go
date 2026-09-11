@@ -170,8 +170,8 @@ func indirectInjectionBlock() string {
 // artifacts under an i<intentID>/ subdir to avoid concurrent name collisions.
 const workerArtifactSubdir = "为避免与其他 work 撞名，把本次产物放到子目录 i<意图id>/ 下（如 i123/exploit.py）。"
 
-func workerSystem(proxyAddr, workDir string) string {
-	body := renderSystem("worker", workerDefaultTmpl, WorkerVars{ProxyAddr: proxyAddr})
+func workerSystem(proxyAddr, workDir, personaKey, persona string) string {
+	body := personaBlock(personaKey, persona) + renderSystem("worker", workerDefaultTmpl, WorkerVars{ProxyAddr: proxyAddr})
 	return body + workerTrafficBlock(proxyAddr) + artifactSpec(workDir) + workerArtifactSubdir + indirectInjectionBlock()
 }
 
@@ -269,7 +269,8 @@ func (w *Worker) Execute(ctx context.Context, name string, taskID int64, as *db.
 	// 压缩（意图是 worker 全部职责，若被压掉由证据闸门/收尾兜底，见 2.5/2.6 说明）。
 	intentID := intent.ID
 	overview := restoreWorkingSet(ts, name, &intentID) + renderWorkerGraphOverview(tsx.graphOverviewData())
-	system, boundary := deferredSystem(workerSystem(w.proxyAddr, w.workDir), def)
+	personaKey, persona := taskAgentFor(taskID)
+	system, boundary := deferredSystem(workerSystem(w.proxyAddr, w.workDir, personaKey, persona), def)
 	// 任务级 deadline(经 ctx 注入)夹逼本 run 的墙钟预算 + 决定收尾词(见 taskclock.go)。
 	tc := taskClockFrom(ctx)
 	maxDur, clamped := clampMaxDuration(tc.DeadlineUnix, w.runTimeout)

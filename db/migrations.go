@@ -433,6 +433,14 @@ ON CONFLICT (source_key) DO NOTHING`)
 			return err
 		},
 	},
+	{
+		Version: 17,
+		Name:    "task_agent_key",
+		Apply: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS agent_key TEXT NOT NULL DEFAULT ''`)
+			return err
+		},
+	},
 }
 
 func applyMigrations(db *sql.DB) error {

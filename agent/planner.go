@@ -231,8 +231,8 @@ const plannerDefaultTmpl = `你是一个授权渗透测试系统的"规划者"�
 
 宁可不生成，也不要重复或硬凑。简洁、克制、高效。`
 
-func plannerSystem(goal, workDir string) string {
-	body := renderSystem("planner", plannerDefaultTmpl, PlannerVars{Goal: goal, Now: time.Now().Format("2006-01-02 15:04:05 MST")})
+func plannerSystem(goal, workDir, personaKey, persona string) string {
+	body := personaBlock(personaKey, persona) + renderSystem("planner", plannerDefaultTmpl, PlannerVars{Goal: goal, Now: time.Now().Format("2006-01-02 15:04:05 MST")})
 	return body + artifactSpec(workDir) + indirectInjectionBlock()
 }
 
@@ -272,7 +272,8 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	if tc.Final {
 		situational += "\n\n【任务终局收尾（本轮特殊指令，覆盖上面的常规规划流程）】：" + resolveTaskTimeoutWrapup("planner")
 	}
-	system, boundary := deferredSystem(plannerSystem(goal, p.workDir), def)
+	personaKey, persona := taskAgentFor(taskID)
+	system, boundary := deferredSystem(plannerSystem(goal, p.workDir, personaKey, persona), def)
 	// planner 无自身墙钟预算;有 deadline 时把 MaxDuration 夹逼到剩余,让在跑的规划轮在
 	// 任务到点时进收尾(因超时→任务超时词,因步数→per-run 词)。
 	maxDur, clamped := clampMaxDuration(tc.DeadlineUnix, 0)

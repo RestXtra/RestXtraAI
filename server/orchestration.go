@@ -257,6 +257,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			"asset_ids":         map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "子 Agent 可直接引用的目标资产 id；只传引用，不复制资产/历史正文"},
 			"required_evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "完成条件要求的证据清单；为空时使用平台安全默认"},
 			"allowed_tools":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "可选能力白名单。图谱核心读写工具始终保留；Bash、外部工具、MCP/Skill 仅白名单内可用。空数组保持普通任务工具策略"},
+			"agent":             map[string]any{"type": "string", "description": "可选：指定本子任务由哪个专用 agent 执行（agent key，如 asset_intel 信息收集 / web_vuln 漏洞猎人 / exploit 利用专家 / pentest_chain 渗透链 / cloud_attack / evasion / binary_vuln / code_audit）。子任务的 planner/worker 会以该 agent 的身份与打法运行。"},
 			"budget": map[string]any{"type": "object", "description": "子 Agent 预算", "properties": map[string]any{
 				"max_wall_time_seconds": map[string]any{"type": "integer", "description": "墙钟上限；映射为任务 deadline 并强制执行"},
 				"max_input_tokens":      map[string]any{"type": "integer", "description": "输入 token 预算，用于结果核算/熔断决策"},
@@ -275,6 +276,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 				AssetIDs         []int64               `json:"asset_ids"`
 				RequiredEvidence []string              `json:"required_evidence"`
 				AllowedTools     []string              `json:"allowed_tools"`
+				Agent            string                `json:"agent"`
 				Budget           pgdb.DelegationBudget `json:"budget"`
 				LLMProfileID     json.RawMessage       `json:"llm_profile_id"`
 				TimeoutSeconds   int                   `json:"timeout_seconds"`
@@ -310,6 +312,12 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 					if id <= 0 || !found[id] {
 						return actool.Errorf(fmt.Sprintf("asset 不存在: %d", id)), nil
 					}
+				}
+			}
+			a.Agent = strings.TrimSpace(a.Agent)
+			if a.Agent != "" {
+				if ag, err := s.m.pg.GetAgentByKey(a.Agent); err != nil || ag == nil {
+					return actool.Errorf("指定 agent 不存在: " + a.Agent), nil
 				}
 			}
 			if len(a.RequiredEvidence) == 0 {
@@ -349,7 +357,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			}
 			childID, _ := strconv.ParseInt(t.ID, 10, 64)
 			contract := pgdb.TaskDelegation{ChildTaskID: childID, ParentRef: a.ParentRef,
-				Objective: objective, AssetIDs: a.AssetIDs, RequiredEvidence: a.RequiredEvidence,
+				Objective: objective, AgentKey: a.Agent, AssetIDs: a.AssetIDs, RequiredEvidence: a.RequiredEvidence,
 				AllowedTools: a.AllowedTools, Budget: a.Budget}
 			if err := s.m.PG().SaveTaskDelegation(contract); err != nil {
 				_ = s.m.DeleteTask(t.ID)
@@ -360,6 +368,12 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			}
 			t.AllowedTools = append([]string(nil), contract.AllowedTools...)
 			t.DelegationBudget = contract.Budget
+			if contract.AgentKey != "" {
+				t.AgentKey = contract.AgentKey
+				if err := s.m.PG().SetTaskAgentKey(childID, contract.AgentKey); err != nil {
+					log.Printf("[spawn] 设置子任务 agent_key 失败: %v", err)
+				}
+			}
 			if a.ParentRef != "" {
 				t.ParentRef = a.ParentRef
 				if err := s.m.PG().SetParentRef(childID, a.ParentRef); err != nil {
@@ -790,7 +804,7 @@ func (s *Server) seedOrchestrationTools() {
 // reaches an old DB otherwise. Preserves each tool's agent binding + enabled flag.
 // Bump the flag whenever these tools' schemas/descriptions change in code.
 func (s *Server) refreshBuiltinToolSchemas() {
-	const flag = "tool_schema_refresh_v6_report_finding"
+	const flag = "tool_schema_refresh_v7_spawn_agent"
 	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
 		return
 	}

@@ -271,6 +271,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     llm_profile_id BIGINT REFERENCES llm_profiles(id) ON DELETE SET NULL,
     company_id     BIGINT REFERENCES companies(id) ON DELETE SET NULL,
     parent_ref     TEXT,
+    agent_key      TEXT NOT NULL DEFAULT '',
     timeout_seconds INTEGER NOT NULL DEFAULT 0,
     first_run_at   TIMESTAMPTZ,
     deadline_at    TIMESTAMPTZ,

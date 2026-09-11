@@ -25,6 +25,7 @@ type TaskDelegation struct {
 	ChildTaskID      int64            `json:"child_task_id"`
 	ParentRef        string           `json:"parent_ref,omitempty"`
 	Objective        string           `json:"objective"`
+	AgentKey         string           `json:"agent_key,omitempty"` // 专用 agent 身份（空=通用 planner/worker）
 	AssetIDs         []int64          `json:"asset_ids,omitempty"`
 	RequiredEvidence []string         `json:"required_evidence,omitempty"`
 	AllowedTools     []string         `json:"allowed_tools,omitempty"`

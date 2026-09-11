@@ -354,6 +354,29 @@ func (s *Server) seedCommanderToolAllowlist() {
 	log.Printf("[allowlist] red_team_lead 工具白名单已启用（仅编排/只读/报告，无执行工具）")
 }
 
+// wireTaskAgentPersona 让 planner/worker 按子任务的 agent_key 加载专用 agent 的人格提示词，
+// 使 spawn_task(agent=X) 的子任务真正以 X 的身份与打法运行（通用任务 key 为空→不变）。
+func (s *Server) wireTaskAgentPersona() {
+	agent.TaskAgent = func(taskID int64) (string, string) {
+		if s.m == nil || s.m.pg == nil {
+			return "", ""
+		}
+		t, err := s.m.pg.GetTask(taskID)
+		if err != nil || t == nil || strings.TrimSpace(t.AgentKey) == "" {
+			return "", ""
+		}
+		ag, err := s.m.pg.GetAgentByKey(t.AgentKey)
+		if err != nil || ag == nil {
+			return t.AgentKey, ""
+		}
+		tmpl, _ := s.m.pg.CurrentPrompt(ag.ID)
+		if strings.TrimSpace(tmpl) == "" {
+			tmpl = "你是「" + ag.Name + "」：" + ag.Description
+		}
+		return t.AgentKey, tmpl
+	}
+}
+
 // seedAgentModelBindings 是一次性(设置标记 agent_model_bind_v1)把 planner 绑到"强模型"、
 // worker 绑到"弱模型"的 profile（P1.4 强/弱模型路由）。按 model 名精确匹配：
 //

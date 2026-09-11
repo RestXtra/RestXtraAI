@@ -26,6 +26,7 @@ type Task struct {
 	Paused        bool       `json:"paused"`
 	LLMProfileID  *int64     `json:"llm_profile_id,omitempty"`
 	ParentRef     string     `json:"parent_ref,omitempty"` // 父任务 id(编排 spawn 记录;空=顶层)
+	AgentKey      string     `json:"agent_key,omitempty"`  // 专用 agent 身份（spawn_task 指定）；空=通用 planner/worker
 	CreatedAt     time.Time  `json:"created_at"`
 	CompletedAt   *time.Time `json:"completed_at,omitempty"` // 进入终态(done/failed/timeout)的时刻;非终态为 nil
 	// 任务级超时(见 docs/任务级超时与收尾设计.md)。
@@ -110,11 +111,11 @@ RETURNING id, status, paused, created_at`, description, goal, expID, llmProfileI
 	return t, nil
 }
 
-const taskCols = `id, description, goal, exploration_id, status, paused, llm_profile_id, COALESCE(parent_ref,''), created_at, completed_at, COALESCE(timeout_seconds,0), first_run_at, deadline_at, COALESCE(plan_heartbeat_seconds,0), COALESCE(company_id,0)`
+const taskCols = `id, description, goal, exploration_id, status, paused, llm_profile_id, COALESCE(parent_ref,''), COALESCE(agent_key,''), created_at, completed_at, COALESCE(timeout_seconds,0), first_run_at, deadline_at, COALESCE(plan_heartbeat_seconds,0), COALESCE(company_id,0)`
 
 func scanTask(sc interface{ Scan(...any) error }) (*Task, error) {
 	var t Task
-	if err := sc.Scan(&t.ID, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.LLMProfileID, &t.ParentRef, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.FirstRunAt, &t.DeadlineAt, &t.PlanHeartbeatSeconds, &t.CompanyID); err != nil {
+	if err := sc.Scan(&t.ID, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.LLMProfileID, &t.ParentRef, &t.AgentKey, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.FirstRunAt, &t.DeadlineAt, &t.PlanHeartbeatSeconds, &t.CompanyID); err != nil {
 		return nil, err
 	}
 	return &t, nil
@@ -220,6 +221,12 @@ WHERE tc.company_id=$1 AND t.deleted_at IS NULL`, companyID)
 // SetParentRef records a task's parent task id (编排 agent spawn_task 关联).
 func (d *DB) SetParentRef(id int64, parentRef string) error {
 	_, err := d.Exec(`UPDATE tasks SET parent_ref=NULLIF($2,'') WHERE id=$1`, id, parentRef)
+	return err
+}
+
+// SetTaskAgentKey records the specialized agent a task runs under (空=通用).
+func (d *DB) SetTaskAgentKey(id int64, agentKey string) error {
+	_, err := d.Exec(`UPDATE tasks SET agent_key=$2 WHERE id=$1`, id, agentKey)
 	return err
 }
 

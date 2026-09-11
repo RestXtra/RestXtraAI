@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"strings"
 	"text/template"
 )
 
@@ -10,6 +11,31 @@ import (
 // When nil or no override exists, agents use their built-in default prompt — so
 // behavior is identical until a user edits a prompt in the UI.
 var PromptOverride func(agentKey string) (string, bool)
+
+// TaskAgent, if set, returns the specialized agent (key, persona prompt) a task
+// runs under, so a delegated sub-task adopts that agent's identity/skills in both
+// the planner and the worker system prompts. Empty key = generic role (unchanged).
+var TaskAgent func(taskID int64) (key, persona string)
+
+// personaBlock renders the identity block prepended to a role prompt so the
+// sub-task "acts as" the specialized agent.
+func personaBlock(key, persona string) string {
+	if strings.TrimSpace(persona) == "" {
+		return ""
+	}
+	if strings.TrimSpace(key) == "" {
+		key = "specialist"
+	}
+	return "【专家身份｜" + key + "】你以该专用 agent 的身份与打法执行本任务：\n" + persona + "\n\n"
+}
+
+// taskAgentFor is a safe lookup helper for the planner/worker.
+func taskAgentFor(taskID int64) (string, string) {
+	if TaskAgent == nil {
+		return "", ""
+	}
+	return TaskAgent(taskID)
+}
 
 // Prompt-variable structs — fields mirror each agent's catalog (docs §5a) so a
 // user template referencing a catalog variable renders; referencing anything else

@@ -54,6 +54,7 @@ type Task struct {
 	ParentRef        string                `json:"parent_ref,omitempty"`        // 父任务 id(编排 spawn 记录)
 	AllowedTools     []string              `json:"allowed_tools,omitempty"`     // child delegation capability whitelist
 	DelegationBudget pgdb.DelegationBudget `json:"delegation_budget,omitempty"` // child task execution budget
+	AgentKey         string                `json:"agent_key,omitempty"`         // 专用 agent 身份（spawn_task 指定）
 	LLMProfileID     *int64                `json:"llm_profile_id,omitempty"`    // 指定运行本任务 planner/worker 的 LLM 配置;nil=用全局激活配置
 	Status           string                `json:"status"`                      // persisted lifecycle status (done/failed/timeout 为终态；空/其它则由运行态推导)
 	// 任务级超时(见 docs/任务级超时与收尾设计.md)。DeadlineAt/FirstRunAt 为 unix 秒,0=未设/未运行。
@@ -540,6 +541,7 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		ID: strconv.FormatInt(pt.ID, 10), ExpID: pt.ExplorationID,
 		Description: pt.Description, Goal: pt.Goal, CreatedAt: pt.CreatedAt.Unix(), Paused: pt.Paused,
 		CompletedAt: unixOrZero(pt.CompletedAt), Status: pt.Status, ParentRef: pt.ParentRef,
+		AgentKey:       pt.AgentKey,
 		LLMProfileID:   pt.LLMProfileID,
 		TimeoutSeconds: pt.TimeoutSeconds, FirstRunAt: unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),
 		PlanHeartbeatSeconds: pt.PlanHeartbeatSeconds,
