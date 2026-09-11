@@ -1319,3 +1319,9 @@ func (s *ExplorationStore) AddStandaloneFinding(taskID, nodeID int64, vulnclass,
 	}
 	return id, err
 }
+
+// SetFindingReport stores the structured 8-block vuln report on a finding row
+// (task-context delegation to the underlying DB).
+func (s *ExplorationStore) SetFindingReport(id int64, report string) (int64, error) {
+	return s.db.SetFindingReport(id, report)
+}

@@ -790,7 +790,7 @@ func (s *Server) seedOrchestrationTools() {
 // reaches an old DB otherwise. Preserves each tool's agent binding + enabled flag.
 // Bump the flag whenever these tools' schemas/descriptions change in code.
 func (s *Server) refreshBuiltinToolSchemas() {
-	const flag = "tool_schema_refresh_v5_structured_delegation"
+	const flag = "tool_schema_refresh_v6_report_finding"
 	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
 		return
 	}
@@ -803,8 +803,10 @@ func (s *Server) refreshBuiltinToolSchemas() {
 	}
 	// 同时把 planner 的 goal_met 描述刷成代码默认：旧库 seed 的描述带“结束本轮规划”的
 	// 误导，会让 planner 把 goal_met 当成“结束空轮”的手段、刚开跑就误判整个任务完成。
+	// report_finding 同步刷新：新增了结构化报告字段(title/url/impact/endpoints/repro/
+	// remediation)，旧库首插的 schema 看不到新参数。
 	for _, sd := range agent.BuiltinToolSeeds() {
-		if sd.Key != "goal_met" {
+		if sd.Key != "goal_met" && sd.Key != "report_finding" {
 			continue
 		}
 		schema, _ := json.Marshal(sd.Schema)

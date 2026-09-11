@@ -620,24 +620,40 @@ func (t *ToolSet) goalMet() actool.CoreTool {
 // --- worker write tools ---
 
 func (t *ToolSet) addFinding() actool.CoreTool {
-	return writeTool("report_finding", "发现漏洞时必须调用该工具!记录一个确认的漏洞发现。在任务上下文中 intent_id 必填（当前正在执行的意图 id）；在会话上下文中 intent_id 可不填。",
+	return writeTool("report_finding",
+		"发现并确认漏洞后调用，记录一个可复现的漏洞发现。任务上下文中 intent_id 必填，会话上下文中可不填。"+
+			"请按漏洞报告规范尽量填全结构化字段（title/url/impact/endpoints/repro/remediation）——它们会合成一份正式报告；"+
+			"越权/注入类必须含可复现 PoC 与基线差分证据。只登记**本次真实触发过、可复现**的漏洞；"+
+			"严禁把版本/CVE 匹配、\"看起来可注入\"当已确认漏洞上报。",
 		obj(map[string]any{
-			"vulnclass": str("漏洞类"),
-			"severity":  str("high|medium|low"),
-			"summary":   str("发现摘要"),
-			"intent_id": idp("产生本发现的意图 id（任务上下文必填；会话上下文可不填）"),
-			"asset_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "受影响资产 id（可选，0/1/多个）：参数/端点/站点等。一个漏洞影响多处可全填，纯观察可不填。"},
-			"evidence":  str("证据/PoC 文本"),
+			"vulnclass":   str("漏洞类"),
+			"severity":    str("严重等级：critical|high|medium（只报中危及以上）"),
+			"summary":     str("一句话摘要（未提供 title 时作为报告标题）"),
+			"title":       str("漏洞标题：一行，谁的站、做成了啥；未填则用 summary"),
+			"url":         str("目标网站URL：人打开的站（https://…）"),
+			"impact":      str("漏洞危害：只写最终伤害，按身份/钥/数据的真实权限面写全、举例"),
+			"endpoints":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "涉及接口清单：只列复现里真打过的完整地址 + 出处"},
+			"repro":       str("复现步骤：1/2/3 逐条，每步一个可复制整包（请求行 + 关键头）"),
+			"remediation": str("修复建议：精准、可落地"),
+			"evidence":    str("证据/PoC 文本"),
+			"intent_id":   idp("产生本发现的意图 id（任务上下文必填；会话上下文可不填）"),
+			"asset_ids":   map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "受影响资产 id（可选）：参数/端点/站点等。一个漏洞影响多处可全填。"},
 		}, "vulnclass", "severity", "summary"),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
 				VulnClass, Severity, Summary, Evidence string
+				Title, URL, Impact, Repro, Remediation string
+				Endpoints                              []string
 				IntentID                               json.RawMessage   `json:"intent_id"`
 				AssetIDs                               []json.RawMessage `json:"asset_ids"`
 			}
 			_ = json.Unmarshal(in, &a)
+			report := composeFindingReport(a.Title, a.Summary, a.URL, a.Severity, a.Impact, a.Endpoints, a.Repro, a.Remediation, a.Evidence)
 			payload := map[string]any{"vulnclass": a.VulnClass, "severity": a.Severity, "summary": a.Summary,
 				"evidence": map[string]any{"by": t.worker, "poc": a.Evidence}}
+			if report != "" {
+				payload["report"] = report
+			}
 			var anchors []int64
 			for _, raw := range a.AssetIDs {
 				if p := pid(raw); p > 0 {
@@ -658,7 +674,10 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 						t.notifyFinding(intent, a.Summary)
 					}
 				}
-				_, _ = t.ts.AddStandaloneFinding(t.taskID, id, a.VulnClass, a.Severity, a.Summary, a.Evidence, t.worker, anchors)
+				fid, _ := t.ts.AddStandaloneFinding(t.taskID, id, a.VulnClass, a.Severity, a.Summary, a.Evidence, t.worker, anchors)
+				if fid > 0 && report != "" {
+					_, _ = t.ts.SetFindingReport(fid, report)
+				}
 			} else {
 				// conversation context: no exploration store — fall back to the
 				// standalone findings table via the global DB handle, so chat
@@ -671,12 +690,53 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 				if err != nil {
 					return actool.Errorf(err.Error()), nil
 				}
+				if report != "" {
+					_, _ = t.pg.SetFindingReport(id, report)
+				}
 				t.writes.Findings++
 				return actool.Text(fmt.Sprintf("finding recorded: %d", id)), nil
 			}
 			t.writes.Findings++
 			return actool.Text(fmt.Sprintf("finding recorded: %d", id)), nil
 		})
+}
+
+// composeFindingReport 把结构化字段合成一份「8 块」正式漏洞报告（空块自动省略）。
+func composeFindingReport(title, summary, url, severity, impact string, endpoints []string, repro, remediation, evidence string) string {
+	if strings.TrimSpace(title) == "" {
+		title = summary
+	}
+	var b strings.Builder
+	line := func(k, v string) {
+		if v = strings.TrimSpace(v); v != "" {
+			b.WriteString(k + v + "\n")
+		}
+	}
+	block := func(k, v string) {
+		if v = strings.TrimSpace(v); v != "" {
+			b.WriteString(k + "\n" + v + "\n")
+		}
+	}
+	line("漏洞标题：", title)
+	line("目标网站URL：", url)
+	line("漏洞等级：", severity)
+	block("漏洞描述：", summary)
+	block("漏洞危害：", impact)
+	n := 0
+	for _, e := range endpoints {
+		if strings.TrimSpace(e) == "" {
+			continue
+		}
+		if n == 0 {
+			b.WriteString("涉及接口清单：\n")
+		}
+		n++
+		b.WriteString(fmt.Sprintf("%d. %s\n", n, strings.TrimSpace(e)))
+	}
+	block("复现步骤：", repro)
+	block("修复建议：", remediation)
+	block("证据/PoC：", evidence)
+	return strings.TrimSpace(b.String())
 }
 
 // recordFact writes a general exploration RESULT/conclusion (not a vuln, not a
