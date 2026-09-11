@@ -244,6 +244,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		// 六域智能体体系（幂等播种：创建领域 agent + 绑定技能/MCP/工具）。
 		s.seedSixDomainAgents()
 		s.seedSrcHuntingSkillBinding()                                      // 把 src-hunting 方法论 skill 追加给对话式进攻 agent
+		s.seedRedTeamLeadPromptV2()                                         // 把红队总指挥提示词升级为 SRC 方法论版
 		s.seedAgentModelBindings()                                          // P1.4 强/弱模型路由：按模型名把 planner 绑强模型、worker 绑弱模型(一次性)
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools, &s.assemblyCatalog) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
 		domainReg := buildDomainReg(m.pg, m.Assets())
