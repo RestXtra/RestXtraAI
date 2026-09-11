@@ -109,15 +109,20 @@ func compactionConfig(windowTokens int, counter llm.TokenCounter) *compaction.Co
 }
 
 // CompactionTokenCounter returns an exact token counter for compaction thresholds,
-// or nil to use norma's local length estimate.
+// or nil to use norma's local length estimate (no network).
 //
-// The count_tokens endpoint is Anthropic-specific, so a counter is wired only for
-// an Anthropic provider that has a key. Previously this counter was wired for every
-// provider with an empty key and the default host, so each model turn attempted a
-// doomed HTTPS request to api.anthropic.com (no timeout) — pure per-turn latency,
-// and the result was discarded on failure anyway. Non-Anthropic providers now skip
-// the network entirely.
+// The counter is consulted on EVERY model turn (Compactor.Pre), so a remote
+// count_tokens call there is a per-turn latency/cost hit. It is therefore OFF by
+// default for every provider, including Anthropic. Set RESTXTRA_LLM_COUNT_TOKENS=1
+// to opt into exact Anthropic counting (provider must be Anthropic with a key);
+// otherwise compaction uses the local estimate, which is accurate enough and never
+// blocks a turn on the network.
+const CountTokensEnv = "RESTXTRA_LLM_COUNT_TOKENS"
+
 func (c Config) CompactionTokenCounter() llm.TokenCounter {
+	if os.Getenv(CountTokensEnv) != "1" {
+		return nil
+	}
 	if c.Format != llm.FormatAnthropic || strings.TrimSpace(c.APIKey) == "" {
 		return nil
 	}
