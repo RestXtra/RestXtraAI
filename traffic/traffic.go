@@ -114,6 +114,28 @@ func Open(dir, addr string) (*Traffic, error) {
 	return t, nil
 }
 
+// SetUpstream routes the recording proxy's outbound through an upstream proxy
+// (http/https/socks5 URL), or dials targets directly when u is empty. Used to
+// make agent traffic exit via the proxy bridge (a chosen SOCKS node) once it
+// is started. go-mitmproxy's GetProxyConn supports socks5, so a URL like
+// "socks5://127.0.0.1:10808" tunnels the captured HTTP/HTTPS out via the node.
+func (t *Traffic) SetUpstream(u string) {
+	if t == nil || t.proxy == nil {
+		return
+	}
+	if u == "" {
+		t.proxy.SetUpstreamProxy(func(*http.Request) (*url.URL, error) { return nil, nil })
+		return
+	}
+	parsed, err := url.Parse(u)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		log.Printf("[traffic] 无效上游代理 %q: %v", u, err)
+		t.proxy.SetUpstreamProxy(func(*http.Request) (*url.URL, error) { return nil, nil })
+		return
+	}
+	t.proxy.SetUpstreamProxy(func(*http.Request) (*url.URL, error) { return parsed, nil })
+}
+
 // hostOnly strips an optional :port, so passthrough keys match whether the host
 // arrives as "example.com:443" (CONNECT) or "example.com" (request URL).
 func hostOnly(hostport string) string {
@@ -156,7 +178,7 @@ func (t *Traffic) Clear() (int64, error) {
 	t.seq.Store(0)
 	return n, nil
 }
-func (t *Traffic) DB() *sql.DB  { return t.db }
+func (t *Traffic) DB() *sql.DB { return t.db }
 
 // Delete removes a set of exchanges by id: the SQLite index rows and their file
 // tree directories. Returns how many exchanges were removed.

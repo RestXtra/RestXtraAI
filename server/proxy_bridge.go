@@ -112,9 +112,23 @@ func (s *Server) startProxyBridge() (proxyBridgeConfig, error) {
 		return cfg, fmt.Errorf("启动代理入口失败: %w", err)
 	}
 	st.bridge = b
+	s.applyTrafficUpstream(cfg.Port)
 	_ = s.m.pg.RecordAudit(db.AuditEntry{Actor: "system", Category: "proxy", Action: "bridge_start", Result: "success",
 		Message: fmt.Sprintf("代理入口已启动 :%d → 节点 %d", cfg.Port, cfg.NodeID)})
 	return cfg, nil
+}
+
+// applyTrafficUpstream 让录制代理(:8788)的出站走代理入口(SOCKS)，agent 的 HTTP/HTTPS
+// 流量即经所选节点出口；port=0 恢复直连。
+func (s *Server) applyTrafficUpstream(port int) {
+	if s.m == nil || s.m.traffic == nil {
+		return
+	}
+	if port > 0 {
+		s.m.traffic.SetUpstream(fmt.Sprintf("socks5://127.0.0.1:%d", port))
+	} else {
+		s.m.traffic.SetUpstream("")
+	}
 }
 
 func (s *Server) stopProxyBridge() error {
@@ -125,6 +139,7 @@ func (s *Server) stopProxyBridge() error {
 		_ = st.bridge.Stop()
 		st.bridge = nil
 	}
+	s.applyTrafficUpstream(0)
 	return nil
 }
 
