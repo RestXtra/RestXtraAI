@@ -542,6 +542,7 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		e.incInflight(t.ID)
 		taskIDInt, _ := strconv.ParseInt(t.ID, 10, 64)
 		metrics.M.Inc(&metrics.M.PlannerRounds) // P5.4
+		verBefore := t.Store.Version()
 		met, reason, err := planner.Plan(ectx, taskIDInt, e.m.assets, t.Store, t.Goal, triggers, emit)
 		e.decInflight(t.ID)
 		switch {
@@ -559,6 +560,11 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 			e.cancelExec(t.ID)
 		default:
 			log.Printf("[planner] task %s 规划完成", t.ID)
+			// 无延续即完成：本轮没有任何图写入，且没有待处理/在跑的意图与 worker →
+			// 这个任务确实演尽了。立即判定完成，而不是空转到墙钟 deadline 被标 timeout。
+			if err == nil && ectx.Err() == nil && t.Store.Version() == verBefore && e.noWorkLeft(t) {
+				e.completeExhausted(t)
+			}
 		}
 		e.touch(t.ID)
 	}
@@ -851,6 +857,42 @@ func (e *Engine) enforceDelegationBudget(t *Task) bool {
 		e.cancelExec(t.ID)
 	}
 	return won || isTerminalStatus(e.m.TaskStatus(t.ID))
+}
+
+// noWorkLeft reports whether a task has nothing pending or running: no in-flight
+// planner/worker pass, and no open or running intents.
+func (e *Engine) noWorkLeft(t *Task) bool {
+	if e.inflightCount(t.ID) > 0 {
+		return false
+	}
+	open, err := t.Store.CountByKindState("intent", "open")
+	if err != nil {
+		return false
+	}
+	running, err := t.Store.CountByKindState("intent", "running")
+	if err != nil {
+		return false
+	}
+	return open == 0 && running == 0
+}
+
+// completeExhausted marks a task done because there is no further exploration
+// direction (no continuation). This is the goal/progress-driven termination that
+// opencode/pi use, replacing "idle until the wall-clock deadline → timeout".
+func (e *Engine) completeExhausted(t *Task) {
+	won, err := e.m.SetTaskStatusGuarded(t.ID, "done")
+	if err != nil {
+		log.Printf("[planner] task %s 判定演尽完成失败: %v", t.ID, err)
+		return
+	}
+	if !won {
+		return // another terminal writer (timeout/settle) already won
+	}
+	payload, _ := json.Marshal(map[string]any{"reason": "no_further_directions"})
+	e.emitActivity(t, db.Activity{Worker: "system", EventType: db.EventTaskExhausted, EventOnly: true,
+		Summary: "无更多探索方向（无待处理意图、无在跑工作、图未变），任务判定完成", Payload: payload})
+	log.Printf("[planner] task %s 无延续 → 判定完成(no_further_directions)", t.ID)
+	e.cancelExec(t.ID)
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) (done bool) {

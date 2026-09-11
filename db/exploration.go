@@ -198,6 +198,16 @@ func (s *ExplorationStore) CachedOverview() ([]byte, bool) {
 	return c.data, true
 }
 
+// Version returns the current graph version (monotonic per exploration; bumped
+// by every write that graph_overview reflects). Used to detect a planner round
+// that produced no graph change.
+func (s *ExplorationStore) Version() int64 {
+	l := s.db.ovLock(s.expID)
+	l.Lock()
+	defer l.Unlock()
+	return s.db.ovVer[s.expID]
+}
+
 // CacheOverview stores a fresh overview snapshot at the current graph version.
 func (s *ExplorationStore) CacheOverview(data map[string]any) {
 	b, err := json.Marshal(data)

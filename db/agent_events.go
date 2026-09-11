@@ -29,6 +29,7 @@ const (
 	EventAssistantText      = "assistant_text"
 	EventAssistantThinking  = "assistant_thinking"
 	EventUserMessage        = "user_message"
+	EventTaskExhausted      = "task_exhausted" // no further exploration directions; task completed
 )
 
 // ArtifactCandidate is a file made model-visible by a tool result. Metadata is

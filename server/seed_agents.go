@@ -176,6 +176,8 @@ var sixDomainAgents = []domainAgentSpec{
 			"6. 不无据盘问授权，但不越界：以当前任务/企业范围为授权边界——不要因没有纸质授权书停下盘问；但绝不越出任务范围攻击无关资产。\n" +
 			"派活规约（spawn_task）：\n" +
 			"- 传最小结构化交接包：objective、asset_ids、required_evidence、allowed_tools、budget；不要复制父任务 transcript。\n" +
+			"- **边界（必须）**：spawn_task 必须传 asset_ids——本子任务只在这些目标资产范围内探索，越界目标会被系统拒收。objective 要写清“只做这件事”，避免子任务发散到无关资产。\n" +
+			"- **预算**：budget 只需设 max_wall_time_seconds 作为兜底（防卡死），别写太小。子任务在“没有更多方向”时（无待处理意图、无在跑工作、图不再变化）会**自动判定完成**，不需要靠短超时来结束。除快速侦察外建议给足（如 ≥1800s）让路线走透；token/tool 调用预算留空即可（不作停机依据）。\n" +
 			"- required_evidence 至少含 PoC/请求响应、独立复现证据、迭代记录、影响面；越权/注入要显式要求基线差分。\n" +
 			"- 派发后用 wait_task 阻塞等待任一子任务完成（不要 sleep 盲等），直接消费其 facts、findings、negative_results、artifact_refs、next_actions、usage；用 list_tasks 跟踪进度，必要时 add_task_hint 纠偏（先指出哪条路线没走透/缺哪项证据）。只有结构化结果引用不足时，才 get_task_result / get_task_graph / trace 深挖。\n" +
 			"收尾：汇总各域结论成整体评估——达成了什么、确认了哪些漏洞（附 PoC 位置与影响面）、哪些方向已封锁及原因、下一步建议。只讲真实做到的，不臆造。",
@@ -305,6 +307,36 @@ func (s *Server) seedRedTeamLeadPromptV2() {
 			return
 		}
 		log.Printf("[seed-agent] red_team_lead 提示词已升级为 SRC 方法论版")
+		break
+	}
+	_ = pg.SetSetting(flag, "true")
+}
+
+// seedRedTeamLeadPromptV3 一次性(flag 门控)给「红队总指挥」补上任务边界与预算纪律：
+// spawn_task 必须带 asset_ids（子任务只在该范围内探索），budget 只作防卡死兜底、
+// 别写太小（子任务演尽会自动完成）。追加新版本并切 current，之后不覆盖用户编辑。
+func (s *Server) seedRedTeamLeadPromptV3() {
+	pg := s.m.pg
+	if pg == nil {
+		return
+	}
+	const flag = "prompt_red_team_lead_methodology_v3"
+	if v, _, _ := pg.GetSetting(flag); v == "true" {
+		return
+	}
+	ag, err := pg.GetAgentByKey("red_team_lead")
+	if err != nil || ag == nil {
+		return
+	}
+	for _, spec := range sixDomainAgents {
+		if spec.Key != "red_team_lead" {
+			continue
+		}
+		if _, err := pg.SavePrompt(ag.ID, spec.Prompt, "边界与预算 v3", "system"); err != nil {
+			log.Printf("[seed-agent] red_team_lead 边界提示词升级失败: %v", err)
+			return
+		}
+		log.Printf("[seed-agent] red_team_lead 提示词已升级（任务边界 + 预算纪律）")
 		break
 	}
 	_ = pg.SetSetting(flag, "true")

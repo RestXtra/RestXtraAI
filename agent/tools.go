@@ -391,6 +391,14 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 		if description, goal, err := t.ts.Root(); err == nil {
 			out["task"] = map[string]any{"description": description, "goal": goal}
 		}
+		// Task boundary: surface the dispatched asset scope so the planner stays
+		// inside it and understands why out-of-scope targets are rejected.
+		if t.as != nil && t.taskID > 0 {
+			if allowed := t.as.TaskAllowedAssetIDs(t.taskID); len(allowed) > 0 {
+				out["scope_asset_ids"] = allowed
+				out["scope_note"] = "本任务仅限在 scope_asset_ids 内探索；越界的目标资产会被拒收。"
+			}
+		}
 		t.ts.CacheOverview(out) // P2.6: 缓存当前版本快照（BumpVersion 后失效）
 		return out
 	}
@@ -480,6 +488,28 @@ func (t *ToolSet) nodeDetail() actool.CoreTool {
 		})
 }
 
+// filterToScope keeps only anchors that are inside a task's allowed asset scope.
+// An empty allowed slice means "unrestricted" (returns the anchors unchanged).
+// dropped is the out-of-scope subset (nil when none).
+func filterToScope(anchors, allowed []int64) (kept, dropped []int64) {
+	if len(allowed) == 0 || len(anchors) == 0 {
+		return anchors, nil
+	}
+	ok := make(map[int64]struct{}, len(allowed))
+	for _, id := range allowed {
+		ok[id] = struct{}{}
+	}
+	kept = make([]int64, 0, len(anchors))
+	for _, id := range anchors {
+		if _, in := ok[id]; in {
+			kept = append(kept, id)
+		} else {
+			dropped = append(dropped, id)
+		}
+	}
+	return kept, dropped
+}
+
 // --- planner write tools ---
 
 // intentItem 是 add_intent 批量/单条的一条探索方向。
@@ -508,6 +538,17 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 		priority = 5
 	}
 	anchors := pidList(it.AssetIDs)
+	// Task boundary: a spawned task may only explore the assets it was
+	// dispatched for. Drop out-of-scope anchors; reject an intent whose targets
+	// are entirely out of scope (scope creep).
+	if len(anchors) > 0 && t.as != nil {
+		if kept, dropped := filterToScope(anchors, t.as.TaskAllowedAssetIDs(t.taskID)); len(dropped) > 0 {
+			if len(kept) == 0 {
+				return 0, fmt.Errorf("意图的目标资产全部超出本任务下发的范围（越界：%v）。本任务只做下发资产范围内的探索；如需换目标请由上级新派任务。", dropped)
+			}
+			anchors = kept
+		}
+	}
 	payload := map[string]any{"summary": it.Summary, "intent_class": it.IntentClass}
 	payload["concurrency_class"] = it.ConcurrencyClass
 	payload["account_scopes"] = it.AccountScopes

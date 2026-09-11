@@ -1260,6 +1260,25 @@ func (s *AssetStore) AddAutoScope(taskID int64, assetType, domain, rawURL, ip st
 	return nil
 }
 
+// TaskAllowedAssetIDs returns the delegated asset_ids that bound a task's
+// exploration scope, or nil when the task is unrestricted (top-level task, or a
+// delegation that carried no asset_ids). Reads the delegation contract.
+func (s *AssetStore) TaskAllowedAssetIDs(taskID int64) []int64 {
+	if taskID <= 0 {
+		return nil
+	}
+	var raw []byte
+	if err := s.db.QueryRow(`SELECT COALESCE(contract->'asset_ids','[]'::jsonb)::text
+FROM task_delegations WHERE child_task_id=$1`, taskID).Scan(&raw); err != nil {
+		return nil
+	}
+	var ids []int64
+	if json.Unmarshal(raw, &ids) != nil || len(ids) == 0 {
+		return nil
+	}
+	return ids
+}
+
 // ipCIDR normalizes a bare IP to a /32 (v4) or /128 (v6) CIDR string; "" if invalid.
 func ipCIDR(ip string) string {
 	ip = strings.TrimSpace(ip)
