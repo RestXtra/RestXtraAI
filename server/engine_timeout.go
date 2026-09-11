@@ -206,7 +206,7 @@ func (e *Engine) runFinalPlannerRound(ctx context.Context, t *Task) (met bool) {
 	e.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
 		Summary: fmt.Sprintf("任务超时收尾·终局判定(第 %d 轮)", e.nextPlannerRound(t.ID))})
 	// 独立 ctx(不挂 execCancel,避免 pause/硬 cancel 打断这最后一轮),带 Final 注入任务超时词。
-	fctx := e.clockCtx(ctx, t, true)
+	fctx := withCurrentTask(e.clockCtx(ctx, t, true), t.ID)
 	e.incInflight(t.ID)
 	tTaskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	met, reason, err := planner.Plan(fctx, tTaskID, e.m.assets, t.Store, t.Goal, t.drainTriggers(), emit)

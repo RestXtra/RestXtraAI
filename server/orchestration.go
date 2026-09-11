@@ -50,6 +50,39 @@ func convCompanyID(ctx context.Context) int64 {
 	return 0
 }
 
+// currentTaskKey carries the id of the task whose agent is running this tool
+// call, so spawn_task can default a child's parent to its caller (the
+// orchestration tree is otherwise broken because parent_ref is optional and
+// routinely omitted). Attached by the engine for planner/worker runs and by the
+// main-agent chat path.
+type currentTaskKey struct{}
+
+// withCurrentTask attaches the running task id to ctx (no-op on empty).
+func withCurrentTask(ctx context.Context, taskID string) context.Context {
+	if strings.TrimSpace(taskID) == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, currentTaskKey{}, taskID)
+}
+
+// currentTaskID returns the running task id from ctx, or "".
+func currentTaskID(ctx context.Context) string {
+	if v, ok := ctx.Value(currentTaskKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// resolveParentRef picks a spawned task's parent: an explicit parent_ref wins;
+// otherwise it defaults to the task running the tool call, so the orchestration
+// tree stays connected even when the model omits parent_ref.
+func resolveParentRef(ctx context.Context, explicit string) string {
+	if ref := strings.TrimSpace(explicit); ref != "" {
+		return ref
+	}
+	return currentTaskID(ctx)
+}
+
 func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	tools := append(s.m.HostTools(), s.orchestrationTools()...)
 	tools = append(tools, s.platformTools()...) // 平台操作工具(建改 skill/工具/MCP，给 Auto 用)
@@ -253,7 +286,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			"description":       strParam("任务描述(简短标题)"),
 			"objective":         strParam("子 Agent 的唯一目标（推荐；goal 作为旧参数仍兼容）"),
 			"goal":              strParam("兼容旧调用：任务目标；objective 为空时使用"),
-			"parent_ref":        strParam("可选：父任务 id(做父子关联)"),
+			"parent_ref":        strParam("可选：父任务 id。留空时自动以调用本工具的当前任务为父，保证编排树连通；仅当要挂到别的父任务时才显式指定"),
 			"asset_ids":         map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "子 Agent 可直接引用的目标资产 id；只传引用，不复制资产/历史正文"},
 			"required_evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "完成条件要求的证据清单；为空时使用平台安全默认"},
 			"allowed_tools":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "可选能力白名单。图谱核心读写工具始终保留；Bash、外部工具、MCP/Skill 仅白名单内可用。空数组保持普通任务工具策略"},
@@ -294,9 +327,13 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			if objective == "" {
 				return actool.Errorf("objective（或兼容参数 goal）为必填"), nil
 			}
-			if a.ParentRef != "" {
-				if _, ok := s.m.Task(a.ParentRef); !ok {
-					return actool.Errorf("父任务不存在: " + a.ParentRef), nil
+			// Parent link: explicit parent_ref wins; otherwise default to the task
+			// running this tool call (the caller), so the orchestration tree is
+			// always connected without relying on the model to pass it.
+			parentRef := resolveParentRef(ctx, a.ParentRef)
+			if parentRef != "" {
+				if _, ok := s.m.Task(parentRef); !ok {
+					return actool.Errorf("父任务不存在: " + parentRef), nil
 				}
 			}
 			if len(a.AssetIDs) > 0 {
@@ -342,14 +379,14 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 					return actool.Errorf(fmt.Sprintf("LLM 配置 #%d 不存在或未设置 API Key", id)), nil
 				}
 				pin = &id
-			} else if a.ParentRef != "" {
-				if pt, ok := s.m.Task(a.ParentRef); ok {
+			} else if parentRef != "" {
+				if pt, ok := s.m.Task(parentRef); ok {
 					pin = pt.LLMProfileID
 				}
 			}
 			var companyIDs []int64
-			if a.ParentRef != "" {
-				if pt, ok := s.m.Task(a.ParentRef); ok {
+			if parentRef != "" {
+				if pt, ok := s.m.Task(parentRef); ok {
 					for _, c := range pt.Companies {
 						companyIDs = append(companyIDs, c.ID)
 					}
@@ -368,7 +405,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 				return actool.Errorf(err.Error()), nil
 			}
 			childID, _ := strconv.ParseInt(t.ID, 10, 64)
-			contract := pgdb.TaskDelegation{ChildTaskID: childID, ParentRef: a.ParentRef,
+			contract := pgdb.TaskDelegation{ChildTaskID: childID, ParentRef: parentRef,
 				Objective: objective, AgentKey: a.Agent, AssetIDs: a.AssetIDs, RequiredEvidence: a.RequiredEvidence,
 				AllowedTools: a.AllowedTools, Budget: a.Budget}
 			if err := s.m.PG().SaveTaskDelegation(contract); err != nil {
@@ -386,9 +423,9 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 					log.Printf("[spawn] 设置子任务 agent_key 失败: %v", err)
 				}
 			}
-			if a.ParentRef != "" {
-				t.ParentRef = a.ParentRef
-				if err := s.m.PG().SetParentRef(childID, a.ParentRef); err != nil {
+			if parentRef != "" {
+				t.ParentRef = parentRef
+				if err := s.m.PG().SetParentRef(childID, parentRef); err != nil {
 					_ = s.m.DeleteTask(t.ID)
 					return actool.Errorf("保存父子任务关系失败: " + err.Error()), nil
 				}

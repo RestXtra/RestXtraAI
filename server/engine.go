@@ -137,6 +137,7 @@ func (e *Engine) execContextFor(parent context.Context, taskID string) context.C
 		return c
 	}
 	c, cancel := context.WithCancel(parent)
+	c = withCurrentTask(c, taskID) // let spawn_task default a child's parent to this task
 	e.execCtx[taskID] = c
 	e.execCancel[taskID] = cancel
 	return c
