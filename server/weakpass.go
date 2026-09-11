@@ -1,11 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"regexp"
 	"strings"
@@ -53,10 +56,16 @@ type weakpassSpec struct {
 	Users     []string `json:"users"`
 	Username  string   `json:"username"`
 	Passwords []string `json:"passwords"`
-	// http-form 专用
+	// http-form / http-json 专用
+	BodyType      string            `json:"body_type"` // "form"(默认) | "json"
 	UserField     string            `json:"user_field"`
 	PassField     string            `json:"pass_field"`
 	ExtraFields   map[string]string `json:"extra_fields"`
+	Headers       map[string]string `json:"headers"`
+	Cookie        string            `json:"cookie"`
+	CSRFField     string            `json:"csrf_field"`
+	CSRFURL       string            `json:"csrf_url"`
+	CSRFHeader    string            `json:"csrf_header"`
 	SuccessMarker string            `json:"success_marker"`
 	FailMarker    string            `json:"fail_marker"`
 	SuccessStatus int               `json:"success_status"`
@@ -208,18 +217,23 @@ func (s *Server) weakpassVerifier(spec weakpassSpec) (weakpassVerify, error) {
 		if spec.URL == "" {
 			return nil, fmt.Errorf("http-basic 需要 url")
 		}
+		cl := weakpassHTTPClient()
 		return func(ctx context.Context, u, p string) (bool, bool, error) {
-			return verifyHTTPBasic(ctx, spec.URL, u, p)
+			return verifyHTTPBasic(ctx, cl, spec.URL, u, p)
 		}, nil
-	case "http-form":
+	case "http-form", "http-json":
 		if spec.URL == "" {
-			return nil, fmt.Errorf("http-form 需要 url")
+			return nil, fmt.Errorf("%s 需要 url", spec.Kind)
 		}
 		if spec.SuccessMarker == "" && spec.SuccessStatus == 0 && spec.FailMarker == "" {
-			return nil, fmt.Errorf("http-form 需要成功/失败判据：success_marker 或 success_status 或 fail_marker（否则无法可靠判定）")
+			return nil, fmt.Errorf("%s 需要成功/失败判据：success_marker 或 success_status 或 fail_marker（否则无法可靠判定）", spec.Kind)
 		}
+		if spec.Kind == "http-json" {
+			spec.BodyType = "json"
+		}
+		cl := weakpassHTTPClient()
 		return func(ctx context.Context, u, p string) (bool, bool, error) {
-			return verifyHTTPForm(ctx, spec, u, p)
+			return verifyHTTPLogin(ctx, cl, spec, u, p)
 		}, nil
 	case "ssh":
 		if spec.Host == "" {
@@ -251,8 +265,10 @@ func (s *Server) weakpassVerifier(spec weakpassSpec) (weakpassVerify, error) {
 }
 
 func weakpassHTTPClient() *http.Client {
+	jar, _ := cookiejar.New(nil) // 跨请求保留会话 cookie（登录页 → 登录 POST）
 	return &http.Client{
 		Timeout: weakpassHTTPTimeout,
+		Jar:     jar,
 		// 不自动跟随跳转：登录成功常是 302，需要在原响应上判定。
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		Transport: &http.Transport{
@@ -262,13 +278,25 @@ func weakpassHTTPClient() *http.Client {
 	}
 }
 
-func verifyHTTPBasic(ctx context.Context, rawURL, user, pass string) (bool, bool, error) {
+func applyWeakpassHeaders(req *http.Request, spec weakpassSpec, csrf string) {
+	for k, v := range spec.Headers {
+		req.Header.Set(k, v)
+	}
+	if spec.Cookie != "" {
+		req.Header.Set("Cookie", spec.Cookie)
+	}
+	if csrf != "" && spec.CSRFHeader != "" {
+		req.Header.Set(spec.CSRFHeader, csrf)
+	}
+}
+
+func verifyHTTPBasic(ctx context.Context, cl *http.Client, rawURL, user, pass string) (bool, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return false, false, err
 	}
 	req.SetBasicAuth(user, pass)
-	resp, err := weakpassHTTPClient().Do(req)
+	resp, err := cl.Do(req)
 	if err != nil {
 		return false, false, err
 	}
@@ -284,8 +312,50 @@ func verifyHTTPBasic(ctx context.Context, rawURL, user, pass string) (bool, bool
 	}
 }
 
-func verifyHTTPForm(ctx context.Context, spec weakpassSpec, user, pass string) (bool, bool, error) {
-	form := url.Values{}
+// extractCSRF 从登录页 HTML 中提取 CSRF/hidden 字段值（支持 input 两种属性顺序与 meta）。
+func extractCSRF(html, field string) string {
+	if field == "" {
+		return ""
+	}
+	q := regexp.QuoteMeta(field)
+	pats := []string{
+		`(?is)<input[^>]*\bname=["']` + q + `["'][^>]*\bvalue=["']([^"']+)["']`,
+		`(?is)<input[^>]*\bvalue=["']([^"']+)["'][^>]*\bname=["']` + q + `["']`,
+		`(?is)<meta[^>]*\bname=["']` + q + `["'][^>]*\bcontent=["']([^"']+)["']`,
+	}
+	for _, p := range pats {
+		if m := regexp.MustCompile(p).FindStringSubmatch(html); len(m) > 1 {
+			return m[1]
+		}
+	}
+	return ""
+}
+
+// fetchCSRF 取登录页并抽出 CSRF 令牌（每次尝试前调用，兼容 token 与会话绑定）。
+func fetchCSRF(ctx context.Context, cl *http.Client, spec weakpassSpec) string {
+	if spec.CSRFField == "" {
+		return ""
+	}
+	u := spec.CSRFURL
+	if u == "" {
+		u = spec.URL
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return ""
+	}
+	applyWeakpassHeaders(req, spec, "")
+	resp, err := cl.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<19))
+	return extractCSRF(string(body), spec.CSRFField)
+}
+
+// verifyHTTPLogin 处理 http-form 与 http-json：构造登录请求，据 success/fail 判据判定。
+func verifyHTTPLogin(ctx context.Context, cl *http.Client, spec weakpassSpec, user, pass string) (bool, bool, error) {
 	uf, pf := spec.UserField, spec.PassField
 	if uf == "" {
 		uf = "username"
@@ -293,23 +363,51 @@ func verifyHTTPForm(ctx context.Context, spec weakpassSpec, user, pass string) (
 	if pf == "" {
 		pf = "password"
 	}
-	form.Set(uf, user)
-	form.Set(pf, pass)
-	for k, v := range spec.ExtraFields {
-		form.Set(k, v)
+	csrf := fetchCSRF(ctx, cl, spec)
+
+	var body io.Reader
+	contentType := "application/x-www-form-urlencoded"
+	if spec.BodyType == "json" {
+		m := map[string]string{uf: user, pf: pass}
+		for k, v := range spec.ExtraFields {
+			m[k] = v
+		}
+		if csrf != "" && spec.CSRFHeader == "" && spec.CSRFField != "" {
+			m[spec.CSRFField] = csrf
+		}
+		b, _ := json.Marshal(m)
+		body = bytes.NewReader(b)
+		contentType = "application/json"
+	} else {
+		form := url.Values{}
+		form.Set(uf, user)
+		form.Set(pf, pass)
+		for k, v := range spec.ExtraFields {
+			form.Set(k, v)
+		}
+		if csrf != "" && spec.CSRFHeader == "" && spec.CSRFField != "" {
+			form.Set(spec.CSRFField, csrf)
+		}
+		body = strings.NewReader(form.Encode())
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, spec.URL, strings.NewReader(form.Encode()))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, spec.URL, body)
 	if err != nil {
 		return false, false, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := weakpassHTTPClient().Do(req)
+	req.Header.Set("Content-Type", contentType)
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; RestXtraAI/weakpass)")
+	}
+	applyWeakpassHeaders(req, spec, csrf)
+
+	resp, err := cl.Do(req)
 	if err != nil {
 		return false, false, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	bs := string(body)
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	bs := string(respBody)
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == 423 || weakpassLockoutRe.MatchString(bs) {
 		return false, true, nil
 	}

@@ -41,20 +41,27 @@ func strMapParam(desc string) map[string]any {
 func (s *Server) toolWeakPasswordProbe() actool.CoreTool {
 	return actool.Build(actool.Spec{
 		Name: "weak_password_probe",
-		Description: "有界弱口令探测：对**已授权**目标做小范围登录尝试（http-form/http-basic/ssh/rdp/telnet）。" +
+		Description: "有界弱口令探测：对**已授权**目标做小范围登录尝试（http-form/http-json/http-basic/ssh/rdp/telnet）。" +
+			"web 登录口支持表单或 JSON 体、自动抽取 CSRF/hidden 令牌、Cookie 会话保持、自定义请求头。" +
 			"严格受限：单线程、默认≤20 次(硬上限 50)、命中即停、遇锁定/限流/验证码立即熔断，且需人工审批。" +
 			"不做字典爆破；仅用于授权范围内、且操作者已同意的小范围弱口令尝试。",
 		Schema: objSchema(map[string]any{
-			"kind":           strParam("http-form | http-basic | ssh | rdp | telnet"),
+			"kind":           strParam("http-form | http-json | http-basic | ssh | rdp | telnet"),
 			"url":            strParam("http-* 的目标 URL（含 http://或 https://）"),
 			"host":           strParam("ssh/rdp/telnet 的目标主机（IP 或域名）"),
 			"port":           intParam("端口（可选；ssh 默认22 / rdp 3389 / telnet 23）"),
 			"username":       strParam("单个用户名（与 users 二选一/可并用）"),
 			"users":          strArrParam("用户名列表（≤5）"),
 			"passwords":      strArrParam("自定义口令列表（≤50）；省略则用内置常见弱口令小字典"),
-			"user_field":     strParam("http-form 用户名字段名（默认 username）"),
-			"pass_field":     strParam("http-form 口令字段名（默认 password）"),
-			"extra_fields":   strMapParam("http-form 附加表单字段（JSON 对象，如 {\"csrf\":\"...\"}）"),
+			"user_field":     strParam("http-form/http-json 用户名字段名（默认 username）"),
+			"pass_field":     strParam("http-form/http-json 口令字段名（默认 password）"),
+			"body_type":      strParam("http 登录体：form(默认) | json"),
+			"extra_fields":   strMapParam("登录体附加字段（JSON 对象，如 {\"captcha\":\"\"}、{\"remember\":\"1\"}）"),
+			"headers":        strMapParam("附加请求头（JSON 对象，如 {\"X-Requested-With\":\"XMLHttpRequest\",\"Referer\":\"...\"}）"),
+			"cookie":         strParam("预置 Cookie 头（可选）"),
+			"csrf_field":     strParam("CSRF/hidden 字段名：自动 GET csrf_url 抽取令牌并随登录请求提交"),
+			"csrf_url":       strParam("取 CSRF 令牌的页面（默认等于 url）"),
+			"csrf_header":    strParam("若设置，则令牌放入该请求头而非登录体"),
 			"success_marker": strParam("http-form/telnet 命中判定：响应体包含该子串即成功"),
 			"fail_marker":    strParam("http-form 失败判定：响应体包含该子串即失败"),
 			"success_status": intParam("http-form 命中判定：响应 HTTP 状态码（如 302）"),
