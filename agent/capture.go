@@ -100,7 +100,7 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input, workDir
 		}
 		switch ev.Kind {
 		case harness.KindPrompt:
-			payload, _ := json.Marshal(ev.Request)
+			payload, _ := json.Marshal(promptSummary(ev.Request))
 			rec(db.Activity{EventType: db.EventPromptAssembled, EventOnly: true, Payload: payload})
 		case harness.KindToolUse:
 			if ev.ToolUse == nil {
@@ -228,6 +228,59 @@ func blocksText(blocks []llm.ContentBlock) string {
 		}
 	}
 	return b.String()
+}
+
+// promptSummary returns a bounded, shape-only summary of an assembled request.
+// The full request is large (~140 KB: system prompt + the entire message history
+// + tool schemas) and was persisted verbatim on every run, which made
+// prompt_assembled the largest event type (measured 113 MB / 62% of agent_events)
+// for zero readers. The exact request remains available from the opt-in LLM
+// recorder (llm_record → /worklog/llm).
+func promptSummary(req *llm.CompletionRequest) map[string]any {
+	if req == nil {
+		return map[string]any{}
+	}
+	systemChars := 0
+	for _, s := range req.System {
+		systemChars += len(s)
+	}
+	messageChars := 0
+	for _, m := range req.Messages {
+		for _, b := range m.Content {
+			messageChars += len(b.Text) + len(b.Input)
+			for _, cb := range b.Content {
+				messageChars += len(cb.Text)
+			}
+		}
+	}
+	out := map[string]any{
+		"system_parts":  len(req.System),
+		"system_chars":  systemChars,
+		"messages":      len(req.Messages),
+		"message_chars": messageChars,
+		"tools":         len(req.Tools),
+	}
+	if req.DynamicBoundary != 0 {
+		out["dynamic_boundary"] = req.DynamicBoundary
+	}
+	if req.MaxTokens != 0 {
+		out["max_tokens"] = req.MaxTokens
+	}
+	if req.Temperature != nil {
+		out["temperature"] = *req.Temperature
+	}
+	const maxToolNames = 64
+	names := make([]string, 0, 16)
+	for _, t := range req.Tools {
+		if len(names) >= maxToolNames {
+			break
+		}
+		names = append(names, t.Name)
+	}
+	if len(names) > 0 {
+		out["tool_names"] = names
+	}
+	return out
 }
 
 // firstLine returns a single-line, length-capped preview for the summary column.
