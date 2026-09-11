@@ -82,7 +82,7 @@ jobs:
           BIN=restxtra
           [ "$GOOS" = "windows" ] && BIN=restxtra.exe
           go build -tags embedui -trimpath \
-            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+            -ldflags "-X main.version=${GITHUB_REF_NAME}" \
             -o "$BIN" ./cmd/restxtra
       - name: Package
         run: |
