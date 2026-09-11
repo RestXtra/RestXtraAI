@@ -15,20 +15,21 @@ import (
 type StreamEventType string
 
 const (
-	SEMessageStart  StreamEventType = "message_start"
-	SETextDelta     StreamEventType = "text_delta"
+	SEMessageStart      StreamEventType = "message_start"
+	SETextDelta         StreamEventType = "text_delta"
 	SEThinkingDelta     StreamEventType = "thinking_delta"
 	SEThinkingSignature StreamEventType = "thinking_signature"
-	SEToolUseStart  StreamEventType = "tool_use_start"
-	SEToolInputJSON StreamEventType = "tool_input_delta"
-	SEMessageDelta  StreamEventType = "message_delta" // carries stop_reason / usage
-	SEMessageStop   StreamEventType = "message_stop"
+	SEToolUseStart      StreamEventType = "tool_use_start"
+	SEToolInputJSON     StreamEventType = "tool_input_delta"
+	SEMessageDelta      StreamEventType = "message_delta" // carries stop_reason / usage
+	SEMessageStop       StreamEventType = "message_stop"
 )
 
 // StreamEvent is one normalized model-level streaming event (FR-03.5).
 type StreamEvent struct {
 	Type       StreamEventType
 	Text       string // text/thinking/tool_input JSON fragment
+	Model      string // model that produced this event (thinking-signature provenance)
 	ToolID     string // tool_use_start
 	ToolName   string // tool_use_start
 	StopReason string // message_delta

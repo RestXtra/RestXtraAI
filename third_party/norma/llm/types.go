@@ -40,6 +40,9 @@ type ContentBlock struct {
 	// the block in multi-turn history.
 	Thinking  string `json:"thinking,omitempty"`
 	Signature string `json:"signature,omitempty"`
+	// Model records which model produced this thinking block, so its opaque
+	// signature is only replayed to that same model (never serialized on the wire).
+	Model string `json:"-"`
 
 	// ToolUse: a model request to invoke a tool.
 	ID    string          `json:"id,omitempty"`

@@ -7,6 +7,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"strings"
 )
 
 type anthropicProvider struct{ cfg Config }
@@ -54,7 +55,7 @@ func (p *anthropicProvider) buildBody(req CompletionRequest) ([]byte, error) {
 	}
 	body := anthropicReq{
 		Model:         p.cfg.Model,
-		Messages:      filterThinkingBlocks(req.Messages, p.cfg.ThinkingType != ""),
+		Messages:      filterThinkingBlocks(req.Messages, p.cfg.ThinkingType != "", p.cfg.Model),
 		MaxTokens:     maxTok,
 		Temperature:   req.Temperature,
 		StopSequences: req.Stop,
@@ -126,7 +127,7 @@ func (p *anthropicProvider) Stream(ctx context.Context, req CompletionRequest) i
 			if data == "" {
 				continue
 			}
-			ev, ok, perr := parseAnthropicFrame(data)
+			ev, ok, perr := parseAnthropicFrame(data, p.cfg.Model)
 			if perr != nil {
 				yield(StreamEvent{}, perr)
 				return
@@ -141,7 +142,7 @@ func (p *anthropicProvider) Stream(ctx context.Context, req CompletionRequest) i
 	}
 }
 
-func parseAnthropicFrame(data string) (StreamEvent, bool, error) {
+func parseAnthropicFrame(data string, model string) (StreamEvent, bool, error) {
 	var f struct {
 		Type         string `json:"type"`
 		ContentBlock struct {
@@ -191,7 +192,7 @@ func parseAnthropicFrame(data string) (StreamEvent, bool, error) {
 		case "thinking_delta":
 			return StreamEvent{Type: SEThinkingDelta, Text: f.Delta.Thinking}, true, nil
 		case "signature_delta":
-			return StreamEvent{Type: SEThinkingSignature, Text: f.Delta.Signature}, true, nil
+			return StreamEvent{Type: SEThinkingSignature, Text: f.Delta.Signature, Model: model}, true, nil
 		case "input_json_delta":
 			return StreamEvent{Type: SEToolInputJSON, Text: f.Delta.PartialJSON}, true, nil
 		}
@@ -236,35 +237,46 @@ func (u anthropicUsage) norm() Usage {
 	}
 }
 
-// filterThinkingBlocks removes thinking-type content blocks from message
-// history when thinking is disabled. Anthropic rejects requests that include
-// thinking blocks in history without the thinking parameter enabled.
-func filterThinkingBlocks(msgs []Message, thinkingEnabled bool) []Message {
-	if thinkingEnabled {
-		return msgs
-	}
+// filterThinkingBlocks gates thinking blocks in message history.
+//
+//   - thinking disabled: every thinking block is removed (Anthropic rejects
+//     thinking blocks in history when the thinking parameter is off).
+//   - thinking enabled, block produced by the current model (or unknown
+//     provenance): kept verbatim, signature included.
+//   - thinking enabled, block produced by a DIFFERENT model: its opaque
+//     signature is invalid for the current model, so it is dropped; non-empty
+//     visible reasoning is lowered to ordinary assistant text.
+func filterThinkingBlocks(msgs []Message, thinkingEnabled bool, currentModel string) []Message {
 	out := make([]Message, 0, len(msgs))
 	for _, m := range msgs {
-		hasThinking := false
-		for _, b := range m.Content {
-			if b.Type == BlockThinking {
-				hasThinking = true
-				break
-			}
-		}
-		if !hasThinking {
-			out = append(out, m)
-			continue
-		}
 		filtered := make([]ContentBlock, 0, len(m.Content))
+		changed := false
 		for _, b := range m.Content {
 			if b.Type != BlockThinking {
 				filtered = append(filtered, b)
+				continue
+			}
+			if !thinkingEnabled {
+				changed = true // disabled → drop
+				continue
+			}
+			if b.Model == "" || b.Model == currentModel {
+				filtered = append(filtered, b) // same model → replay with signature
+				continue
+			}
+			changed = true
+			if strings.TrimSpace(b.Thinking) != "" {
+				filtered = append(filtered, TextBlock(b.Thinking)) // degrade to plain text
 			}
 		}
-		if len(filtered) > 0 {
-			out = append(out, Message{Role: m.Role, Content: filtered})
+		if len(filtered) == 0 {
+			continue // drop messages that became empty (e.g. a thinking-only turn)
 		}
+		if !changed {
+			out = append(out, m)
+			continue
+		}
+		out = append(out, Message{Role: m.Role, Content: filtered})
 	}
 	return out
 }
