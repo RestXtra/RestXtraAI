@@ -74,7 +74,13 @@ func (s *Server) pgCreateConversation(w http.ResponseWriter, r *http.Request) {
 	if title == "" {
 		title = "新对话"
 	}
-	c, err := pg.CreateConversation(req.AgentKey, title, req.LLMProfileID, req.CompanyID)
+	companyID := req.CompanyID
+	if companyID == nil {
+		if def := s.m.DefaultCompanyID(); def > 0 {
+			companyID = &def // 未指定企业 → 挂默认企业，避免派生发现无归属
+		}
+	}
+	c, err := pg.CreateConversation(req.AgentKey, title, req.LLMProfileID, companyID)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return

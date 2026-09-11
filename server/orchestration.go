@@ -348,8 +348,20 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 				}
 			}
 			var companyIDs []int64
-			if cid := convCompanyID(ctx); cid > 0 {
-				companyIDs = []int64{cid}
+			if a.ParentRef != "" {
+				if pt, ok := s.m.Task(a.ParentRef); ok {
+					for _, c := range pt.Companies {
+						companyIDs = append(companyIDs, c.ID)
+					}
+					if len(companyIDs) == 0 && pt.CompanyID > 0 {
+						companyIDs = append(companyIDs, pt.CompanyID)
+					}
+				}
+			}
+			if len(companyIDs) == 0 {
+				if cid := convCompanyID(ctx); cid > 0 {
+					companyIDs = []int64{cid}
+				}
 			}
 			t, err := s.m.CreateTask(a.Description, objective, pin, timeout, 0, companyIDs)
 			if err != nil {

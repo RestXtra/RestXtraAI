@@ -452,6 +452,17 @@ ON CONFLICT (source_key) DO NOTHING`)
 			return err
 		},
 	},
+	{
+		Version: 19,
+		Name:    "finding_dedup_key",
+		Apply: func(tx *sql.Tx) error {
+			if _, err := tx.Exec(`ALTER TABLE findings ADD COLUMN IF NOT EXISTS dedup_key TEXT NOT NULL DEFAULT ''`); err != nil {
+				return err
+			}
+			_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_findings_task_dedup ON findings(task_id, dedup_key)`)
+			return err
+		},
+	},
 }
 
 func applyMigrations(db *sql.DB) error {

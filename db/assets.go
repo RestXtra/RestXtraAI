@@ -1062,6 +1062,26 @@ func (s *AssetStore) CountsByTypeForCompany(companyID int64) (map[string]int, er
 	return out, rows.Err()
 }
 
+// CountsByTask returns asset counts per type for assets tagged with a task id
+// (task_ids contains taskID). Used by the recon completeness gate.
+func (s *AssetStore) CountsByTask(taskID int64) (map[string]int, error) {
+	rows, err := s.db.Query(`SELECT type, COUNT(*) FROM assets WHERE $1 = ANY(task_ids) GROUP BY type`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var typ string
+		var cnt int
+		if err := rows.Scan(&typ, &cnt); err != nil {
+			return nil, err
+		}
+		out[typ] = cnt
+	}
+	return out, rows.Err()
+}
+
 // CompanyAssetHosts returns company_id → 资产 host 清单（域名 + IP + URL host）。
 // 供前端按企业过滤流量/资产维度。host 统一去 host:port 形式（IP 保留原样）。
 func (d *DB) CompanyAssetHosts() map[int64][]string {

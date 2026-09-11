@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { CpuIcon, RadioTowerIcon, SearchIcon, Settings2Icon } from "lucide-react";
+import { Building2Icon, CpuIcon, RadioTowerIcon, SearchIcon, Settings2Icon } from "lucide-react";
 import { toast } from "sonner";
 
 import { PreferencesPanel } from "@/components/preferences-panel";
@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
-import type { Settings } from "@/lib/types";
+import type { Company, Settings } from "@/lib/types";
 
 export default function SystemSettingsPage() {
   const [trafficCapture, setTrafficCapture] = React.useState(false);
@@ -33,6 +33,9 @@ export default function SystemSettingsPage() {
   const [pyInterp, setPyInterp] = React.useState("");
   const [workers, setWorkers] = React.useState("3");
   const [savingWorkers, setSavingWorkers] = React.useState(false);
+  const [companies, setCompanies] = React.useState<Company[]>([]);
+  const [defaultCompanyId, setDefaultCompanyId] = React.useState("0");
+  const [savingDefaultCompany, setSavingDefaultCompany] = React.useState(false);
 
   const apply = React.useCallback((s: Settings) => {
     setTrafficCapture(!!s.traffic_capture);
@@ -43,6 +46,7 @@ export default function SystemSettingsPage() {
     setProxyInput(s.web_search_proxy || "");
     setPyInterp(s.python_interpreter || "");
     setWorkers(String(s.workers ?? 3));
+    setDefaultCompanyId(String(s.default_company_id ?? 0));
   }, []);
 
   const saveWorkers = () => {
@@ -60,6 +64,25 @@ export default function SystemSettingsPage() {
       })
       .catch((e) => toast.error(`保存失败：${(e as Error).message}`))
       .finally(() => setSavingWorkers(false));
+  };
+
+  const saveDefaultCompany = (value: string) => {
+    setDefaultCompanyId(value); // optimistic
+    setSavingDefaultCompany(true);
+    api
+      .setSettings({ default_company_id: Number(value) })
+      .then((s) => {
+        apply(s);
+        toast.success(Number(value) > 0 ? "已设置默认企业（新建任务/会话自动关联）" : "已清除默认企业");
+      })
+      .catch((e) => {
+        toast.error(`保存失败：${(e as Error).message}`);
+        api
+          .settings()
+          .then(apply)
+          .catch(() => undefined);
+      })
+      .finally(() => setSavingDefaultCompany(false));
   };
 
   const savePython = () => {
@@ -88,6 +111,10 @@ export default function SystemSettingsPage() {
       .then(apply)
       .catch(() => undefined)
       .finally(() => setLoaded(true));
+    api
+      .companies()
+      .then((cs) => setCompanies(cs))
+      .catch(() => undefined);
   }, [apply]);
 
   const toggleTraffic = (v: boolean) => {
@@ -434,6 +461,40 @@ export default function SystemSettingsPage() {
               保存
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="max-w-2xl">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Building2Icon className="size-4" />
+            默认企业
+          </CardTitle>
+          <CardDescription>
+            新建<b>任务</b>或<b>会话</b>时若未指定企业，自动关联该企业，确保派生发现/资产有企业归属。留为“不默认”则不自动关联。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex items-center justify-between gap-4">
+          <Label className="font-normal text-muted-foreground text-sm">
+            {Number(defaultCompanyId) > 0 ? "已设置 · 新任务/会话默认归属此企业" : "未设置 · 新任务/会话不自动归属"}
+          </Label>
+          <Select
+            value={defaultCompanyId}
+            disabled={!loaded || savingDefaultCompany}
+            onValueChange={saveDefaultCompany}
+          >
+            <SelectTrigger className="w-56 shrink-0">
+              <SelectValue placeholder="选择默认企业" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="0">不默认</SelectItem>
+              {companies.map((c) => (
+                <SelectItem key={c.id} value={String(c.id)}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </CardContent>
       </Card>
 

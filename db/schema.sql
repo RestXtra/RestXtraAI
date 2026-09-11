@@ -647,14 +647,17 @@ CREATE TABLE IF NOT EXISTS findings (
     report      TEXT NOT NULL DEFAULT '',
     request_raw  TEXT NOT NULL DEFAULT '',
     response_raw TEXT NOT NULL DEFAULT '',
+    dedup_key   TEXT NOT NULL DEFAULT '',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending';
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS report TEXT NOT NULL DEFAULT '';
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS request_raw TEXT NOT NULL DEFAULT '';
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS response_raw TEXT NOT NULL DEFAULT '';
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS dedup_key TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_findings_task ON findings(task_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_findings_time ON findings(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_findings_task_dedup ON findings(task_id, dedup_key);
 CREATE INDEX IF NOT EXISTS idx_findings_status_time ON findings(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_findings_severity_time ON findings(severity, created_at DESC);
 

@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -93,6 +96,21 @@ func (t *ToolSet) SetPG(pg *db.DB) { t.pg = pg }
 
 // SetNotifyFinding wires the finding-wake callback (see ToolSet.notifyFinding).
 func (t *ToolSet) SetNotifyFinding(fn func(int64, string)) { t.notifyFinding = fn }
+
+// ReconGate, if set, returns the mandatory recon dimensions still missing for a
+// task (nil/empty = satisfied). The server wires it for recon-type tasks
+// (asset_intel) so a task that has proven its goals but not yet covered the
+// mandatory recon dimensions cannot be marked complete. nil = no gate (unchanged).
+var ReconGate func(taskID int64) []string
+
+// reconGateMissing consults ReconGate for this run's task; nil when no gate is
+// wired or the task is unknown.
+func (t *ToolSet) reconGateMissing() []string {
+	if ReconGate == nil || t.taskID == 0 {
+		return nil
+	}
+	return ReconGate(t.taskID)
+}
 
 // EnrichTrigger is the enrichment engine seen from the tool layer (see package
 // enrich). Kept as an interface here to avoid coupling agent → enrich.
@@ -204,6 +222,9 @@ func obj(props map[string]any, required ...string) map[string]any {
 	return m
 }
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
+func boolp(desc string) map[string]any {
+	return map[string]any{"type": "boolean", "description": desc}
+}
 func intp(desc string) map[string]any {
 	return map[string]any{"type": "integer", "description": desc}
 }
@@ -596,6 +617,9 @@ func (t *ToolSet) proveGoal() actool.CoreTool {
 					}
 				}
 				if allMet {
+					if missing := t.reconGateMissing(); len(missing) > 0 {
+						return actool.Text(fmt.Sprintf("goal %d marked met；本任务所有目标虽已 met，但信息收集完成度不足，暂不判定任务完成。请先补齐以下必查项后再调 goal_met 收官：%s", goal, strings.Join(missing, "；"))), nil
+					}
 					t.GoalMet = true
 					t.Reason = fmt.Sprintf("所有 %d 个目标均已 met（最后由 goal %d 触发）", len(goals), goal)
 					return actool.Text(fmt.Sprintf("goal %d marked met；本任务所有目标均已达成，任务自动判定完成", goal)), nil
@@ -607,10 +631,20 @@ func (t *ToolSet) proveGoal() actool.CoreTool {
 
 func (t *ToolSet) goalMet() actool.CoreTool {
 	return writeTool("goal_met", "【立即结束整个任务】——仅当你确认任务的【全部目标都已真正达成、整体收官】时才调（注意是任务【整体】完成；仅仅达成了其中某一个目标/某一个 flag/某一个漏洞【不算】——那种情况用 prove_goal 标记该目标即可）。⚠️它不是用来“结束本轮规划”的：本轮没有新意图要派、或在等 worker 产出，都【直接结束本轮即可，不要调本工具】（0 个意图是完全正常的）。正常判定优先用 prove_goal 逐个证明目标；goal_met 只是绕过逐个证明、直接从全局收官的手段。",
-		obj(map[string]any{"reason": str("达成理由（必须是目标真正达成的证据，不能是“本轮无新方向”这类结束本轮的理由）")}, "reason"),
+		obj(map[string]any{
+			"reason": str("达成理由（必须是目标真正达成的证据，不能是“本轮无新方向”这类结束本轮的理由）"),
+			"force":  boolp("仅当信息收集必查项确实不适用（如目标企业确无子域）时才传 true 强制收官；默认 false"),
+		}, "reason"),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
-			var a struct{ Reason string }
+			var a struct {
+				Reason string
+				Force  bool
+			}
 			_ = json.Unmarshal(in, &a)
+			if missing := t.reconGateMissing(); len(missing) > 0 && !a.Force {
+				return actool.Text("暂不判定任务完成：本任务的信息收集必查项尚未齐全——" + strings.Join(missing, "；") +
+					"。请先补齐这些维度后再收官；若确认它们确实不适用，可在 goal_met 传 force=true 强制收官。"), nil
+			}
 			t.GoalMet = true
 			t.Reason = a.Reason
 			return actool.Text("acknowledged: goal marked met"), nil
@@ -664,6 +698,7 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 				}
 			}
 			var id int64
+			dedupKey := findingDedupKey(a.VulnClass, a.URL, a.Endpoints, anchors)
 			if t.ts != nil {
 				var err error
 				id, err = t.ts.AddNode(db.KindFinding, payload, 9, "confirmed", t.worker, anchors)
@@ -677,7 +712,16 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 						t.notifyFinding(intent, a.Summary)
 					}
 				}
-				fid, _ := t.ts.AddStandaloneFinding(t.taskID, id, a.VulnClass, a.Severity, a.Summary, a.Evidence, t.worker, anchors)
+				fid, merged, err := t.ts.AddStandaloneFindingDedup(t.taskID, id, a.VulnClass, a.Severity, a.Summary, a.Evidence, t.worker, anchors, dedupKey)
+				if err != nil {
+					return actool.Errorf(err.Error()), nil
+				}
+				if merged {
+					_ = t.ts.SetFindingReportIfEmpty(fid, report)
+					_ = t.ts.SetFindingPOCIfEmpty(fid, a.Request, a.Response)
+					t.writes.Findings++
+					return actool.Text(fmt.Sprintf("finding duplicate of #%d（相同漏洞类+目标已存在，已合并，未重复记录）", fid)), nil
+				}
 				if fid > 0 && report != "" {
 					_, _ = t.ts.SetFindingReport(fid, report)
 				}
@@ -692,9 +736,15 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 					return actool.Errorf("report_finding 需要任务上下文（exploration store 未初始化）"), nil
 				}
 				ev, _ := json.Marshal(map[string]string{"by": t.worker, "poc": a.Evidence})
-				id, err := t.pg.AddFinding(t.taskID, 0, a.VulnClass, a.Severity, a.Summary, string(ev), t.worker, anchors)
+				id, merged, err := t.pg.AddFindingDedup(t.taskID, 0, a.VulnClass, a.Severity, a.Summary, string(ev), t.worker, anchors, dedupKey)
 				if err != nil {
 					return actool.Errorf(err.Error()), nil
+				}
+				if merged {
+					_ = t.pg.SetFindingReportIfEmpty(id, report)
+					_ = t.pg.SetFindingPOCIfEmpty(id, a.Request, a.Response)
+					t.writes.Findings++
+					return actool.Text(fmt.Sprintf("finding duplicate of #%d（相同漏洞类+目标已存在，已合并，未重复记录）", id)), nil
 				}
 				if report != "" {
 					_, _ = t.pg.SetFindingReport(id, report)
@@ -708,6 +758,36 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 			t.writes.Findings++
 			return actool.Text(fmt.Sprintf("finding recorded: %d", id)), nil
 		})
+}
+
+// findingDedupKey builds a stable signature for duplicate suppression from the
+// vuln class + target (URL/endpoints) + affected asset ids. Returns "" when no
+// target signal is present (so class-only findings are never merged).
+func findingDedupKey(vulnclass, url string, endpoints []string, assetIDs []int64) string {
+	norm := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+	vc := norm(vulnclass)
+	if vc == "" {
+		return ""
+	}
+	parts := []string{vc, norm(url)}
+	n := 0
+	for _, e := range endpoints {
+		if v := norm(e); v != "" {
+			parts = append(parts, v)
+			n++
+		}
+	}
+	ids := append([]int64(nil), assetIDs...)
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	for _, id := range ids {
+		parts = append(parts, strconv.FormatInt(id, 10))
+		n++
+	}
+	if n == 0 {
+		return "" // 没有目标信号（URL/端点/资产）→ 不去重，避免同类不同处的漏洞被误并
+	}
+	sum := sha1.Sum([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(sum[:])
 }
 
 // composeFindingReport 把结构化字段合成一份「8 块」正式漏洞报告（空块自动省略）。

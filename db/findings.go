@@ -52,6 +52,16 @@ func ValidFindingStatus(status string) bool {
 // AddFinding inserts a finding into the standalone findings table. taskID and
 // nodeID may be 0 (stored as NULL). Returns the new finding id.
 func (d *DB) AddFinding(taskID, nodeID int64, vulnclass, severity, summary, evidence, worker string, assetIDs []int64) (int64, error) {
+	id, _, err := d.AddFindingDedup(taskID, nodeID, vulnclass, severity, summary, evidence, worker, assetIDs, "")
+	return id, err
+}
+
+// AddFindingDedup is AddFinding with duplicate suppression: when dedupKey is
+// non-empty and a non-dismissed finding with the same task + key already exists,
+// it returns the existing id with merged=true and bumps severity if the new one
+// is higher (the caller may fill report/PoC only when empty). dedupKey == ""
+// disables dedup (same as AddFinding).
+func (d *DB) AddFindingDedup(taskID, nodeID int64, vulnclass, severity, summary, evidence, worker string, assetIDs []int64, dedupKey string) (int64, bool, error) {
 	aidsJSON, _ := json.Marshal(assetIDs)
 	if assetIDs == nil {
 		aidsJSON = []byte("[]")
@@ -63,13 +73,47 @@ func (d *DB) AddFinding(taskID, nodeID int64, vulnclass, severity, summary, evid
 	if nodeID > 0 {
 		nid = &nodeID
 	}
+	if dedupKey != "" && taskID > 0 {
+		var existing int64
+		var existingSev string
+		err := d.QueryRow(
+			`SELECT id, COALESCE(severity,'') FROM findings
+			 WHERE task_id=$1 AND dedup_key=$2
+			   AND COALESCE(status,'pending') NOT IN ('false_positive','ignored','duplicate')
+			 ORDER BY id LIMIT 1`, taskID, dedupKey).Scan(&existing, &existingSev)
+		if err == nil && existing > 0 {
+			if severityRank(severity) > severityRank(existingSev) {
+				_, _ = d.Exec(`UPDATE findings SET severity=$2 WHERE id=$1`, existing, severity)
+			}
+			return existing, true, nil
+		}
+		if err != nil && err != sql.ErrNoRows {
+			return 0, false, err
+		}
+	}
 	var id int64
 	err := d.QueryRow(
-		`INSERT INTO findings (task_id, node_id, vulnclass, severity, summary, evidence, worker, asset_ids)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-		tid, nid, vulnclass, severity, summary, evidence, worker, string(aidsJSON),
+		`INSERT INTO findings (task_id, node_id, vulnclass, severity, summary, evidence, worker, asset_ids, dedup_key)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+		tid, nid, vulnclass, severity, summary, evidence, worker, string(aidsJSON), dedupKey,
 	).Scan(&id)
-	return id, err
+	return id, false, err
+}
+
+// severityRank orders severities for de-duplication merges; unknown/empty = 0.
+func severityRank(s string) int {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "critical":
+		return 4
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
+	}
 }
 
 const findingSelectCols = `f.id, f.task_id, f.node_id, f.vulnclass, f.severity, f.summary,
@@ -239,11 +283,12 @@ func (d *DB) FindingStats(companyID int64) (*FindingStats, error) {
 func (d *DB) GetFinding(id int64) (*DBFinding, error) {
 	f := &DBFinding{}
 	var assetJSON, companyJSON string
-	err := d.QueryRow(`SELECT `+findingSelectCols+`, COALESCE(f.report, '')
+	err := d.QueryRow(`SELECT `+findingSelectCols+`
 		FROM findings f LEFT JOIN tasks t ON t.id=f.task_id WHERE f.id=$1`, id).Scan(
 		&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Severity, &f.Summary,
 		&f.Evidence, &f.Worker, &assetJSON, &f.Status, &f.CreatedAt,
-		&f.TaskDescription, &companyJSON, &f.Report)
+		&f.Report, &f.RequestRaw, &f.ResponseRaw,
+		&f.TaskDescription, &companyJSON)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -275,5 +320,25 @@ func (d *DB) SetFindingReport(id int64, report string) (int64, error) {
 // finding, so the report can render an exact request-packet + response-packet.
 func (d *DB) SetFindingPOC(id int64, requestRaw, responseRaw string) error {
 	_, err := d.Exec(`UPDATE findings SET request_raw=$2, response_raw=$3 WHERE id=$1`, id, requestRaw, responseRaw)
+	return err
+}
+
+// SetFindingReportIfEmpty fills the report only when the existing value is empty
+// (used when a duplicate merge should enrich without clobbering the original).
+func (d *DB) SetFindingReportIfEmpty(id int64, report string) error {
+	if strings.TrimSpace(report) == "" {
+		return nil
+	}
+	_, err := d.Exec(`UPDATE findings SET report=$2 WHERE id=$1 AND COALESCE(report,'')=''`, id, report)
+	return err
+}
+
+// SetFindingPOCIfEmpty fills request/response packets only when both are empty.
+func (d *DB) SetFindingPOCIfEmpty(id int64, requestRaw, responseRaw string) error {
+	if strings.TrimSpace(requestRaw) == "" && strings.TrimSpace(responseRaw) == "" {
+		return nil
+	}
+	_, err := d.Exec(`UPDATE findings SET request_raw=$2, response_raw=$3
+		WHERE id=$1 AND COALESCE(request_raw,'')='' AND COALESCE(response_raw,'')=''`, id, requestRaw, responseRaw)
 	return err
 }

@@ -160,6 +160,7 @@ const (
 	settingWorkers               = "workers"
 	settingLLMRecord             = "llm_record"
 	settingDenyExploit           = "guard_deny_exploit" // P6.1: 拒绝利用类动作(recon-only/RoE 严格)
+	settingDefaultCompany        = "default_company_id" // 新建任务/会话未指定企业时默认关联的企业 id
 	// defaultWebSearchBackend is used when web search is on but no backend was picked.
 	defaultWebSearchBackend = "ddgs"
 	// defaultWorkers is the concurrent work-agent count when the setting is unset.
@@ -186,6 +187,35 @@ func (m *Manager) SetWorkers(n int) error {
 		return fmt.Errorf("workers 必须 >0")
 	}
 	return m.pg.SetSetting(settingWorkers, strconv.Itoa(n))
+}
+
+// DefaultCompanyID returns the configured default company id for new tasks and
+// conversations, or 0 when unset/invalid. Validated against the companies table
+// so a stale setting never breaks task creation.
+func (m *Manager) DefaultCompanyID() int64 {
+	v, ok, err := m.pg.GetSetting(settingDefaultCompany)
+	if err != nil || !ok {
+		return 0
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+	if err != nil || id <= 0 {
+		return 0
+	}
+	if c, err := m.pg.Companies().GetCompany(id); err != nil || c == nil {
+		return 0
+	}
+	return id
+}
+
+// SetDefaultCompanyID persists the default company id (0 clears it).
+func (m *Manager) SetDefaultCompanyID(id int64) error {
+	if id <= 0 {
+		return m.pg.SetSetting(settingDefaultCompany, "")
+	}
+	if c, err := m.pg.Companies().GetCompany(id); err != nil || c == nil {
+		return fmt.Errorf("企业 #%d 不存在", id)
+	}
+	return m.pg.SetSetting(settingDefaultCompany, strconv.FormatInt(id, 10))
 }
 
 // Enrich returns the asset auto-completion engine (may be nil if init failed).
@@ -562,6 +592,11 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 // planHeartbeatSeconds is the planner periodic wake-up interval (0 = disabled).
 // companyIDs are the companies the task belongs to (first = primary; empty = unassigned).
 func (m *Manager) CreateTask(description, goal string, llmProfileID *int64, timeoutSeconds, planHeartbeatSeconds int, companyIDs []int64) (*Task, error) {
+	if len(companyIDs) == 0 {
+		if cid := m.DefaultCompanyID(); cid > 0 {
+			companyIDs = []int64{cid} // 未指定企业 → 挂默认企业
+		}
+	}
 	pt, err := m.pg.CreateTask(description, goal, llmProfileID, timeoutSeconds, planHeartbeatSeconds, companyIDs)
 	if err != nil {
 		return nil, err

@@ -1,7 +1,9 @@
 package db
 
 import (
+	"fmt"
 	"testing"
+	"time"
 )
 
 // testSetup opens a DB and returns both stores. Skips if no PG.
@@ -288,12 +290,12 @@ func TestUpsertHTTPService(t *testing.T) {
 	sc := 200
 	cl := int64(1024)
 	id1, err := av2.UpsertHTTPService(UpsertHTTPServiceReq{
-		URL:          "https://www.httptest.example.com/",
-		Technologies: []string{"nginx", "vue"},
-		StatusCode:   &sc,
+		URL:           "https://www.httptest.example.com/",
+		Technologies:  []string{"nginx", "vue"},
+		StatusCode:    &sc,
 		ContentLength: &cl,
-		PageTitle:    "Test Site",
-		TaskID:       1,
+		PageTitle:     "Test Site",
+		TaskID:        1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -701,5 +703,37 @@ func TestNormalizeURL(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("normalizeURL(%q): want %q, got %q", tc.raw, tc.want, got)
 		}
+	}
+}
+
+// TestCountsByTask verifies assets tagged with a task id are counted by type,
+// which the recon completeness gate relies on.
+func TestCountsByTask(t *testing.T) {
+	d, as, _ := testSetup(t)
+
+	const taskID int64 = 987654321 // unlikely to collide; no FK on task_ids
+	suffix := time.Now().UnixNano()
+	dom := fmt.Sprintf("counts-%d.invalid", suffix)
+
+	rootID, err := as.UpsertRootDomain(UpsertRootDomainReq{Domain: dom, TaskID: taskID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subID, err := as.UpsertSubdomain(UpsertSubdomainReq{Domain: "a." + dom, TaskID: taskID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		deleteAsset(d, rootID)
+		deleteAsset(d, subID)
+		d.Close()
+	})
+
+	counts, err := as.CountsByTask(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts["root_domain"] != 1 || counts["subdomain"] != 1 {
+		t.Fatalf("unexpected counts: %+v", counts)
 	}
 }

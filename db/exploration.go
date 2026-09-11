@@ -1313,11 +1313,22 @@ FROM activity WHERE exploration_id=$1 AND kind<>'thinking' AND id IN (`+strings.
 // persists across task deletion (task_id / node_id become NULL when the task or
 // exploration node is deleted). taskID and nodeID may be 0 (stored as NULL).
 func (s *ExplorationStore) AddStandaloneFinding(taskID, nodeID int64, vulnclass, severity, summary, evidence, worker string, assetIDs []int64) (int64, error) {
-	id, err := s.db.AddFinding(taskID, nodeID, vulnclass, severity, summary, evidence, worker, assetIDs)
+	id, _, err := s.db.AddFindingDedup(taskID, nodeID, vulnclass, severity, summary, evidence, worker, assetIDs, "")
 	if err == nil {
 		s.BumpVersion() // P2.6
 	}
 	return id, err
+}
+
+// AddStandaloneFindingDedup is AddStandaloneFinding with duplicate suppression
+// (see DB.AddFindingDedup). Returns merged=true when an existing same-key finding
+// for the task was reused instead of inserting a new row.
+func (s *ExplorationStore) AddStandaloneFindingDedup(taskID, nodeID int64, vulnclass, severity, summary, evidence, worker string, assetIDs []int64, dedupKey string) (int64, bool, error) {
+	id, merged, err := s.db.AddFindingDedup(taskID, nodeID, vulnclass, severity, summary, evidence, worker, assetIDs, dedupKey)
+	if err == nil {
+		s.BumpVersion() // P2.6
+	}
+	return id, merged, err
 }
 
 // SetFindingReport stores the structured 8-block vuln report on a finding row
@@ -1329,4 +1340,14 @@ func (s *ExplorationStore) SetFindingReport(id int64, report string) (int64, err
 // SetFindingPOC stores the raw request/response packets on a finding row.
 func (s *ExplorationStore) SetFindingPOC(id int64, requestRaw, responseRaw string) error {
 	return s.db.SetFindingPOC(id, requestRaw, responseRaw)
+}
+
+// SetFindingReportIfEmpty / SetFindingPOCIfEmpty fill a finding's report/packets
+// only when empty (duplicate-merge enrichment).
+func (s *ExplorationStore) SetFindingReportIfEmpty(id int64, report string) error {
+	return s.db.SetFindingReportIfEmpty(id, report)
+}
+
+func (s *ExplorationStore) SetFindingPOCIfEmpty(id int64, requestRaw, responseRaw string) error {
+	return s.db.SetFindingPOCIfEmpty(id, requestRaw, responseRaw)
 }

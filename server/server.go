@@ -249,6 +249,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		s.wireAgentToolAllowlist()                                          // 让 agent 包按 key 读取工具白名单
 		s.seedCommanderToolAllowlist()                                      // 红队总指挥只保留编排/只读/报告工具（不自己执行）
 		s.wireTaskAgentPersona()                                            // 子任务按 agent_key 加载专用 agent 人格
+		s.wireReconGate()                                                   // 信息收集子任务必查项闸门（不齐不得收官）
 		s.seedAgentModelBindings()                                          // P1.4 强/弱模型路由：按模型名把 planner 绑强模型、worker 绑弱模型(一次性)
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools, &s.assemblyCatalog) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
 		domainReg := buildDomainReg(m.pg, m.Assets())
@@ -2385,6 +2386,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"web_search_proxy":   proxy,                       // 独立出口代理(http/https/socks5)，空=直连
 		"python_interpreter": strings.TrimSpace(pyStored), // 用户/自动设的值(空=用运行时检测)
 		"workers":            s.m.Workers(),               // 并发工作 agent 数(默认3)；对之后启动的任务生效
+		"default_company_id": s.m.DefaultCompanyID(),      // 新建任务/会话未指定企业时默认关联的企业 id(0=不默认)
 	}
 }
 
@@ -2418,10 +2420,17 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		WebSearchProxy   *string `json:"web_search_proxy"`   // 独立出口代理(http/https/socks5)；null=不改，""=清空
 		PythonInterp     *string `json:"python_interpreter"` // 自定义脚本工具的 python 解释器路径
 		Workers          *int    `json:"workers"`            // 并发工作 agent 数(>0)；对之后启动的任务生效
+		DefaultCompanyID *int64  `json:"default_company_id"` // 默认企业 id(0=清除)；新建任务/会话未指定时挂它
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
 		return
+	}
+	if req.DefaultCompanyID != nil {
+		if err := s.m.SetDefaultCompanyID(*req.DefaultCompanyID); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
 	}
 	if req.Workers != nil {
 		if err := s.m.SetWorkers(*req.Workers); err != nil {

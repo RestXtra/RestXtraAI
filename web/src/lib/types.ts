@@ -535,6 +535,7 @@ export interface Settings {
   web_search_proxy?: string;
   python_interpreter?: string; // 自定义脚本工具的 python 解释器路径(空=运行时检测)
   workers?: number; // 并发工作 agent 数(默认3)；对之后启动的任务生效
+  default_company_id?: number; // 新建任务/会话未指定企业时默认关联的企业 id(0=不默认)
 }
 
 // ---- LLM config ----
