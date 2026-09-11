@@ -18,17 +18,20 @@ type CompanyRef struct {
 
 // Task is a row in the task registry (1:1 with an exploration).
 type Task struct {
-	ID            int64      `json:"id"`
-	Description   string     `json:"description"`
-	Goal          string     `json:"goal"`
-	ExplorationID int64      `json:"exploration_id"`
-	Status        string     `json:"status"`
-	Paused        bool       `json:"paused"`
-	LLMProfileID  *int64     `json:"llm_profile_id,omitempty"`
-	ParentRef     string     `json:"parent_ref,omitempty"` // 父任务 id(编排 spawn 记录;空=顶层)
-	AgentKey      string     `json:"agent_key,omitempty"`  // 专用 agent 身份（spawn_task 指定）；空=通用 planner/worker
-	CreatedAt     time.Time  `json:"created_at"`
-	CompletedAt   *time.Time `json:"completed_at,omitempty"` // 进入终态(done/failed/timeout)的时刻;非终态为 nil
+	ID            int64  `json:"id"`
+	Description   string `json:"description"`
+	Goal          string `json:"goal"`
+	ExplorationID int64  `json:"exploration_id"`
+	Status        string `json:"status"`
+	Paused        bool   `json:"paused"`
+	LLMProfileID  *int64 `json:"llm_profile_id,omitempty"`
+	ParentRef     string `json:"parent_ref,omitempty"` // 父任务 id(编排 spawn 记录;空=顶层)
+	AgentKey      string `json:"agent_key,omitempty"`  // 专用 agent 身份（spawn_task 指定）；空=通用 planner/worker
+	// ConversationID 记录本任务由哪个会话(chat page)派生，用于把会话级编排归到一棵树；
+	// 任务内 spawn 用 ParentRef 关联，会话根层的 spawn 用本字段分组。0=非会话派生。
+	ConversationID int64      `json:"conversation_id,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"` // 进入终态(done/failed/timeout)的时刻;非终态为 nil
 	// 任务级超时(见 docs/任务级超时与收尾设计.md)。
 	TimeoutSeconds int        `json:"timeout_seconds"`        // 0=不限时
 	FirstRunAt     *time.Time `json:"first_run_at,omitempty"` // 首次真正开始运行的时刻(非 created_at);nil=尚未运行
@@ -111,11 +114,11 @@ RETURNING id, status, paused, created_at`, description, goal, expID, llmProfileI
 	return t, nil
 }
 
-const taskCols = `id, description, goal, exploration_id, status, paused, llm_profile_id, COALESCE(parent_ref,''), COALESCE(agent_key,''), created_at, completed_at, COALESCE(timeout_seconds,0), first_run_at, deadline_at, COALESCE(plan_heartbeat_seconds,0), COALESCE(company_id,0)`
+const taskCols = `id, description, goal, exploration_id, status, paused, llm_profile_id, COALESCE(parent_ref,''), COALESCE(agent_key,''), created_at, completed_at, COALESCE(timeout_seconds,0), first_run_at, deadline_at, COALESCE(plan_heartbeat_seconds,0), COALESCE(company_id,0), COALESCE(conversation_id,0)`
 
 func scanTask(sc interface{ Scan(...any) error }) (*Task, error) {
 	var t Task
-	if err := sc.Scan(&t.ID, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.LLMProfileID, &t.ParentRef, &t.AgentKey, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.FirstRunAt, &t.DeadlineAt, &t.PlanHeartbeatSeconds, &t.CompanyID); err != nil {
+	if err := sc.Scan(&t.ID, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.LLMProfileID, &t.ParentRef, &t.AgentKey, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.FirstRunAt, &t.DeadlineAt, &t.PlanHeartbeatSeconds, &t.CompanyID, &t.ConversationID); err != nil {
 		return nil, err
 	}
 	return &t, nil
@@ -227,6 +230,13 @@ func (d *DB) SetParentRef(id int64, parentRef string) error {
 // SetTaskAgentKey records the specialized agent a task runs under (空=通用).
 func (d *DB) SetTaskAgentKey(id int64, agentKey string) error {
 	_, err := d.Exec(`UPDATE tasks SET agent_key=$2 WHERE id=$1`, id, agentKey)
+	return err
+}
+
+// SetTaskConversation records the conversation (chat session) a task was spawned
+// from, so chat-driven orchestrations can be grouped into one tree. 0 clears it.
+func (d *DB) SetTaskConversation(id int64, conversationID int64) error {
+	_, err := d.Exec(`UPDATE tasks SET conversation_id=NULLIF($2,0) WHERE id=$1`, id, conversationID)
 	return err
 }
 

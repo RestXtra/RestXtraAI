@@ -381,6 +381,8 @@ func (s *Server) runConversationSync(c *db.Conversation, msg, busyKey string) {
 	if c.CompanyID != nil {
 		ctx = context.WithValue(ctx, convCompanyKey{}, c.CompanyID)
 	}
+	// Tag tasks spawned by this conversation so chat-driven orchestration groups.
+	ctx = withCurrentConversation(ctx, c.ID)
 	// On a manual stop ctx is cancelled; Chat already emits a clean "已手动停止"
 	// step, so skip the raw-error entry — only surface genuine failures.
 	if _, err := ca.Chat(ctx, c.AgentKey, sessionID, msg, maxTurns, maxDuration, webSearch, emit); err != nil && ctx.Err() == nil {

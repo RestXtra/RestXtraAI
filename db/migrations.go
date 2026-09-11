@@ -463,6 +463,17 @@ ON CONFLICT (source_key) DO NOTHING`)
 			return err
 		},
 	},
+	{
+		Version: 20,
+		Name:    "task_conversation_id",
+		Apply: func(tx *sql.Tx) error {
+			if _, err := tx.Exec(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS conversation_id BIGINT REFERENCES conversations(id) ON DELETE SET NULL`); err != nil {
+				return err
+			}
+			_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_conversation ON tasks(conversation_id) WHERE conversation_id IS NOT NULL`)
+			return err
+		},
+	},
 }
 
 func applyMigrations(db *sql.DB) error {

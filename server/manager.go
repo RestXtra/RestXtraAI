@@ -52,6 +52,7 @@ type Task struct {
 	CompletedAt      int64                 `json:"completed_at,omitempty"` // 进入终态的 unix 秒;0=未完成
 	Paused           bool                  `json:"paused"`
 	ParentRef        string                `json:"parent_ref,omitempty"`        // 父任务 id(编排 spawn 记录)
+	ConversationID   int64                 `json:"conversation_id,omitempty"`   // 派生本任务的会话(chat) id；会话级编排分组用
 	AllowedTools     []string              `json:"allowed_tools,omitempty"`     // child delegation capability whitelist
 	DelegationBudget pgdb.DelegationBudget `json:"delegation_budget,omitempty"` // child task execution budget
 	AgentKey         string                `json:"agent_key,omitempty"`         // 专用 agent 身份（spawn_task 指定）
@@ -578,6 +579,7 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		ID: strconv.FormatInt(pt.ID, 10), ExpID: pt.ExplorationID,
 		Description: pt.Description, Goal: pt.Goal, CreatedAt: pt.CreatedAt.Unix(), Paused: pt.Paused,
 		CompletedAt: unixOrZero(pt.CompletedAt), Status: pt.Status, ParentRef: pt.ParentRef,
+		ConversationID: pt.ConversationID,
 		AgentKey:       pt.AgentKey,
 		LLMProfileID:   pt.LLMProfileID,
 		TimeoutSeconds: pt.TimeoutSeconds, FirstRunAt: unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),

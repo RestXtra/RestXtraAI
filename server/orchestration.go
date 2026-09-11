@@ -83,6 +83,27 @@ func resolveParentRef(ctx context.Context, explicit string) string {
 	return currentTaskID(ctx)
 }
 
+// currentConversationKey carries the chat conversation id (if any) into agent
+// tools so spawn_task can tag a task with the conversation it came from. Chat is
+// the real orchestration entry point (spawn_task is bound to conversation agents
+// like red_team_lead), and a conversation has no task identity — this is how its
+// spawned tasks get grouped into one tree.
+type currentConversationKey struct{}
+
+func withCurrentConversation(ctx context.Context, convID int64) context.Context {
+	if convID <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, currentConversationKey{}, convID)
+}
+
+func currentConversationID(ctx context.Context) int64 {
+	if v, ok := ctx.Value(currentConversationKey{}).(int64); ok {
+		return v
+	}
+	return 0
+}
+
 func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	tools := append(s.m.HostTools(), s.orchestrationTools()...)
 	tools = append(tools, s.platformTools()...) // 平台操作工具(建改 skill/工具/MCP，给 Auto 用)
@@ -244,6 +265,9 @@ func (s *Server) toolListTasks() actool.CoreTool {
 				row := map[string]any{"id": t.ID, "description": t.Description, "goal": t.Goal, "status": status, "run_seconds": dur}
 				if t.ParentRef != "" {
 					row["parent_ref"] = t.ParentRef
+				}
+				if t.ConversationID > 0 {
+					row["conversation_id"] = t.ConversationID
 				}
 				if t.LLMProfileID == nil {
 					row["llm_profile"] = "(激活配置)"
@@ -428,6 +452,15 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 				if err := s.m.PG().SetParentRef(childID, parentRef); err != nil {
 					_ = s.m.DeleteTask(t.ID)
 					return actool.Errorf("保存父子任务关系失败: " + err.Error()), nil
+				}
+			}
+			// Tag the child with the conversation it was spawned from (chat-driven
+			// orchestration has no task parent; this is its grouping key).
+			if convID := currentConversationID(ctx); convID > 0 {
+				if err := s.m.PG().SetTaskConversation(childID, convID); err != nil {
+					log.Printf("[spawn] 记录子任务会话归属失败: %v", err)
+				} else {
+					t.ConversationID = convID
 				}
 			}
 			origin, err := t.Store.OriginFactID()
