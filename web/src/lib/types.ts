@@ -227,6 +227,8 @@ export interface Finding {
   evidence: string;
   status: FindingStatus;
   report?: string;
+  request_raw?: string;
+  response_raw?: string;
   intent_id?: string;
   param_id?: string;
   task_id?: string;

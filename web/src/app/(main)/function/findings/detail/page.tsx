@@ -5,7 +5,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
-import { ArrowLeftIcon, CheckIcon, FileTextIcon, RouteIcon, ShieldAlertIcon } from "lucide-react";
+import { ArrowLeftIcon, CheckIcon, CopyIcon, FileTextIcon, RouteIcon, ShieldAlertIcon, TerminalIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Markdown } from "@/components/markdown";
@@ -35,6 +35,29 @@ const STATUSES: FindingStatus[] = [
 function ReportPreview({ report }: { report?: string }) {
   if (!report) return <p className="text-muted-foreground text-sm">暂无详细报告。</p>;
   return <Markdown text={report} />;
+}
+
+function PacketBlock({ title, text }: { title: string; text?: string }) {
+  if (!text) return null;
+  const copy = () => {
+    void navigator.clipboard.writeText(text).then(
+      () => toast.success(`${title}已复制`),
+      () => toast.error("复制失败"),
+    );
+  };
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <div className="text-muted-foreground text-xs">{title}</div>
+        <Button size="sm" variant="ghost" onClick={copy}>
+          <CopyIcon /> 复制
+        </Button>
+      </div>
+      <pre className="overflow-x-auto whitespace-pre-wrap border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+        {text}
+      </pre>
+    </div>
+  );
 }
 
 function FindingDetailContent() {
@@ -150,6 +173,19 @@ function FindingDetailContent() {
                 </pre>
               </CardContent>
             </Card>
+            {(finding.request_raw || finding.response_raw) && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <TerminalIcon className="size-4" /> 请求 / 响应（PoC 报文）
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <PacketBlock title="请求包" text={finding.request_raw} />
+                  <PacketBlock title="响应包" text={finding.response_raw} />
+                </CardContent>
+              </Card>
+            )}
             <Card>
               <CardHeader className="flex-row items-center justify-between">
                 <CardTitle className="flex items-center gap-2 text-sm">
