@@ -182,8 +182,9 @@ proxybridge/ intercept/ traffic/   代理桥、拦截、流量录制
 guard/      RoE / 越权防护
 workflow/   工作流引擎
 skills/     技能库（打法 / 方法论）
-docs/       架构与能力文档（含 docs/features.md 完整能力清单）
 ```
+
+> 注：`docs/`、`skills/`、`data/` 等为本地/部署资源，不随源码分发。
 
 ---
 
